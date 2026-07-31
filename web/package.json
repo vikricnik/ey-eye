@@ -1,0 +1,15 @@
+{
+  "name": "llm-pipeline-web",
+  "version": "1.0.0",
+  "description": "Web client for the multi-tier LLM pipeline (FastAPI + LangGraph + Ollama)",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0"
+  }
+}

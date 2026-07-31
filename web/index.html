@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LLM Pipeline</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+
+  <header>
+    <div class="title-block">
+      <h1>LLM Pipeline</h1>
+      <span class="subtitle" id="server-url"></span>
+    </div>
+    <div class="status">
+      <span class="status-dot" id="status-dot"></span>
+      <span id="status-text">connecting…</span>
+    </div>
+  </header>
+
+  <div class="relay" id="relay">
+    <div class="relay-stage" data-stage="route"><span class="dot"></span><span>Route</span></div>
+    <div class="relay-line"></div>
+    <div class="relay-stage" data-stage="generate"><span class="dot"></span><span>Generate</span></div>
+    <div class="relay-line"></div>
+    <div class="relay-stage" data-stage="validate"><span class="dot"></span><span>Validate</span></div>
+    <div class="relay-line"></div>
+    <div class="relay-stage" data-stage="judge"><span class="dot"></span><span>Judge</span></div>
+  </div>
+
+  <main id="transcript">
+    <div class="empty-state" id="empty-state">
+      Type a prompt below and press <span class="accent">Enter</span> to send it through the
+      pipeline — router, generators, validators, and judge, in sequence.
+    </div>
+  </main>
+
+  <footer>
+    <div class="input-row">
+      <textarea id="prompt-input" placeholder="Ask something…" rows="1"></textarea>
+      <button id="send-btn">
+        <span class="btn-label">Send</span>
+        <span class="btn-spinner" aria-hidden="true"></span>
+      </button>
+    </div>
+    <div class="footer-controls">
+      <span class="hint"><kbd>Enter</kbd> to send · <kbd>Shift+Enter</kbd> for newline</span>
+      <div class="footer-right">
+        <label class="toggle">
+          <input type="checkbox" id="verbose-toggle" />
+          show all candidates
+        </label>
+        <button id="reset-btn" class="reset-link">reset conversation</button>
+      </div>
+    </div>
+  </footer>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
