@@ -1,0 +1,213 @@
+# ==========================
+# OS files
+# ==========================
+
+.DS_Store
+.DS_Store?
+Thumbs.db
+
+
+# ==========================
+# Editors / IDEs
+# ==========================
+
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+
+# ==========================
+# Python
+# ==========================
+
+# Byte-compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Python virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Poetry
+poetry.lock.backup
+.poetry/
+
+# Pyenv
+.python-version
+
+# PIP
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Test / coverage
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+
+# Type checking
+.pyright/
+.pytype/
+
+# Jupyter
+.ipynb_checkpoints/
+
+
+# ==========================
+# Node.js / npm
+# ==========================
+
+node_modules/
+
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+.npm/
+.yarn/
+.pnpm-store/
+
+
+# ==========================
+# JavaScript builds
+# ==========================
+
+dist/
+build/
+out/
+
+.next/
+.nuxt/
+.svelte-kit/
+
+.cache/
+.parcel-cache/
+
+
+# ==========================
+# Environment variables
+# ==========================
+
+.env
+.env.*
+!.env.example
+
+
+# ==========================
+# Logs
+# ==========================
+
+*.log
+logs/
+
+
+# ==========================
+# Temporary files
+# ==========================
+
+tmp/
+temp/
+*.tmp
+
+
+# ==========================
+# Database files
+# ==========================
+
+*.sqlite
+*.sqlite3
+*.db
+
+
+# ==========================
+# Docker
+# ==========================
+
+docker-compose.override.yml
+
+
+# ==========================
+# Documentation generators
+# ==========================
+
+site/
+docs/_build/
+
+
+# ==========================
+# Security scanners
+# ==========================
+
+.safety/
+.bandit/
+
+
+# ==========================
+# AI / LLM local files
+# ==========================
+
+# Local models
+models/
+*.gguf
+
+# Vector databases
+chroma/
+.vectordb/
+.qdrant/
+
+
+# ==========================
+# Package manager artifacts
+# ==========================
+
+# npm
+# package-lock.json
+
+# Uncomment if you DO NOT want lock files committed
+# yarn.lock
+# pnpm-lock.yaml
+
+
+# ==========================
+# Generated files
+# ==========================
+
+*.generated.*
+generated/
+
+
+# ==========================
+# macOS / Linux
+# ==========================
+
+.Trashes
+.AppleDouble
+.LSOverride
+
+
+# ==========================
+# Windows
+# ==========================
+
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+
+# ==========================
+# Project-specific
+# ==========================
+
+*.bak
+*.old
+*.orig
