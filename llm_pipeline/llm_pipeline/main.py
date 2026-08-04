@@ -257,7 +257,7 @@ async def health() -> HealthResponse:
     "/pipelines",
     response_model=PipelinesListResponse,
     dependencies=[Depends(require_api_key), Depends(enforce_rate_limit)],
-    responses={k: _ERROR_RESPONSES[k] for k in (401, 429)},
+    responses={k: _ERROR_RESPONSES[k] for k in (401, 422, 429)},
 )
 async def list_pipelines() -> PipelinesListResponse:
     return PipelinesListResponse(pipelines=list_available_pipelines(settings.pipelines_path))
@@ -267,7 +267,7 @@ async def list_pipelines() -> PipelinesListResponse:
     "/pipelines/{name}",
     response_model=PipelineDetailResponse,
     dependencies=[Depends(require_api_key), Depends(enforce_rate_limit)],
-    responses={k: _ERROR_RESPONSES[k] for k in (401, 404, 429)},
+    responses={k: _ERROR_RESPONSES[k] for k in (401, 404, 422, 429)},
 )
 async def get_pipeline_definition(name: str) -> PipelineDetailResponse:
     """Returns the full parsed definition — nodes, edges, models — so a
