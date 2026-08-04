@@ -3,8 +3,8 @@ from fastapi.testclient import TestClient
 
 from llm_pipeline.main import app
 import llm_pipeline.main as main_module
-import llm_pipeline.auth as auth_module
 import llm_pipeline.rate_limit as rate_limit_module
+from llm_pipeline.settings import settings
 
 EXPECTED_KEYS = {
     "timestamp",
@@ -19,14 +19,18 @@ EXPECTED_KEYS = {
 
 
 @pytest.fixture(autouse=True)
-def _reset_shared_state(monkeypatch: pytest.MonkeyPatch) -> None:
+def _reset_shared_state(monkeypatch: pytest.MonkeyPatch) -> None:  # pyright: ignore[reportUnusedFunction]
     """Auth/rate-limit state and the pipeline cache are process-wide
     singletons — reset them around every test in this file so one test's
     setup can't leak into another's (same category of issue as the circuit
-    breaker singleton fixed earlier in conftest.py)."""
-    monkeypatch.setattr(auth_module.settings, "api_keys", "")
+    breaker singleton fixed earlier in conftest.py).
+
+    (pyright flags this as unused — pytest invokes autouse fixtures via its
+    own dependency-injection machinery, invisible to static analysis; a
+    known, harmless false positive for this pattern.)"""
+    monkeypatch.setattr(settings, "api_keys", "")
     monkeypatch.setattr(rate_limit_module, "_limiter", rate_limit_module.RateLimiter(1000))
-    main_module._pipeline_cache.clear()
+    main_module.clear_pipeline_cache()
 
 
 @pytest.fixture
@@ -93,7 +97,7 @@ def test_malformed_request_body_matches_error_shape_with_validations(
 def test_missing_api_key_matches_error_shape(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(auth_module.settings, "api_keys", "secret-key")
+    monkeypatch.setattr(settings, "api_keys", "secret-key")
     response = client.post(
         "/ask", json={"prompt": "hi", "pipeline_name": "anything", "history": []}
     )

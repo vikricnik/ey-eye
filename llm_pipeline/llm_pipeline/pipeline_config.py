@@ -63,8 +63,12 @@ class NodeConfig(BaseModel):
     # exists now so retrieval/tool/human_approval node types can be added
     # later without changing the schema shape of every existing pipeline.
     type: Literal["llm_call"] = "llm_call"
-    depends_on: list[str] = Field(default_factory=list)
-    model: NodeModelConfig
+    depends_on: list[str] = Field(default_factory=list[str])
+    # Optional, not required: only llm_call needs a model block today, but
+    # future non-llm_call node types (retrieval, tool, ...) genuinely won't
+    # have one — see model_required_for_llm_call below, which is the actual
+    # enforcement point for llm_call specifically.
+    model: NodeModelConfig | None = None
     prompt_template: str
 
     @model_validator(mode="after")
@@ -138,8 +142,8 @@ class PipelineDefinition(BaseModel):
     description: str = ""
     execution: ExecutionConfig = ExecutionConfig()
     nodes: list[NodeConfig] = Field(min_length=1)
-    branches: list[BranchConfig] = Field(default_factory=list)
-    loops: list[LoopConfig] = Field(default_factory=list)
+    branches: list[BranchConfig] = Field(default_factory=list[BranchConfig])
+    loops: list[LoopConfig] = Field(default_factory=list[LoopConfig])
     # A single node id, or a list of candidate node ids in priority order —
     # a list is required once `branches` means only ONE of several possible
     # "final" nodes actually runs for a given request (the others in that

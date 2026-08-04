@@ -28,7 +28,7 @@ mechanism from the base DAG wiring above:
 
 import logging
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Hashable
 
 from langgraph.graph import StateGraph, END
 from langgraph.graph.state import CompiledStateGraph
@@ -81,7 +81,12 @@ def render_template(template_str: str, node_outputs: dict[str, NodeResult], inpu
     context: dict[str, object] = {"input": input_text}
     for node_id, result in node_outputs.items():
         context[node_id] = _NodeOutputView(result["output"])
-    return template.render(**context)
+    # str(...) here isn't redundant: template.render() resolves to `Any`
+    # (its exact type depends on jinja2's own stub availability), and
+    # returning that directly would leak Any past this function's declared
+    # `-> str` return type (mypy's warn_return_any/no-any-return catches
+    # exactly this) — str() gives mypy a concrete, guaranteed-str value.
+    return str(template.render(**context))
 
 
 # ---------------------------------------------------------------------------
@@ -159,7 +164,7 @@ def _make_branch_router(
 
 def _wire_branch(graph: StateGraph, branch: BranchConfig) -> None:
     keyed_routes = [(f"__branch_{branch.id}_{i}__", route) for i, route in enumerate(branch.routes)]
-    path_map = {key: route.to for key, route in keyed_routes}
+    path_map: dict[Hashable, str] = {key: route.to for key, route in keyed_routes}
     graph.add_conditional_edges(branch.from_, _make_branch_router(branch, keyed_routes), path_map)
 
 
@@ -211,7 +216,7 @@ def _wire_loop(graph: StateGraph, loop: LoopConfig) -> None:
     graph.add_edge(inc_id, loop.back_to)
 
     exit_target = END if loop.exit_to == "END" else loop.exit_to
-    path_map = {"loop": inc_id, "exit": exit_target, "fail": failed_id}
+    path_map: dict[Hashable, str] = {"loop": inc_id, "exit": exit_target, "fail": failed_id}
     graph.add_conditional_edges(loop.from_, _make_loop_router(loop), path_map)
 
 

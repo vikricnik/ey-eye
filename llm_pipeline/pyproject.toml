@@ -33,6 +33,7 @@ pytest-asyncio = "^0.24.0"
 httpx = "^0.27.0"
 mypy = "^1.13.0"
 types-pyyaml = "^6.0.12"
+pyright = "^1.1.390"
 
 [build-system]
 requires = ["poetry-core"]
@@ -53,6 +54,15 @@ warn_unused_ignores = true
 
 [[tool.mypy.overrides]]
 module = "langgraph.*"
+ignore_missing_imports = true
+
+# NOTE: ignore_missing_imports only has an effect when a module can't be
+# resolved at all — if it resolves successfully with its own working type
+# stubs (as langgraph does once properly installed), this override is a
+# harmless no-op and full type checking proceeds normally against the
+# real signatures. Kept as a defensive fallback either way.
+[[tool.mypy.overrides]]
+module = "jinja2.*"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
@@ -79,3 +89,52 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "strict"
+
+[tool.pyright]
+include = ["llm_pipeline", "tests"]
+pythonVersion = "3.11"
+# Matches mypy's `strict = true` in spirit. The two tools use different
+# type-checking algorithms and occasionally disagree — that disagreement is
+# useful signal on its own, not a bug to resolve by loosening one of them.
+typeCheckingMode = "strict"
+
+# Relaxed from strict-mode defaults. These specifically fire when a type
+# traces back to a third-party surface that's partially typed or
+# intentionally unresolved — LangGraph's heavily-overloaded, generic
+# add_node/compile signatures (its own types include `Unknown` fallbacks
+# pyright can't fully resolve), and the three OPTIONAL cloud provider SDKs
+# (langchain_openai/anthropic/google_genai), unresolved by design when
+# their extras aren't installed. They're about inference COMPLETENESS at a
+# third-party interop boundary, not real type-safety bugs in this
+# codebase's own code — every genuine mismatch WE introduce is still caught
+# by the rest of strict mode (reportArgumentType, reportCallIssue,
+# reportAssignmentType, etc.), which all remain fully active.
+reportUnknownMemberType = false
+reportUnknownVariableType = false
+reportUnknownArgumentType = false
+reportUnknownParameterType = false
+# Bare lambdas (used for concise test mocks, e.g.
+# `monkeypatch.setattr(x, "y", lambda spec: ...)`) can't carry parameter
+# type annotations at all — Python's lambda syntax doesn't support them —
+# so this would otherwise fire on every mocked lambda in the test suite.
+reportUnknownLambdaType = false
+
+# Deliberately NOT setting venvPath/venv here: that only makes sense if
+# Poetry creates the virtualenv inside this project folder, which depends
+# on `virtualenvs.in-project` being enabled — true in the Docker build (see
+# Dockerfile), but not guaranteed for your local Poetry config. Running via
+# `poetry run pyright` already activates the correct interpreter without
+# needing this; for VSCode/Pylance, select the Poetry-managed interpreter
+# explicitly instead (see README) rather than relying on this config to
+# guess its location.
+
+# NOTE on the three optional cloud provider imports (langchain_openai,
+# langchain_anthropic, langchain_google_genai) in providers.py: unlike
+# mypy's per-module `ignore_missing_imports` overrides above, pyright has
+# no equivalent per-module config for "this import is allowed to be
+# missing." Those three import lines carry an inline
+# `# pyright: ignore[reportMissingImports]` comment instead — deliberately
+# NOT a plain `# type: ignore`, since mypy already tolerates those imports
+# via its overrides above, and a redundant `# type: ignore` there would
+# trip mypy's own `warn_unused_ignores`. Using pyright's own comment syntax
+# means each tool only reacts to the suppression meant for it.

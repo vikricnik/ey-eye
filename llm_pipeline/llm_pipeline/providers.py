@@ -70,7 +70,7 @@ class OllamaProvider:
 
 class OpenAIProvider:
     def __init__(self, spec: ModelSpec) -> None:
-        from langchain_openai import ChatOpenAI
+        from langchain_openai import ChatOpenAI  # pyright: ignore[reportMissingImports]
 
         self._llm = ChatOpenAI(model=spec.model, temperature=spec.temperature)
 
@@ -81,7 +81,7 @@ class OpenAIProvider:
 
 class AnthropicProvider:
     def __init__(self, spec: ModelSpec) -> None:
-        from langchain_anthropic import ChatAnthropic
+        from langchain_anthropic import ChatAnthropic  # pyright: ignore[reportMissingImports]
 
         self._llm = ChatAnthropic(model=spec.model, temperature=spec.temperature)
 
@@ -92,7 +92,7 @@ class AnthropicProvider:
 
 class GeminiProvider:
     def __init__(self, spec: ModelSpec) -> None:
-        from langchain_google_genai import ChatGoogleGenerativeAI
+        from langchain_google_genai import ChatGoogleGenerativeAI  # pyright: ignore[reportMissingImports]
 
         self._llm = ChatGoogleGenerativeAI(model=spec.model, temperature=spec.temperature)
 
@@ -217,6 +217,13 @@ class CircuitBreaker:
         if state.consecutive_failures >= self.failure_threshold:
             state.opened_at = time.monotonic()
 
+    def reset(self) -> None:
+        """Clears all tracked state — a proper public method rather than
+        having callers reach into `_states` directly (which correctly trips
+        reportPrivateUsage/breaks encapsulation across the module boundary
+        when done from a free function instead of a method of this class)."""
+        self._states.clear()
+
 
 _circuit_breaker = CircuitBreaker(
     settings.circuit_breaker_failure_threshold, settings.circuit_breaker_cooldown_seconds
@@ -230,7 +237,7 @@ def reset_circuit_breaker() -> None:
     pipelines using the same model identity (e.g. two fixtures both using
     `ollama:test-model`) would share circuit state across unrelated tests.
     Call this in an autouse test fixture between tests — see tests/conftest.py."""
-    _circuit_breaker._states.clear()
+    _circuit_breaker.reset()
 
 
 # ---------------------------------------------------------------------------

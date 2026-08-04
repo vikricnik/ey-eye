@@ -8,7 +8,7 @@ on:
 
 jobs:
   pipeline-server:
-    name: Python — lint, typecheck, test, validate pipelines
+    name: Python — lint, typecheck (mypy + pyright), test, validate pipelines
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -36,6 +36,14 @@ jobs:
 
       - name: mypy --strict
         run: poetry run mypy llm_pipeline/
+
+      - name: pyright --strict
+        # Complements mypy rather than replacing it — different type-checking
+        # algorithm, occasionally disagrees, both signals are useful. This is
+        # also what VSCode/Pylance uses live in the editor (see pyrightconfig
+        # in pyproject.toml), so this CI step keeps that in sync with what
+        # the editor already shows locally.
+        run: poetry run pyright
 
       - name: pytest
         run: poetry run pytest -v

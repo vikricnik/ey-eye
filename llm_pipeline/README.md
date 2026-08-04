@@ -419,7 +419,22 @@ already enforce the shape at runtime regardless of what's declared.
 ```bash
 poetry run pytest
 poetry run mypy llm_pipeline/
+poetry run pyright
 ```
+
+Both type checkers are run deliberately, not redundantly — they use different
+type-checking algorithms and occasionally disagree, which is useful signal
+rather than noise. `pyright` also drives VSCode's Pylance extension, so the
+`[tool.pyright]` config in `pyproject.toml` keeps CI in sync with what you
+already see live in the editor. `pyright`'s scope (`llm_pipeline/` +
+`tests/`) is slightly wider than the documented `mypy` command above since
+the test suite was brought to the same strict standard as the package
+itself — see `tests/conftest.py` and friends for examples of that.
+
+**VSCode/Pylance**: select the Poetry-managed interpreter explicitly
+(`Cmd/Ctrl+Shift+P` → "Python: Select Interpreter") rather than relying on
+`pyrightconfig`'s venv detection — run `poetry env info --path` to find it
+if it's not already listed.
 
 - `tests/test_safe_eval.py` — the sandboxed expression evaluator: allowed
   operations, and explicit rejection of chaining and code-injection attempts.

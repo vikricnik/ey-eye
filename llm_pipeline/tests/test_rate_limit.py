@@ -20,6 +20,9 @@ def test_rejects_requests_over_limit() -> None:
     with pytest.raises(HTTPException) as exc_info:
         limiter.check("client-a")
     assert exc_info.value.status_code == 429
+    # HTTPException.headers is typed Optional — narrow before using `in`,
+    # since None doesn't support __contains__.
+    assert exc_info.value.headers is not None
     assert "Retry-After" in exc_info.value.headers
 
 

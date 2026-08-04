@@ -2,7 +2,11 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from llm_pipeline.pipeline_config import load_pipeline_definition, list_available_pipelines
+from llm_pipeline.pipeline_config import (
+    PipelineDefinition,
+    load_pipeline_definition,
+    list_available_pipelines,
+)
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 VALID_DIR = FIXTURES_DIR / "valid"
@@ -105,3 +109,19 @@ def test_iterative_refinement_output_node_is_the_loop_back_target() -> None:
     assert definition.output_node_candidates == ["generate"]
     assert definition.loops[0].max_iterations == 3
     assert definition.loops[0].on_max_iterations == "proceed"
+
+
+def test_llm_call_node_without_model_is_rejected() -> None:
+    """model became genuinely Optional on NodeConfig (to support future
+    non-llm_call node types), so this validator is the actual enforcement
+    point for llm_call specifically — confirm it's reachable and correct."""
+    raw = {
+        "name": "missing-model",
+        "version": 1,
+        "nodes": [
+            {"id": "A", "depends_on": [], "type": "llm_call", "prompt_template": "{{ input }}"}
+        ],
+        "output_node": "A",
+    }
+    with pytest.raises(ValidationError, match="requires a 'model' block"):
+        PipelineDefinition.model_validate(raw)

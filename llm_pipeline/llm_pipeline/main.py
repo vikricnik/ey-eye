@@ -1,10 +1,10 @@
 import logging
 import re
 from contextlib import asynccontextmanager
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
 from http import HTTPStatus
-from pathlib import Path
+from typing import cast
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -72,7 +72,7 @@ def _validate_pipelines_at_startup() -> None:
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     _validate_pipelines_at_startup()
     yield
 
@@ -215,6 +215,14 @@ def get_pipeline(name: str) -> tuple[PipelineDefinition, CompiledStateGraph]:
     return definition, graph
 
 
+def clear_pipeline_cache() -> None:
+    """Public accessor for resetting the pipeline cache — used by tests so
+    they don't need to reach into the module-private `_pipeline_cache`
+    directly (which pyright's reportPrivateUsage correctly flags as
+    breaking encapsulation across the module boundary)."""
+    _pipeline_cache.clear()
+
+
 def _validate_prompt_and_history(req: AskRequest) -> None:
     if not req.prompt.strip():
         raise HTTPException(status_code=400, detail="prompt cannot be empty")
@@ -287,21 +295,33 @@ async def get_pipeline_definition(name: str) -> PipelineDetailResponse:
                 id=n.id,
                 type=n.type,
                 depends_on=n.depends_on,
-                model=f"{n.model.provider.value}:{n.model.model}",
+                model=(
+                    f"{n.model.provider.value}:{n.model.model}"
+                    if n.model is not None
+                    else "(no model — non-llm_call node type)"
+                ),
             )
             for n in definition.nodes
         ],
         branches=[
-            PipelineBranchInfo(id=b.id, from_=b.from_, routes=[r.to for r in b.routes])
+            # model_validate() with a plain dict, not keyword arguments:
+            # `from` is a reserved word (can't be a Python kwarg at all), and
+            # pydantic's alias-based synthesized __init__ signature — which
+            # pyright reads literally — only recognizes the alias "from" as
+            # a keyword name, not the populate_by_name-permitted "from_".
+            # A dict keyed by the alias sidesteps that mismatch entirely.
+            PipelineBranchInfo.model_validate({"id": b.id, "from": b.from_, "routes": [r.to for r in b.routes]})
             for b in definition.branches
         ],
         loops=[
-            PipelineLoopInfo(
-                id=l.id,
-                from_=l.from_,
-                back_to=l.back_to,
-                exit_to=l.exit_to,
-                max_iterations=l.max_iterations,
+            PipelineLoopInfo.model_validate(
+                {
+                    "id": l.id,
+                    "from": l.from_,
+                    "back_to": l.back_to,
+                    "exit_to": l.exit_to,
+                    "max_iterations": l.max_iterations,
+                }
             )
             for l in definition.loops
         ],
@@ -337,7 +357,11 @@ async def ask(req: AskRequest) -> AskResponse:
     }
 
     try:
-        final_state: PipelineState = await graph.ainvoke(initial_state)
+        # graph.ainvoke's declared return type is generic (LangGraph doesn't
+        # know about our specific PipelineState TypedDict) — cast makes
+        # explicit what we already know: our own node functions and state
+        # reducers guarantee this exact shape at runtime.
+        final_state: PipelineState = cast(PipelineState, await graph.ainvoke(initial_state))
     except PipelineExecutionError as e:
         logger.exception(f"Pipeline '{req.pipeline_name}' run failed")
         raise HTTPException(status_code=503, detail=str(e))
