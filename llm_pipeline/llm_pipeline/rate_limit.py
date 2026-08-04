@@ -10,8 +10,8 @@ the standard pattern) if you actually run multiple instances and need a
 hard global cap.
 """
 
-import time
 import logging
+import time
 from collections import defaultdict, deque
 
 from fastapi import Header, HTTPException, Request
