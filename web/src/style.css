@@ -258,12 +258,22 @@ main {
 
 /* ---------- Candidates (verbose) ---------- */
 .candidates {
-  margin-top: 14px;
-  padding-top: 14px;
-  border-top: 1px dashed var(--border);
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+/* The dashed divider belongs on whichever element comes SECOND, regardless
+   of which order that is — renderTurn() (completed response) puts
+   final-answer first then candidates; beginStreamingTurn() (in-progress
+   response) puts candidates first then final-answer, so the divider
+   correctly separates "the answer" from "the supporting per-node detail"
+   either way instead of assuming one fixed order. */
+.final-answer + .candidates,
+.candidates + .final-answer {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--border);
 }
 
 .candidates-label {

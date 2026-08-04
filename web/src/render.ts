@@ -93,6 +93,18 @@ export interface StreamingTurnHandle {
  * thing in one shot from a complete AskResponse. Node output cards appear
  * the moment each node_complete event arrives (when verbose is on) — the
  * summary/final-answer section is filled in once, at finish().
+ *
+ * DOM order here is deliberately candidates-then-final-answer — the
+ * OPPOSITE of renderTurn()'s final-answer-then-candidates order for a
+ * completed (non-streaming) response. That's not an inconsistency: for a
+ * response that's already fully done, "conclusion first, details below" is
+ * a reasonable TL;DR pattern. For one that's still arriving, the final
+ * answer is empty for the whole time node cards are streaming in below a
+ * fixed "final answer" slot above them — since transcript auto-scrolls to
+ * follow each new card downward, the answer fills in at a position the
+ * user has already scrolled past. Putting candidates first means the
+ * final answer lands last, at the bottom, exactly where attention (and
+ * scroll position) already is.
  */
 export function beginStreamingTurn(
   transcript: HTMLElement,
@@ -105,12 +117,12 @@ export function beginStreamingTurn(
     <div class="turn-prompt"><span class="marker">›</span><span>${escapeHtml(prompt)}</span></div>
     <div class="turn-response">
       <div class="turn-meta turn-meta-pending"><span class="tag">running…</span></div>
-      <div class="final-answer final-answer-pending"></div>
       ${
         verbose
           ? '<div class="candidates"><div class="candidates-label">Node outputs</div></div>'
           : ""
       }
+      <div class="final-answer final-answer-pending"></div>
     </div>
   `;
   transcript.appendChild(turn);
