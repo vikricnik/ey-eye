@@ -176,6 +176,15 @@ This replaces the old fixed `category`/`router_model`/`winning_model`/`judge_mod
 `candidates`/`votes` shape from the pre-DAG design — there's no fixed set of
 tiers anymore, since a pipeline's shape is whatever its YAML defines.
 
+## Error handling
+
+Every server error — 400/401/404/422/429/502/503, and even a genuine
+unhandled 500 — comes back as one consistent structured object, not just a
+bare string. When a request fails, the CLI prints the `message` plus a
+`reference id` (the server's `exceptionUID`, same value as its logged
+`X-Request-ID`) — include that id if you're reporting an issue, since it's
+searchable directly in server logs.
+
 ## Known limitation: history isn't summarized
 
 Conversation history is sent as raw prior turns, capped by the active

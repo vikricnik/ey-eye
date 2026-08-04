@@ -2,6 +2,8 @@ import logging
 import re
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
+from datetime import datetime, timezone
+from http import HTTPStatus
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -23,6 +25,7 @@ from llm_pipeline.models import (
     PipelineNodeInfo,
     PipelinesListResponse,
     PipelineState,
+    ValidationIssue,
 )
 from llm_pipeline.pipeline_config import (
     PipelineDefinition,
@@ -35,7 +38,7 @@ from llm_pipeline.errors import PipelineExecutionError, PipelineNotFoundError
 from llm_pipeline.settings import settings
 from llm_pipeline.auth import require_api_key
 from llm_pipeline.rate_limit import enforce_rate_limit
-from llm_pipeline.logging_context import configure_logging, request_id_middleware
+from llm_pipeline.logging_context import configure_logging, request_id_middleware, get_request_id
 
 configure_logging()
 logger: logging.Logger = logging.getLogger("llm_pipeline")
@@ -85,17 +88,51 @@ app.add_middleware(
 app.middleware("http")(request_id_middleware)
 
 
+def _reason_phrase(status_code: int) -> str:
+    try:
+        return HTTPStatus(status_code).phrase
+    except ValueError:
+        return "Error"
+
+
+def _build_error_response(
+    request: Request,
+    status_code: int,
+    message: str,
+    details: dict[str, object] | None = None,
+    validations: list[ValidationIssue] | None = None,
+) -> ErrorResponse:
+    """The one place every error field gets populated, so all three handlers
+    below (HTTPException, RequestValidationError, and the catch-all for
+    anything else) produce byte-for-byte the same shape."""
+    return ErrorResponse(
+        timestamp=datetime.now(timezone.utc),
+        status=status_code,
+        error=_reason_phrase(status_code),
+        message=message,
+        request=f"{request.method} {request.url.path}",
+        exceptionUID=get_request_id(),
+        details=details or {},
+        validations=validations or [],
+    )
+
+
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
     """Every HTTPException raised anywhere (endpoints, or Depends()
     dependencies like require_api_key/enforce_rate_limit) is caught here
-    exactly once, so its JSON body is always built via ErrorResponse rather
-    than FastAPI's unstructured default `{"detail": ...}` handler. Forwards
-    `exc.headers` so things like the rate limiter's `Retry-After` header
-    still reach the client correctly."""
+    exactly once. Forwards exc.headers so the rate limiter's `Retry-After`
+    header still reaches the client, and mirrors it into `details` too
+    since that's the one piece of already-structured extra data a plain
+    HTTPException carries."""
+    details: dict[str, object] = {}
+    if exc.headers and "Retry-After" in exc.headers:
+        details["retry_after_seconds"] = exc.headers["Retry-After"]
+
+    body = _build_error_response(request, exc.status_code, str(exc.detail), details=details)
     return JSONResponse(
         status_code=exc.status_code,
-        content=ErrorResponse(detail=str(exc.detail)).model_dump(),
+        content=body.model_dump(mode="json"),  # mode="json": datetime -> ISO string
         headers=exc.headers,
     )
 
@@ -105,13 +142,33 @@ async def validation_exception_handler(
     request: Request, exc: RequestValidationError
 ) -> JSONResponse:
     """FastAPI's automatic 422 (e.g. a malformed AskRequest body) normally
-    returns Pydantic's own nested error list shape, which isn't something
-    this codebase constructs. Flattened into the same ErrorResponse shape
-    as every other error, for one consistent error contract."""
-    detail = "; ".join(
-        f"{'.'.join(str(loc) for loc in e['loc'])}: {e['msg']}" for e in exc.errors()
+    returns Pydantic's own nested error-list shape. Mapped into the same
+    ErrorResponse contract instead — each individual field problem becomes
+    one ValidationIssue in `validations`, rather than being flattened away."""
+    validations = [
+        ValidationIssue(
+            field=".".join(str(loc) for loc in e["loc"]),
+            message=e["msg"],
+            type=e["type"],
+        )
+        for e in exc.errors()
+    ]
+    body = _build_error_response(
+        request, 422, "Request validation failed", validations=validations
     )
-    return JSONResponse(status_code=422, content=ErrorResponse(detail=detail).model_dump())
+    return JSONResponse(status_code=422, content=body.model_dump(mode="json"))
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Catches anything not already handled above — a genuine bug slipping
+    past the error handling this codebase explicitly anticipates. Without
+    this, an unexpected exception would fall through to FastAPI's default
+    handler and NOT match the ErrorResponse contract; with it, every
+    possible error path — anticipated or not — returns the same shape."""
+    logger.exception("Unhandled exception")
+    body = _build_error_response(request, 500, "Internal server error")
+    return JSONResponse(status_code=500, content=body.model_dump(mode="json"))
 
 
 # Documents the error shape in OpenAPI for every status code an endpoint can
@@ -125,6 +182,7 @@ _ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
     429: {"model": ErrorResponse, "description": "Rate limit exceeded"},
     502: {"model": ErrorResponse, "description": "Unexpected pipeline error"},
     503: {"model": ErrorResponse, "description": "Pipeline tier fully failed"},
+    500: {"model": ErrorResponse, "description": "Unhandled server error"},
 }
 
 # Only safe filename characters — pipeline_name comes straight from client

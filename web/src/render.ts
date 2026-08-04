@@ -78,12 +78,20 @@ export function renderTurn(
   transcript.scrollTop = transcript.scrollHeight;
 }
 
-export function renderError(transcript: HTMLElement, prompt: string, message: string): void {
+export function renderError(
+  transcript: HTMLElement,
+  prompt: string,
+  message: string,
+  exceptionUID?: string
+): void {
   const turn = document.createElement("div");
   turn.className = "turn";
+  const refLine = exceptionUID
+    ? `<div class="error-ref">reference id: ${escapeHtml(exceptionUID)}</div>`
+    : "";
   turn.innerHTML = `
     <div class="turn-prompt"><span class="marker">›</span><span>${escapeHtml(prompt)}</span></div>
-    <div class="error-banner">error: ${escapeHtml(message)}</div>
+    <div class="error-banner">error: ${escapeHtml(message)}${refLine}</div>
   `;
   transcript.appendChild(turn);
   transcript.scrollTop = transcript.scrollHeight;

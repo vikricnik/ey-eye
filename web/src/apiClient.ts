@@ -7,24 +7,51 @@ import type {
   PipelinesListResponse,
 } from "./types";
 
+export interface ValidationIssue {
+  field: string;
+  message: string;
+  type: string;
+}
+
+// Matches the server's ErrorResponse model exactly (models.py) — every
+// error response, regardless of status code or where it was raised, takes
+// this shape.
+export interface ApiErrorBody {
+  timestamp: string;
+  status: number;
+  error: string;
+  message: string;
+  request: string;
+  exceptionUID: string;
+  details: Record<string, unknown>;
+  validations: ValidationIssue[];
+}
+
 export class PipelineApiError extends Error {
-  constructor(message: string, public readonly statusCode?: number) {
+  constructor(
+    message: string,
+    public readonly statusCode?: number,
+    public readonly exceptionUID?: string,
+    public readonly validations?: ValidationIssue[]
+  ) {
     super(message);
     this.name = "PipelineApiError";
   }
 }
 
-async function parseErrorDetail(response: Response): Promise<string> {
-  let detail = `Request failed with status ${response.status}`;
+async function buildApiError(response: Response): Promise<PipelineApiError> {
+  const fallbackMessage = `Request failed with status ${response.status}`;
   try {
-    const errorBody = (await response.json()) as { detail?: string };
-    if (errorBody.detail) {
-      detail = errorBody.detail;
+    const body = (await response.json()) as Partial<ApiErrorBody>;
+    let message = body.message ?? fallbackMessage;
+    if (body.validations && body.validations.length > 0) {
+      const fieldDetails = body.validations.map((v) => `${v.field}: ${v.message}`).join("; ");
+      message = `${message} (${fieldDetails})`;
     }
+    return new PipelineApiError(message, response.status, body.exceptionUID, body.validations);
   } catch {
-    // response body wasn't JSON, keep the generic message
+    return new PipelineApiError(fallbackMessage, response.status);
   }
-  return detail;
 }
 
 export class PipelineClient {
@@ -55,7 +82,7 @@ export class PipelineClient {
     }
 
     if (!response.ok) {
-      throw new PipelineApiError(await parseErrorDetail(response), response.status);
+      throw await buildApiError(response);
     }
 
     return (await response.json()) as T;
@@ -94,7 +121,7 @@ export class PipelineClient {
     }
 
     if (!response.ok) {
-      throw new PipelineApiError(await parseErrorDetail(response), response.status);
+      throw await buildApiError(response);
     }
 
     return (await response.json()) as AskResponse;

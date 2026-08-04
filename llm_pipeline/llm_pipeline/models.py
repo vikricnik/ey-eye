@@ -1,4 +1,5 @@
-from typing import Annotated, Optional, TypedDict
+from datetime import datetime
+from typing import Annotated, TypedDict
 from pydantic import BaseModel, Field, ConfigDict
 
 
@@ -127,11 +128,27 @@ class PipelineDetailResponse(BaseModel):
     loops: list[PipelineLoopInfo]
 
 
-class ErrorResponse(BaseModel):
-    """Shape of every error response (401/404/429/400/502/503) — wired up
-    via a custom exception handler in main.py so error bodies are
-    constructed through this model too, not just success responses. Keeps
-    the `detail` field name FastAPI already uses by default, so existing
-    clients (CLI/web already parse `error.detail`) don't need to change."""
+class ValidationIssue(BaseModel):
+    """One field-level problem, used only when `validations` is non-empty
+    (request body schema validation failures)."""
 
-    detail: str
+    field: str
+    message: str
+    type: str
+
+
+class ErrorResponse(BaseModel):
+    """The one shape every error response takes, regardless of status code
+    or where it was raised (an endpoint, a Depends() dependency, or FastAPI's
+    own automatic request validation) — wired up via custom exception
+    handlers in main.py so this is constructed for every error path, not
+    just a subset of them."""
+
+    timestamp: datetime
+    status: int
+    error: str  # HTTP reason phrase, e.g. "Not Found", "Too Many Requests"
+    message: str  # human-readable detail — what used to be the bare "detail" string
+    request: str  # "<METHOD> <path>", e.g. "POST /ask"
+    exceptionUID: str  # ties this error to server log lines carrying the same id
+    details: dict[str, object] = {}  # extra structured context, varies by error type
+    validations: list[ValidationIssue] = []  # populated only for 422 schema validation errors

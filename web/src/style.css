@@ -233,6 +233,12 @@ main {
   font-size: 12px;
 }
 
+.error-ref {
+  margin-top: 6px;
+  color: var(--text-faint);
+  font-size: 10px;
+}
+
 /* ---------- Candidates (verbose) ---------- */
 .candidates {
   margin-top: 14px;

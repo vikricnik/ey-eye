@@ -354,28 +354,57 @@ back — `{}` for pipelines with no loops.
 
 ## Error handling
 
-**Every response — success or failure — is a Pydantic model.** Errors
-(`HTTPException` from anywhere: an endpoint, or a `Depends()` dependency like
-`require_api_key`/`enforce_rate_limit`) are caught by a single custom
-exception handler that builds the JSON body via `ErrorResponse` (`{"detail":
-str}`), instead of FastAPI's default unstructured error shape. Automatic
-`422` validation errors (e.g. a malformed `AskRequest` body) go through a
-second handler that flattens Pydantic's nested error list into the same
-`ErrorResponse` shape, so callers only ever need to handle one error
-contract regardless of what went wrong.
+**Every response — success or failure — is a Pydantic model, including
+genuinely unexpected exceptions.** Three custom exception handlers cover the
+entire surface:
 
-| Situation | Status | Meaning |
+- `@app.exception_handler(HTTPException)` — every `HTTPException` raised
+  anywhere (an endpoint, or a `Depends()` dependency like
+  `require_api_key`/`enforce_rate_limit`)
+- `@app.exception_handler(RequestValidationError)` — FastAPI's automatic
+  `422` when a request body fails schema validation
+- `@app.exception_handler(Exception)` — a catch-all for anything not already
+  handled above (a genuine bug slipping past intended error handling),
+  returned as `500`, so there's no path where an error can bypass this
+  contract entirely
+
+All three build the **same shape** via one shared `_build_error_response()`
+helper:
+
+```json
+{
+  "timestamp": "2026-08-04T06:25:52.813Z",
+  "status": 404,
+  "error": "Not Found",
+  "message": "No pipeline named 'does-not-exist'",
+  "request": "POST /ask",
+  "exceptionUID": "a1b2c3d4e5f6",
+  "details": {},
+  "validations": []
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `timestamp` | UTC, when the error was handled |
+| `status` | HTTP status code (int) |
+| `error` | The HTTP reason phrase for that code (`"Not Found"`, `"Too Many Requests"`, etc.) |
+| `message` | Human-readable detail — what a plain `HTTPException(detail=...)` used to surface alone |
+| `request` | `"<METHOD> <path>"` of the request that failed |
+| `exceptionUID` | Same value as the `X-Request-ID` response header — ties this error directly to server log lines carrying the same id (see `logging_context.py`) |
+| `details` | Extra structured context; currently populated for rate-limit errors (`retry_after_seconds`), `{}` otherwise |
+| `validations` | One entry per field problem, **only** non-empty for `422` schema validation errors — each entry is `{"field": ..., "message": ..., "type": ...}` |
+
+| Situation | Status | `error` |
 |---|---|---|
-| Missing/invalid API key (when `API_KEYS` is set) | `401` | `auth.py` |
-| Request body fails schema validation | `422` | e.g. missing `pipeline_name` |
-| Prompt/history exceeds length caps | `400` | `MAX_PROMPT_LENGTH` / `MAX_HISTORY_TURN_LENGTH` |
-| Empty prompt | `400` | Basic input validation |
-| `pipeline_name` doesn't match any file | `404` | `PipelineNotFoundError` |
-| Rate limit exceeded | `429` | `rate_limit.py` — includes a `Retry-After` header (forwarded through the custom handler) |
-| A node fails after retries are exhausted | `503` | `PipelineExecutionError` — a DAG node has no generically safe "skip and continue" fallback, so a node failure fails the whole run with a clear message naming which node |
-| A loop hits `max_iterations` with `on_max_iterations: fail` | `503` | `PipelineExecutionError` naming the loop |
-| No output_node candidate produced a result | `502` | Shouldn't normally happen given DAG validation, but guarded |
-| Anything else unexpected | `502` | Generic pipeline error |
+| Missing/invalid API key (when `API_KEYS` is set) | `401` | Unauthorized |
+| Request body fails schema validation | `422` | Unprocessable Entity |
+| Prompt/history exceeds length caps, or empty prompt | `400` | Bad Request |
+| `pipeline_name` doesn't match any file | `404` | Not Found |
+| Rate limit exceeded | `429` | Too Many Requests — `Retry-After` header + mirrored in `details.retry_after_seconds` |
+| A node fails after retries are exhausted, or a loop hits `max_iterations` with `on_max_iterations: fail` | `503` | Service Unavailable — `message` names which node/loop |
+| No output_node candidate produced a result, or any other anticipated pipeline error | `502` | Bad Gateway |
+| A genuinely unexpected exception (a bug) | `500` | Internal Server Error |
 
 `pipeline_name` is validated against a strict filename-safe pattern
 (`^[a-zA-Z0-9_-]+$`) before being used to build a filesystem path.

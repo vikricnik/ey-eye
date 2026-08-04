@@ -181,6 +181,9 @@ async function handlePrompt(
 function printError(err: unknown): void {
   if (err instanceof PipelineApiError) {
     console.log(chalk.red(`error: ${err.message}`));
+    if (err.exceptionUID) {
+      console.log(chalk.gray(`  (reference id: ${err.exceptionUID} — include this if reporting the issue)`));
+    }
   } else if (err instanceof Error) {
     console.log(chalk.red(`unexpected error: ${err.message}`));
   } else {

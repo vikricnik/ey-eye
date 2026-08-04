@@ -187,7 +187,8 @@ async function handleSend(): Promise<void> {
     const message = err instanceof PipelineApiError || err instanceof Error
       ? err.message
       : String(err);
-    renderError(transcript, prompt, message);
+    const exceptionUID = err instanceof PipelineApiError ? err.exceptionUID : undefined;
+    renderError(transcript, prompt, message, exceptionUID);
   } finally {
     isLoading = false;
     sendBtn.disabled = false;
