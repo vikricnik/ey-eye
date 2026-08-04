@@ -198,3 +198,28 @@ automatically).
 npm run build
 node dist/index.js
 ```
+
+## Docker (optional — plain local install is usually better)
+
+This is an interactive terminal REPL, which is a genuinely weaker fit for
+Docker than the web client's static build — Docker exists to isolate
+processes/services, not really to wrap something you want to type into
+directly. Unlike a Python CLI, there's no system-dependency mess Docker
+would be solving here; `npm install && npm start` already works anywhere
+Node runs, with no `-it`/TTY/networking setup needed.
+
+Still, if you have a specific reason (no Node on this machine, running from
+CI, etc.):
+
+```bash
+docker build -t llm-pipeline-cli .
+docker run -it --rm \
+  -e PIPELINE_BASE_URL=http://host.docker.internal:8000 \
+  llm-pipeline-cli
+```
+
+`-it` is required — without it, the interactive prompt won't work at all.
+`host.docker.internal` reaches a pipeline server running on your host
+machine; if it's a sibling container on the same `docker compose` network
+instead, use that service's name (e.g. `http://pipeline-server:8000`) and
+add `--network <project>_default` to the `docker run` command.

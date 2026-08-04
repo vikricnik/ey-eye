@@ -251,9 +251,18 @@ for the full reasoning on each:
 ```bash
 docker compose up
 ```
-Runs the pipeline server + Ollama together. Set `API_KEYS` and any cloud
+Runs Ollama + the pipeline server + the web client together. Open
+`http://localhost:8080` for the web UI. Set `API_KEYS` and any cloud
 provider keys as environment variables in `docker-compose.yml` before
 exposing this beyond your local machine.
+
+The CLI isn't part of this stack — it's an interactive terminal tool, a
+genuinely weaker fit for Docker than the web client's static build (see
+`cli/README.md`'s Docker section for the full reasoning and how to run it
+in a container anyway if you have a specific reason to). Plain
+`npm install && npm start` against the running compose stack
+(`PIPELINE_BASE_URL=http://localhost:8000 npm start`, from `cli/`) is the
+normal way to use it alongside `docker compose up`.
 
 ## License
 

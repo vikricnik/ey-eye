@@ -37,5 +37,26 @@ services:
     depends_on:
       - ollama
 
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    ports:
+      - "8080:80"
+    environment:
+      # IMPORTANT: this must be a URL reachable from the USER'S BROWSER
+      # (the host machine), not the internal Docker network — the web
+      # client's JS runs client-side, not inside this container. That means
+      # "http://pipeline-server:8000" (the internal service name) will NOT
+      # work here even though these two containers can reach each other
+      # directly; use the pipeline-server's PUBLISHED host port instead,
+      # matching the "8000:8000" mapping above.
+      PIPELINE_BASE_URL: "http://localhost:8000"
+      # Only needed if pipeline-server's API_KEYS is set. Note this value
+      # is visible to anyone with browser devtools open — see web/README.md.
+      PIPELINE_API_KEY: ""
+    depends_on:
+      - pipeline-server
+
 volumes:
   ollama-models:

@@ -41,27 +41,66 @@ npm run build
 npm run preview   # preview the production build locally
 ```
 
-## Pointing at a different pipeline server
+## Configuring which pipeline server to talk to
 
-By default the client talks to `http://localhost:8000`. Override it by setting
-`window.PIPELINE_BASE_URL` before the app loads — add this to `index.html` just above
-the `<script type="module" src="/src/main.ts">` line:
+By default the client talks to `http://localhost:8000` with no API key. Two
+ways to override this, depending on how you're running the app:
 
-```html
-<script>window.PIPELINE_BASE_URL = "http://localhost:9000";</script>
+**Plain static hosting (no Docker)** — edit `public/runtime-config.js`
+directly before building, or edit the built `dist/runtime-config.js` after:
+```js
+window.PIPELINE_BASE_URL = "http://localhost:9000";
+window.PIPELINE_API_KEY = "your-key"; // only if the server has API_KEYS set
 ```
 
-If the server has `API_KEYS` configured (see the server README's Auth
-section), set `window.PIPELINE_API_KEY` the same way:
-
-```html
-<script>window.PIPELINE_API_KEY = "your-key";</script>
-```
+**Docker** — set environment variables at container *startup*; see the
+Docker section below. This works without rebuilding the image, since the
+config file is regenerated fresh each time the container starts.
 
 ⚠️ Anything set here is visible to anyone with browser devtools — this is a
 "shared team secret" pattern suitable for an internal tool already behind
 its own access control (VPN, internal network, etc.), **not** a real
 security boundary for a public-facing deployment.
+
+## Docker
+
+```bash
+docker build -t llm-pipeline-web .
+docker run -p 8080:80 \
+  -e PIPELINE_BASE_URL=http://host.docker.internal:8000 \
+  llm-pipeline-web
+```
+
+Open `http://localhost:8080`.
+
+This is a genuinely good fit for Docker, unlike the CLI — after `npm run
+build` this is just static files, so the image is a standard two-stage
+build: Node compiles the bundle, then an `nginx:alpine` image serves it.
+
+**How runtime configuration works**: `PIPELINE_BASE_URL`/`PIPELINE_API_KEY`
+are read at **container startup**, not baked in at build time. nginx's
+official image automatically runs every script in `/docker-entrypoint.d/`
+before it starts serving — `docker/40-runtime-config.sh` uses this to
+(re)write `runtime-config.js` from the current environment variables each
+time the container starts. This means the same built image can point at a
+different server (or use a different key) in different environments without
+rebuilding — just change the env vars passed to `docker run`/`docker compose`.
+
+⚠️ **`PIPELINE_BASE_URL` must be reachable from the browser**, not just from
+inside Docker's network — the web client's JS runs on the user's machine,
+not inside this container. If the pipeline server is a sibling container
+(e.g. via `docker compose`), use its *published host port*
+(`http://localhost:8000`), not its internal service name
+(`http://pipeline-server:8000`) — the latter only resolves between
+containers, not from a browser on the host. See root `docker-compose.yml`
+for a worked example with this exact comment in place.
+
+Via `docker compose` (from the repo root, brings up Ollama + the pipeline
+server + this web client together):
+```bash
+docker compose up
+```
+Then open `http://localhost:8080`.
 
 ## ⚠️ CORS — required server-side change
 

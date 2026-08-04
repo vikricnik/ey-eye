@@ -23,9 +23,12 @@ RUN if [ -n "$POETRY_EXTRAS" ]; then poetry install --no-interaction --no-root -
 
 COPY llm_pipeline/ ./llm_pipeline/
 COPY pipelines/ ./pipelines/
+COPY README.md ./
 
 # Re-run install to register the project itself (the --no-root install
-# above only installed dependencies).
+# above only installed dependencies). This step reads pyproject.toml's
+# `readme = "README.md"` field, so README.md must exist in the build
+# context by this point — that's what the COPY above is for.
 RUN poetry install --no-interaction --only main
 
 EXPOSE 8000
