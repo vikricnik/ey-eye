@@ -7,7 +7,8 @@ state.py's internal PipelineState shape is not.
 """
 
 from datetime import datetime
-from pydantic import BaseModel, Field, ConfigDict
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ConversationTurn(BaseModel):

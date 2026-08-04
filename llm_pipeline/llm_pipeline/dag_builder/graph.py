@@ -27,15 +27,15 @@ the base DAG wiring above:
     and reaches END via the loop's own `exit_to`, not through here.
 """
 
-from langgraph.graph import StateGraph, END
+from langgraph.graph import END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
-from llm_pipeline.pipeline_config import PipelineDefinition
-from llm_pipeline.providers.resilience import CircuitBreaker
-from llm_pipeline.dag_builder.node_types import build_node
 from llm_pipeline.dag_builder.branches import wire_branch
 from llm_pipeline.dag_builder.loops import wire_loop
-from llm_pipeline.state import PipelineState, NodeResult
+from llm_pipeline.dag_builder.node_types import build_node
+from llm_pipeline.pipeline_config import PipelineDefinition
+from llm_pipeline.providers.resilience import CircuitBreaker
+from llm_pipeline.state import NodeResult, PipelineState
 
 
 def build_graph(

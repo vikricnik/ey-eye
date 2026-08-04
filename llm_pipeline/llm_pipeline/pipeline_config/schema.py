@@ -15,10 +15,11 @@ Pydantic's validation lifecycle — see validation.py's own docstring.
 """
 
 from typing import Literal, Union
-from pydantic import BaseModel, Field, ConfigDict, model_validator
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from llm_pipeline.providers import ProviderType
-from llm_pipeline.safe_eval import validate_expression_syntax, UnsafeExpressionError
+from llm_pipeline.safe_eval import UnsafeExpressionError, validate_expression_syntax
 
 
 class ExecutionConfig(BaseModel):

@@ -16,6 +16,7 @@ into this module from inside a method).
 """
 
 from typing import TYPE_CHECKING
+
 from jinja2 import Environment, meta
 
 if TYPE_CHECKING:
