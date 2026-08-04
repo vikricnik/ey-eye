@@ -1,4 +1,4 @@
-from llm_pipeline.models import ConversationTurn
+from llm_pipeline.api_schemas import ConversationTurn
 
 
 def build_contextual_input(current_prompt: str, history: list[ConversationTurn]) -> str:

@@ -1,7 +1,7 @@
 from pathlib import Path
 import pytest
 
-import llm_pipeline.dag_builder as dag_builder_module
+import llm_pipeline.dag_builder.node_types as node_types_module
 from llm_pipeline.pipeline_config import load_pipeline_definition
 from llm_pipeline.dag_builder import build_graph
 from llm_pipeline.errors import PipelineExecutionError
@@ -52,7 +52,7 @@ async def test_diamond_dag_executes_and_joins_correctly(monkeypatch: pytest.Monk
     def fake_get_provider(spec: ModelSpec) -> LLMProvider:  # test double, spec shape not needed
         return _EchoProvider(spec.model)
 
-    monkeypatch.setattr(dag_builder_module, "get_provider", fake_get_provider)
+    monkeypatch.setattr(node_types_module, "get_provider", fake_get_provider)
 
     graph = build_graph(definition)
     result = await graph.ainvoke(
@@ -81,7 +81,7 @@ async def test_node_failure_raises_pipeline_execution_error(
     def fake_get_provider(spec: ModelSpec) -> LLMProvider:
         return _FailingProvider()
 
-    monkeypatch.setattr(dag_builder_module, "get_provider", fake_get_provider)
+    monkeypatch.setattr(node_types_module, "get_provider", fake_get_provider)
 
     graph = build_graph(definition)
 
@@ -103,7 +103,7 @@ async def test_multi_root_pipeline_uses_synthetic_start_node(
     def fake_get_provider(spec: ModelSpec) -> LLMProvider:
         return _EchoProvider(spec.identity)
 
-    monkeypatch.setattr(dag_builder_module, "get_provider", fake_get_provider)
+    monkeypatch.setattr(node_types_module, "get_provider", fake_get_provider)
 
     graph = build_graph(definition)
     result = await graph.ainvoke(
@@ -136,7 +136,7 @@ async def test_branch_only_runs_the_matching_route(monkeypatch: pytest.MonkeyPat
         async def generate(self, prompt: str) -> str:
             return "A"  # matches the `"A" in output` route
 
-    monkeypatch.setattr(dag_builder_module, "get_provider", lambda spec: _ClassifierProvider())
+    monkeypatch.setattr(node_types_module, "get_provider", lambda spec: _ClassifierProvider())
 
     graph = build_graph(definition)
     result = await graph.ainvoke(
@@ -158,7 +158,7 @@ async def test_branch_falls_through_to_default_route(monkeypatch: pytest.MonkeyP
         async def generate(self, prompt: str) -> str:
             return "neither letter matches"  # doesn't contain "A"
 
-    monkeypatch.setattr(dag_builder_module, "get_provider", lambda spec: _ClassifierProvider())
+    monkeypatch.setattr(node_types_module, "get_provider", lambda spec: _ClassifierProvider())
 
     graph = build_graph(definition)
     result = await graph.ainvoke(
@@ -186,7 +186,7 @@ async def test_loop_revises_until_approved(monkeypatch: pytest.MonkeyPatch) -> N
             return critique_provider
         return generate_provider
 
-    monkeypatch.setattr(dag_builder_module, "get_provider", fake_get_provider)
+    monkeypatch.setattr(node_types_module, "get_provider", fake_get_provider)
 
     graph = build_graph(definition)
     result = await graph.ainvoke(
@@ -221,7 +221,7 @@ async def test_loop_hits_max_iterations_and_proceeds(monkeypatch: pytest.MonkeyP
             return critique_provider
         return generate_provider
 
-    monkeypatch.setattr(dag_builder_module, "get_provider", fake_get_provider)
+    monkeypatch.setattr(node_types_module, "get_provider", fake_get_provider)
 
     graph = build_graph(definition)
     result = await graph.ainvoke(
@@ -269,7 +269,7 @@ async def test_loop_hits_max_iterations_and_fails(monkeypatch: pytest.MonkeyPatc
             return critique_provider
         return generate_provider
 
-    monkeypatch.setattr(dag_builder_module, "get_provider", fake_get_provider)
+    monkeypatch.setattr(node_types_module, "get_provider", fake_get_provider)
 
     graph = build_graph(definition)
 

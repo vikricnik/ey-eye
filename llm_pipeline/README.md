@@ -22,32 +22,89 @@ on top when a plain DAG isn't enough.
 ## Architecture
 
 ```
-category.py, config.py, model_registry.py, nodes.py, graph.py   <- REMOVED (phase 1)
-                          |
-                          v
-pipeline_config.py   YAML schema + full validation (Pydantic): DAG cycles,
-                       branches, loops, Jinja-based template reference checks
-dag_builder.py         Turns a validated PipelineDefinition into a compiled
-                        LangGraph — base edges + conditional edges for
-                        branches/loops
-safe_eval.py            Sandboxed expression language for `when`/`exit_when` —
-                        never eval(), a small whitelisted AST subset
-models.py               Generic PipelineState (node_outputs, loop_counts) + API schemas
-history.py              Conversation-context folding
-providers.py             LLMProvider Protocol + adapters (Ollama/OpenAI/Anthropic/Gemini)
-settings.py              pipelines_dir, default_pipeline_name, Ollama/CORS config
-errors.py                PipelineExecutionError, PipelineNotFoundError, PipelineDefinitionError
-main.py                  Stateless per-request pipeline selection
+providers/                LLMProvider Protocol + one adapter module per backend
+├── base.py                 ProviderType, ModelSpec, LLMProvider Protocol, ProviderError
+├── ollama.py / openai.py / anthropic.py / gemini.py / copilot.py
+│                            one file per backend — adding a provider means
+│                            writing one new file + one registry.py branch,
+│                            never touching the others
+├── registry.py               get_provider() factory + cache
+└── resilience.py              CircuitBreaker, generate_with_timeout,
+                                generate_with_retry — genuinely provider-agnostic,
+                                would apply identically to a future non-LLM node type
+
+dag_builder/               Turns a validated PipelineDefinition into a compiled LangGraph
+├── graph.py                 assembly: base depends_on edges + branch/loop wiring
+├── node_types.py              the node-type registry (NODE_BUILDERS dict) — the
+│                              extension point for future retrieval/tool/
+│                              human_approval node types; today only llm_call
+├── branches.py                  conditional routing (a node's output picks ONE path)
+├── loops.py                      bounded generate/critique/revise cycles
+└── templating.py                  Jinja2 prompt rendering
+
+pipeline_config/            YAML schema + validation
+├── schema.py                 pure Pydantic model definitions
+├── validation.py               DAG-level checks (cycles, branch/loop consistency,
+│                                template references) as standalone functions —
+│                                independently testable, not sprawling
+│                                @model_validator methods
+└── loader.py                     reads/lists pipeline YAML files from disk
+
+routers/                    FastAPI route handlers
+├── health.py                 GET /health, /pipelines, /pipelines/{name}
+└── ask.py                      POST /ask + prompt/history validation
+
+safe_eval.py                Sandboxed expression language for `when`/`exit_when` —
+                             never eval(), a small whitelisted AST subset
+api_schemas.py                The public HTTP contract — every request/response
+                              model that crosses the wire
+state.py                       Internal LangGraph state (PipelineState, NodeResult) —
+                                free to change without being an API-breaking change
+pipeline_loader.py               PipelineCache — owns the compiled-graph cache AND
+                                  its own CircuitBreaker instance, injected via
+                                  app.state (Depends(get_pipeline_cache)) rather
+                                  than bare module-level globals
+error_handling.py                  The 3 exception handlers + shared ErrorResponse
+                                    builder + OpenAPI response documentation map
+history.py                          Conversation-context folding
+settings.py                          pipelines_dir, default_pipeline_name, auth,
+                                      rate limiting, Ollama/CORS config
+errors.py                             PipelineExecutionError, PipelineNotFoundError
+main.py                                Composition root ONLY — app creation,
+                                        middleware, router registration. No route
+                                        logic or business logic lives here directly.
 ```
 
-## Why "stateless per-request pipeline selection"?
+### Why dependency injection for the pipeline cache?
+
+`PipelineCache` (in `pipeline_loader.py`) replaced what used to be a bare
+module-level dict plus a bare module-level `CircuitBreaker` singleton. This
+isn't just style — it's the fix for a real bug found during development: a
+circuit breaker shared as a process-wide global let one test's deliberate
+provider failures leak into an unrelated test that happened to use the same
+model identity (`ollama:test-model`), causing it to fail with "circuit open"
+before ever reaching its own (working) mocked provider.
+
+Bundling the compiled-graph cache and its circuit breaker into one object,
+constructed fresh in `main.py`'s `lifespan` function and stored on
+`app.state`, means every app instance (production, or a test's own
+`TestClient`) gets fully independent state automatically — there's no
+global left to leak through, and no autouse fixture needed to reset it
+between test runs (see `tests/test_error_responses.py`, which uses
+`with TestClient(app) as client:` specifically because that re-runs
+`lifespan` and constructs a fresh `PipelineCache` on every test).
+
+### Why stateless per-request pipeline *selection*?
 
 Every `/ask` call includes `pipeline_name` explicitly, and the server loads/caches
 compiled graphs by name rather than mutating a global "currently active"
 pipeline. This matters once you run more than one worker process
 (`uvicorn --workers N`): a global "active pipeline" would live independently
 in each worker's memory, so an "activate" call would only affect whichever
-worker happened to receive it. Stateless selection sidesteps this entirely.
+worker happened to receive it. Stateless selection sidesteps this entirely —
+distinct from the `PipelineCache` DI discussion above, which is about *how*
+state is scoped, not *whether* there's a server-side "active" pipeline concept
+at all (there isn't, by design).
 
 ## Writing a pipeline YAML — the base DAG
 
@@ -162,7 +219,7 @@ output_node: generate   # NOT critique — critique's text is just APPROVE/REVIS
   immediately on an unguarded `{{ critique.output }}` reference to an
   undefined variable — this is intentional (see "Validation" below).
 
-## Validation, at load time (`pipeline_config.py`)
+## Validation, at load time (`pipeline_config/validation.py`)
 
 - **No cycles in `depends_on`** — this check applies to the base DAG only.
   Loops are a deliberately *separate* mechanism and are expected to introduce
@@ -460,10 +517,10 @@ if it's not already listed.
 - **Rate limiting** (`rate_limit.py`) — a per-process, per-API-key (or
   per-IP if auth is disabled) fixed-window limiter, default 60 req/min.
   Single-instance only; see the module docstring for the multi-instance caveat.
-- **Retries with backoff** (`providers.py::generate_with_retry`) — transient
+- **Retries with backoff** (`providers/resilience.py::generate_with_retry`) — transient
   failures (`ProviderError`) get retried with exponential backoff, configurable
   per pipeline via `execution.max_retries` / `execution.retry_backoff_seconds`.
-- **Circuit breaker** (`providers.py::CircuitBreaker`) — after N consecutive
+- **Circuit breaker** (`providers/resilience.py::CircuitBreaker`) — after N consecutive
   failures for a given model (`CIRCUIT_BREAKER_FAILURE_THRESHOLD`), that model
   is skipped entirely (fails fast, no network call) for a cooldown period
   (`CIRCUIT_BREAKER_COOLDOWN_SECONDS`) before a trial call is allowed again.

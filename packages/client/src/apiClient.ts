@@ -1,31 +1,13 @@
 import type {
+  ApiErrorBody,
   AskRequest,
   AskResponse,
   ConversationTurn,
   HealthResponse,
   PipelineDetail,
   PipelinesListResponse,
+  ValidationIssue,
 } from "./types.js";
-
-export interface ValidationIssue {
-  field: string;
-  message: string;
-  type: string;
-}
-
-// Matches the server's ErrorResponse model exactly (models.py) — every
-// error response, regardless of status code or where it was raised, takes
-// this shape.
-export interface ApiErrorBody {
-  timestamp: string;
-  status: number;
-  error: string;
-  message: string;
-  request: string;
-  exceptionUID: string;
-  details: Record<string, unknown>;
-  validations: ValidationIssue[];
-}
 
 export class PipelineApiError extends Error {
   constructor(
@@ -57,6 +39,14 @@ async function buildApiError(response: Response): Promise<PipelineApiError> {
   }
 }
 
+/**
+ * Typed client for the pipeline server's HTTP API. Shared between the CLI
+ * and web clients so the request/response contract only has one source of
+ * truth — see each consumer's own README for how it specifically supplies
+ * `apiKey` (CLI: `PIPELINE_API_KEY` env var; web: `window.PIPELINE_API_KEY`,
+ * with the important caveat that anything set there is visible to anyone
+ * with browser devtools open).
+ */
 export class PipelineClient {
   private readonly baseUrl: string;
   private readonly apiKey: string | undefined;
@@ -125,7 +115,7 @@ export class PipelineClient {
 
     if (!response.ok) {
       // A 401 here almost always means the server has API_KEYS configured
-      // but PIPELINE_API_KEY wasn't set (or is wrong) on this client.
+      // but the client's apiKey wasn't set (or is wrong).
       throw await buildApiError(response);
     }
 

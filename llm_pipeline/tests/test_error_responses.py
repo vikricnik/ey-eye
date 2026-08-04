@@ -1,8 +1,8 @@
+from collections.abc import Iterator
 import pytest
 from fastapi.testclient import TestClient
 
 from llm_pipeline.main import app
-import llm_pipeline.main as main_module
 import llm_pipeline.rate_limit as rate_limit_module
 from llm_pipeline.settings import settings
 
@@ -20,22 +20,33 @@ EXPECTED_KEYS = {
 
 @pytest.fixture(autouse=True)
 def _reset_shared_state(monkeypatch: pytest.MonkeyPatch) -> None:  # pyright: ignore[reportUnusedFunction]
-    """Auth/rate-limit state and the pipeline cache are process-wide
-    singletons — reset them around every test in this file so one test's
-    setup can't leak into another's (same category of issue as the circuit
-    breaker singleton fixed earlier in conftest.py).
+    """Auth and rate-limit state are still process-wide singletons (not yet
+    dependency-injected the way the pipeline cache now is — see
+    pipeline_loader.PipelineCache) — reset them around every test so one
+    test's setup can't leak into another's.
+
+    The pipeline cache itself no longer needs an explicit reset here: each
+    test's `client` fixture below uses `with TestClient(app) as client:`,
+    which re-runs the app's `lifespan` startup on every test and so
+    constructs a brand new PipelineCache (with its own fresh circuit
+    breaker) automatically — see main.py's lifespan function. This is a
+    direct benefit of moving that state off a bare module-level global.
 
     (pyright flags this as unused — pytest invokes autouse fixtures via its
     own dependency-injection machinery, invisible to static analysis; a
     known, harmless false positive for this pattern.)"""
     monkeypatch.setattr(settings, "api_keys", "")
     monkeypatch.setattr(rate_limit_module, "_limiter", rate_limit_module.RateLimiter(1000))
-    main_module.clear_pipeline_cache()
 
 
 @pytest.fixture
-def client() -> TestClient:
-    return TestClient(app, raise_server_exceptions=False)
+def client() -> Iterator[TestClient]:
+    # `with` is required (not just `TestClient(app)`), so the app's
+    # `lifespan` context manager actually runs — that's what sets
+    # app.state.pipeline_cache. Using it this way per-test is also what
+    # gives each test a fully isolated PipelineCache for free.
+    with TestClient(app, raise_server_exceptions=False) as c:
+        yield c
 
 
 def _assert_matches_error_shape(body: dict[str, object]) -> None:
@@ -129,9 +140,7 @@ def test_rate_limit_matches_error_shape_with_retry_after(
     assert "Retry-After" in response.headers
 
 
-def test_exception_uid_is_consistent_within_one_request(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_exception_uid_is_consistent_within_one_request(client: TestClient) -> None:
     """exceptionUID should match X-Request-ID for the same request, so ops
     can correlate an error body directly with server log lines."""
     response = client.post(

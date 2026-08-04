@@ -60,6 +60,67 @@ B's answer? Reference `{B.output}` in C's `prompt_template` while depending on
 it — that's the entire difference between independent and collaborative.
 Nothing else changes.
 
+## Project structure
+
+```
+llm-pipeline-monorepo/
+├── package.json                npm workspace root (links cli/, web/, packages/client/)
+├── packages/client/              @llm-pipeline/client — shared API types + typed
+│                                  fetch client, single source of truth for the
+│                                  request/response contract both clients depend on
+├── cli/                           keyboard-driven terminal client
+├── web/                            browser client
+└── llm_pipeline/                    Python package (Poetry)
+    ├── providers/                    LLMProvider Protocol + one adapter module per
+    │                                 backend (ollama.py, openai.py, anthropic.py,
+    │                                 gemini.py, copilot.py) + registry.py (factory)
+    │                                 + resilience.py (timeout/retry/circuit breaker)
+    ├── dag_builder/                    graph.py (assembly) + node_types.py (the
+    │                                   node-type registry — the extension point for
+    │                                   future retrieval/tool/human_approval node
+    │                                   types) + branches.py + loops.py + templating.py
+    ├── pipeline_config/                  schema.py (pure Pydantic models) +
+    │                                     validation.py (standalone DAG-level checks,
+    │                                     independently testable) + loader.py
+    ├── routers/                            health.py + ask.py (FastAPI route handlers)
+    ├── api_schemas.py                        the public HTTP contract (request/response
+    │                                         models — anything that crosses the wire)
+    ├── state.py                                internal LangGraph state — free to change
+    │                                           without being an API-breaking change
+    ├── pipeline_loader.py                        PipelineCache — owns the compiled-graph
+    │                                             cache AND its own CircuitBreaker
+    │                                             instance, injected via app.state
+    │                                             rather than bare module globals
+    ├── error_handling.py                            the 3 exception handlers + shared
+    │                                                 ErrorResponse builder
+    └── main.py                                        composition root only — app
+                                                          creation, middleware, router
+                                                          registration; no route logic
+```
+
+A few design decisions worth calling out:
+
+- **The provider/dag_builder/pipeline_config splits use `__init__.py` re-exports**,
+  so `from llm_pipeline.providers import ModelSpec, get_provider` (etc.) keeps
+  working exactly as before — the split is an internal reorganization, not a
+  breaking change to how these are imported elsewhere.
+- **`PipelineCache` replaced bare module-level globals** (`_pipeline_cache` dict,
+  a process-wide `CircuitBreaker`) with one object stored on `app.state` and
+  injected via `Depends(get_pipeline_cache)`. This is the actual architectural
+  fix for a real bug hit earlier in development — a circuit breaker shared
+  globally across tests let one test's deliberate failures leak into an
+  unrelated test using the same model identity. With DI, each `PipelineCache`
+  (one per app instance) has fully independent state; nothing to leak.
+- **`pipeline_config/schema.py` and `validation.py` have a deliberate one-way
+  dependency**, made safe via a `TYPE_CHECKING`-guarded import in `validation.py`
+  and a deferred (function-body) import in `schema.py` — this lets validation
+  logic live as standalone, independently-testable functions instead of
+  sprawling `@model_validator` methods, without a real circular import.
+- **`api_schemas.py` vs. `state.py`** — the public API contract vs. internal
+  LangGraph plumbing are now separate files specifically so a change to
+  `PipelineState`'s internal shape is never confused with a breaking change to
+  the HTTP API.
+
 ## Quickstart
 
 ### 1. Start the pipeline server
@@ -76,11 +137,22 @@ poetry run uvicorn llm_pipeline.main:app --reload --port 8000
 curl http://localhost:8000/health
 ```
 
-### 2. Use the CLI
+### 2. Install client dependencies (once, from the repo root)
+
+```bash
+npm install
+```
+
+This is an **npm workspace** — `cli/`, `web/`, and `packages/client/` (the
+shared API types + typed fetch client both clients depend on) are linked
+together by this one install. Running `npm install` separately inside
+`cli/` or `web/` won't correctly link `@llm-pipeline/client` — always
+install from the repo root.
+
+### 3. Use the CLI
 
 ```bash
 cd cli
-npm install
 npm start
 ```
 
@@ -97,11 +169,10 @@ switched to pipeline "consensus-qa" — conversation history cleared
 (consensus-qa) › What year did the Berlin Wall fall?
 ```
 
-### 3. Or use the web client
+### 4. Or use the web client
 
 ```bash
 cd web
-npm install
 npm run dev
 ```
 

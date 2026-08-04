@@ -1,5 +1,12 @@
+"""
+The public API contract — every model that actually crosses the wire:
+request bodies, response bodies, error bodies. Anything here is effectively
+a promise to API consumers (the CLI, the web client, anyone else); changing
+a field name or type here is a breaking change in a way that changing
+state.py's internal PipelineState shape is not.
+"""
+
 from datetime import datetime
-from typing import Annotated, TypedDict
 from pydantic import BaseModel, Field, ConfigDict
 
 
@@ -20,39 +27,6 @@ class AskRequest(BaseModel):
     history: list[ConversationTurn] = []
 
 
-class NodeResult(TypedDict):
-    node_id: str
-    model_name: str  # provider:model identity, e.g. "ollama:qwen3-coder:30b"
-    output: str
-    duration_ms: float
-
-
-def merge_node_outputs(a: dict[str, NodeResult], b: dict[str, NodeResult]) -> dict[str, NodeResult]:
-    """Reducer for parallel nodes writing to the same state key: each node
-    writes its own unique node_id key, so siblings completing in the same
-    LangGraph superstep merge without colliding. Also correctly holds only
-    the LATEST result for a node that runs multiple times in a loop, since
-    a later write to the same key simply overwrites the earlier one."""
-    merged = dict(a)
-    merged.update(b)
-    return merged
-
-
-def merge_loop_counts(a: dict[str, int], b: dict[str, int]) -> dict[str, int]:
-    """Reducer for loop iteration counters — same merge-by-key shape as
-    merge_node_outputs, just for the small int-valued loop_counts map."""
-    merged = dict(a)
-    merged.update(b)
-    return merged
-
-
-class PipelineState(TypedDict):
-    input: str
-    contextual_input: str  # input with conversation history folded in
-    node_outputs: Annotated[dict[str, NodeResult], merge_node_outputs]
-    loop_counts: Annotated[dict[str, int], merge_loop_counts]
-
-
 class NodeOutputDTO(BaseModel):
     node_id: str
     model_name: str
@@ -70,11 +44,6 @@ class AskResponse(BaseModel):
 
 # ---------------------------------------------------------------------------
 # Pipeline listing / introspection response models
-#
-# These replace what used to be loosely-typed `dict[str, object]` return
-# values on /health, /pipelines, and /pipelines/{name} — giving FastAPI a
-# real schema to validate against and document in its OpenAPI output,
-# instead of "whatever shape the dict happened to have at the time."
 # ---------------------------------------------------------------------------
 
 class PipelineSummary(BaseModel):
@@ -128,6 +97,10 @@ class PipelineDetailResponse(BaseModel):
     loops: list[PipelineLoopInfo]
 
 
+# ---------------------------------------------------------------------------
+# Error response contract
+# ---------------------------------------------------------------------------
+
 class ValidationIssue(BaseModel):
     """One field-level problem, used only when `validations` is non-empty
     (request body schema validation failures)."""
@@ -141,8 +114,8 @@ class ErrorResponse(BaseModel):
     """The one shape every error response takes, regardless of status code
     or where it was raised (an endpoint, a Depends() dependency, or FastAPI's
     own automatic request validation) — wired up via custom exception
-    handlers in main.py so this is constructed for every error path, not
-    just a subset of them."""
+    handlers in error_handling.py so this is constructed for every error
+    path, not just a subset of them."""
 
     timestamp: datetime
     status: int

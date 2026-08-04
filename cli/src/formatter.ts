@@ -5,7 +5,7 @@ import type {
   NodeOutput,
   PipelineDetail,
   PipelineSummary,
-} from "./types.js";
+} from "@llm-pipeline/client";
 
 const DIVIDER = chalk.gray("─".repeat(60));
 

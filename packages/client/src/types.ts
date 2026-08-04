@@ -18,7 +18,7 @@ export interface NodeOutput {
 
 export interface AskResponse {
   pipeline_name: string;
-  output_node: string;
+  output_node: string; // whichever output_node candidate actually resolved
   final_answer: string;
   node_outputs: Record<string, NodeOutput>;
   loop_iterations: Record<string, number>;
@@ -54,6 +54,8 @@ export interface PipelineLoopInfo {
 export interface PipelineDetail {
   name: string;
   description: string;
+  // One or more candidates — only ONE actually resolves per request once
+  // branches mean mutually exclusive terminal nodes.
   output_node_candidates: string[];
   nodes: PipelineNodeInfo[];
   branches: PipelineBranchInfo[];
@@ -69,4 +71,24 @@ export interface HealthResponse {
 
 export interface PipelinesListResponse {
   pipelines: PipelineSummary[];
+}
+
+export interface ValidationIssue {
+  field: string;
+  message: string;
+  type: string;
+}
+
+// Matches the server's ErrorResponse model exactly (api_schemas.py) —
+// every error response, regardless of status code or where it was raised,
+// takes this shape.
+export interface ApiErrorBody {
+  timestamp: string;
+  status: number;
+  error: string;
+  message: string;
+  request: string;
+  exceptionUID: string;
+  details: Record<string, unknown>;
+  validations: ValidationIssue[];
 }

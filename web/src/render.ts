@@ -1,4 +1,4 @@
-import type { AskResponse, NodeOutput } from "./types";
+import type { AskResponse, NodeOutput } from "@llm-pipeline/client";
 
 function escapeHtml(str: string): string {
   const div = document.createElement("div");

@@ -9,21 +9,29 @@ and dev-server hot reload.
 ```
 web/
 ├── index.html          # structure only — no inline styles or scripts
-├── package.json
+├── package.json          # depends on @llm-pipeline/client (../packages/client)
 ├── tsconfig.json
 └── src/
-    ├── style.css        # all styling
-    ├── types.ts         # shared types matching the FastAPI response schema
-    ├── apiClient.ts     # typed fetch wrapper: /health, /pipelines, /ask
-    ├── relayAnimator.ts # builds & animates stage indicators dynamically per pipeline
-    ├── render.ts         # DOM rendering (transcript entries, node outputs, errors)
-    └── main.ts           # entry point — pipeline picker, conversation memory, event wiring
+    ├── style.css          # all styling
+    ├── relayAnimator.ts     # builds & animates stage indicators dynamically per pipeline
+    ├── render.ts             # DOM rendering (transcript entries, node outputs, errors)
+    └── main.ts                # entry point — pipeline picker, conversation memory, event wiring
 ```
+
+Types and the typed fetch client (`PipelineClient`, `AskResponse`, etc.) live in
+the shared `@llm-pipeline/client` package (`../packages/client`) — the CLI
+depends on the exact same package, so the request/response contract only has
+one source of truth. See the root README's "Project structure" section.
 
 ## Setup
 
+Install from the **repo root** (this is an npm workspace — `@llm-pipeline/client`
+won't link correctly if you `npm install` from inside `web/` directly):
+
 ```bash
+cd ..            # repo root
 npm install
+cd web
 ```
 
 ## Run (dev server with hot reload)

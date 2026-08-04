@@ -1,0 +1,12 @@
+{
+  "name": "llm-pipeline-monorepo",
+  "private": true,
+  "workspaces": [
+    "packages/client",
+    "cli",
+    "web"
+  ],
+  "scripts": {
+    "typecheck": "npm run typecheck --workspace=cli && npm run typecheck --workspace=web"
+  }
+}

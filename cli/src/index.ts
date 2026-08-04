@@ -1,14 +1,14 @@
 import * as readline from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import chalk from "chalk";
-import { PipelineClient, PipelineApiError } from "./apiClient.js";
+import { PipelineClient, PipelineApiError } from "@llm-pipeline/client";
 import {
   formatAskResponse,
   formatHealth,
   formatPipelineList,
   formatPipelineDetail,
 } from "./formatter.js";
-import type { ConversationTurn } from "./types.js";
+import type { ConversationTurn } from "@llm-pipeline/client";
 
 const BASE_URL = process.env.PIPELINE_BASE_URL ?? "http://localhost:8000";
 const API_KEY = process.env.PIPELINE_API_KEY; // only needed if the server has API_KEYS configured

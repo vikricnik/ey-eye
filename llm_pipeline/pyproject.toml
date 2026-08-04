@@ -70,11 +70,11 @@ module = "langchain_ollama.*"
 ignore_missing_imports = true
 
 # These three are OPTIONAL dependencies (only installed via `poetry install
-# --extras ...`), imported lazily inside providers.py's OpenAIProvider /
-# AnthropicProvider / GeminiProvider classes. Without these overrides, mypy
-# fails on a plain `poetry install` (no extras) with "Cannot find
-# implementation or library stub" for each — regardless of whether the
-# import is lazy/local, mypy still resolves every reachable import statement.
+# --extras ...`), imported lazily inside providers/openai.py, anthropic.py,
+# and gemini.py's adapter classes. Without these overrides, mypy fails on a
+# plain `poetry install` (no extras) with "Cannot find implementation or
+# library stub" for each — regardless of whether the import is lazy/local,
+# mypy still resolves every reachable import statement.
 [[tool.mypy.overrides]]
 module = "langchain_openai.*"
 ignore_missing_imports = true
@@ -129,10 +129,10 @@ reportUnknownLambdaType = false
 # guess its location.
 
 # NOTE on the three optional cloud provider imports (langchain_openai,
-# langchain_anthropic, langchain_google_genai) in providers.py: unlike
-# mypy's per-module `ignore_missing_imports` overrides above, pyright has
-# no equivalent per-module config for "this import is allowed to be
-# missing." Those three import lines carry an inline
+# langchain_anthropic, langchain_google_genai) in providers/openai.py,
+# anthropic.py, gemini.py: unlike mypy's per-module `ignore_missing_imports`
+# overrides above, pyright has no equivalent per-module config for "this
+# import is allowed to be missing." Those three import lines carry an inline
 # `# pyright: ignore[reportMissingImports]` comment instead — deliberately
 # NOT a plain `# type: ignore`, since mypy already tolerates those imports
 # via its overrides above, and a redundant `# type: ignore` there would

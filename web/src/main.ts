@@ -1,8 +1,8 @@
 import "./style.css";
-import { PipelineClient, PipelineApiError } from "./apiClient";
+import { PipelineClient, PipelineApiError } from "@llm-pipeline/client";
 import { RelayAnimator } from "./relayAnimator";
 import { renderTurn, renderError } from "./render";
-import type { ConversationTurn } from "./types";
+import type { ConversationTurn } from "@llm-pipeline/client";
 
 declare global {
   interface Window {

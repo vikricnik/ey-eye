@@ -4,8 +4,14 @@ A keyboard-driven TypeScript CLI for the FastAPI + LangGraph DAG pipeline server
 
 ## Setup
 
+Depends on `@llm-pipeline/client` (shared API types + fetch client, in
+`../packages/client`) via an npm workspace — install from the **repo root**,
+not from this directory:
+
 ```bash
+cd ..            # repo root
 npm install
+cd cli
 ```
 
 ## Run
