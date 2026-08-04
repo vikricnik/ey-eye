@@ -156,13 +156,13 @@ Node outputs (4)
 answer_local (ollama:qwen3-coder:30b, 1.8s)
   The Berlin Wall fell in 1989.
 
-answer_gpt (openai:gpt-4o, 2.1s)
+answer_b (ollama:llama3, 2.1s)
   November 9, 1989.
 
-answer_claude (anthropic:claude-sonnet-4-5, 2.3s)
+answer_c (ollama:gemma3:12b, 2.3s)
   The Berlin Wall fell on November 9, 1989.
 
-reconcile (anthropic:claude-sonnet-4-5, 4.2s)  ← output node
+reconcile (ollama:llama3, 4.2s)  ← output node
   All three sources agree: the Berlin Wall fell on November 9, 1989.
 ```
 

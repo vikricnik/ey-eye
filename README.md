@@ -185,11 +185,14 @@ Full details for each component: [`llm_pipeline/README.md`](llm_pipeline/README.
 ## Two example pipelines, two different DAG shapes
 
 ### `consensus-qa` — multi-model consensus
-Three models (local Ollama + GPT-4o + Claude) independently answer the same
-question in parallel (three roots, no edges between them), then a fourth node
-reconciles them into one authoritative answer. **Use case**: reducing
-hallucination risk on factual Q&A by cross-checking across independent models
-— if they disagree, the reconciler node has to say so explicitly rather than
+Three models independently answer the same question in parallel (three
+roots, no edges between them), then a fourth node reconciles them into one
+authoritative answer. Runs entirely on Ollama by default — no cloud API
+keys needed — with commented-out alternatives in the YAML for swapping in
+a real cloud provider on any node for genuine cross-provider (not just
+cross-model) consensus. **Use case**: reducing hallucination risk on
+factual Q&A by cross-checking across independent models — if they
+disagree, the reconciler node has to say so explicitly rather than
 silently pick one.
 
 ### `code-review-pipeline` — task decomposition

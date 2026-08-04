@@ -6,6 +6,10 @@ execution:
   model_timeout_seconds: 90
   max_history_turns: 4
 
+# Runs entirely on Ollama by default — no cloud API keys needed. See the
+# commented-out alternatives below for swapping in a cloud provider on
+# specific nodes (a reasonable place to spend a cloud call is the final
+# `review` step, even if the rest stays local).
 nodes:
   - id: plan
     depends_on: []
@@ -18,7 +22,10 @@ nodes:
 
   - id: implement
     depends_on: [plan]
-    model: { provider: openai, model: gpt-4o, temperature: 0.2 }
+    model: { provider: ollama, model: qwen3-coder:30b, temperature: 0.2 }
+    # Optional: requires `poetry install --extras openai` and
+    # OPENAI_API_KEY set — see llm_pipeline/README.md.
+    # model: { provider: openai, model: gpt-4o, temperature: 0.2 }
     prompt_template: |
       Plan: {{ plan.output }}
 
@@ -39,7 +46,10 @@ nodes:
 
   - id: review
     depends_on: [implement, write_tests]
-    model: { provider: anthropic, model: claude-sonnet-4-5, temperature: 0.0 }
+    model: { provider: ollama, model: gemma3:12b, temperature: 0.0 }
+    # Optional: requires `poetry install --extras anthropic` and
+    # ANTHROPIC_API_KEY set.
+    # model: { provider: anthropic, model: claude-sonnet-4-5, temperature: 0.0 }
     prompt_template: |
       Implementation:
       {{ implement.output }}

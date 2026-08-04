@@ -152,8 +152,8 @@ This client renders the DAG-based response shape:
   "final_answer": "...",
   "node_outputs": {
     "answer_local": { "node_id": "answer_local", "model_name": "ollama:qwen3-coder:30b", "output": "...", "duration_ms": 1820 },
-    "answer_gpt": { "node_id": "answer_gpt", "model_name": "openai:gpt-4o", "output": "...", "duration_ms": 2140 },
-    "reconcile": { "node_id": "reconcile", "model_name": "anthropic:claude-sonnet-4-5", "output": "...", "duration_ms": 4230 }
+    "answer_b": { "node_id": "answer_b", "model_name": "ollama:llama3", "output": "...", "duration_ms": 2140 },
+    "reconcile": { "node_id": "reconcile", "model_name": "ollama:llama3", "output": "...", "duration_ms": 4230 }
   },
   "loop_iterations": {}
 }

@@ -54,13 +54,22 @@ def register_exception_handlers(app: FastAPI) -> None:
     main.py at app creation."""
 
     @app.exception_handler(HTTPException)
-    async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    async def http_exception_handler(  # pyright: ignore[reportUnusedFunction]
+        request: Request, exc: HTTPException
+    ) -> JSONResponse:
         """Every HTTPException raised anywhere (endpoints, or Depends()
         dependencies like require_api_key/enforce_rate_limit) is caught here
         exactly once. Forwards exc.headers so the rate limiter's `Retry-After`
         header still reaches the client, and mirrors it into `details` too
         since that's the one piece of already-structured extra data a plain
-        HTTPException carries."""
+        HTTPException carries.
+
+        (pyright flags this as unused: it can see the `@app.exception_handler`
+        decorator is applied, but not that FastAPI's own internal registry is
+        what actually "calls" this afterward — the local name itself is never
+        referenced again in this function's body. Same false-positive category
+        as the pytest autouse fixtures elsewhere in this codebase; the
+        decorator's registration side effect IS the usage.)"""
         details: dict[str, object] = {}
         if exc.headers and "Retry-After" in exc.headers:
             details["retry_after_seconds"] = exc.headers["Retry-After"]
@@ -73,13 +82,16 @@ def register_exception_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(RequestValidationError)
-    async def validation_exception_handler(
+    async def validation_exception_handler(  # pyright: ignore[reportUnusedFunction]
         request: Request, exc: RequestValidationError
     ) -> JSONResponse:
         """FastAPI's automatic 422 (e.g. a malformed AskRequest body) normally
         returns Pydantic's own nested error-list shape. Mapped into the same
         ErrorResponse contract instead — each individual field problem becomes
-        one ValidationIssue in `validations`, rather than being flattened away."""
+        one ValidationIssue in `validations`, rather than being flattened away.
+
+        (pyright false positive — see http_exception_handler's docstring above
+        for why.)"""
         validations = [
             ValidationIssue(
                 field=".".join(str(loc) for loc in e["loc"]),
@@ -94,12 +106,17 @@ def register_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(status_code=422, content=body.model_dump(mode="json"))
 
     @app.exception_handler(Exception)
-    async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    async def unhandled_exception_handler(  # pyright: ignore[reportUnusedFunction]
+        request: Request, exc: Exception
+    ) -> JSONResponse:
         """Catches anything not already handled above — a genuine bug slipping
         past the error handling this codebase explicitly anticipates. Without
         this, an unexpected exception would fall through to FastAPI's default
         handler and NOT match the ErrorResponse contract; with it, every
-        possible error path — anticipated or not — returns the same shape."""
+        possible error path — anticipated or not — returns the same shape.
+
+        (pyright false positive — see http_exception_handler's docstring above
+        for why.)"""
         logger.exception("Unhandled exception")
         body = build_error_response(request, 500, "Internal server error")
         return JSONResponse(status_code=500, content=body.model_dump(mode="json"))

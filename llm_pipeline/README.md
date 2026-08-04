@@ -125,7 +125,12 @@ nodes:
 
   - id: draft
     depends_on: [analyze]        # runs after `analyze` completes
-    model: { provider: openai, model: gpt-4o, temperature: 0.3 }
+    model: { provider: ollama, model: llama3, temperature: 0.3 }
+    # Any node can use a different provider — e.g.
+    # { provider: openai, model: gpt-4o, temperature: 0.3 } — see
+    # pipelines/consensus-qa.yaml for a worked example with commented-out
+    # cloud alternatives. Requires the matching `poetry install --extras`
+    # and API key; see "Requirements" below.
     prompt_template: |
       Analysis: {{ analyze.output }}
       Original request: {{ input }}
@@ -399,7 +404,7 @@ Response:
   "final_answer": "All three sources agree: November 9, 1989.",
   "node_outputs": {
     "answer_local": { "node_id": "answer_local", "model_name": "ollama:qwen3-coder:30b", "output": "...", "duration_ms": 1820.4 },
-    "reconcile": { "node_id": "reconcile", "model_name": "anthropic:claude-sonnet-4-5", "output": "...", "duration_ms": 4230.6 }
+    "reconcile": { "node_id": "reconcile", "model_name": "ollama:llama3", "output": "...", "duration_ms": 4230.6 }
   },
   "loop_iterations": {}
 }

@@ -1,37 +1,51 @@
 name: consensus-qa
-description: Multi-provider consensus for factual Q&A — three models answer independently, one reconciles
+description: Multi-model consensus for factual Q&A — three models answer independently, one reconciles
 version: 1
 
 execution:
   model_timeout_seconds: 45
   max_history_turns: 6
 
+# Runs entirely on Ollama by default — no cloud API keys needed. For a
+# genuine cross-PROVIDER consensus (not just cross-model), swap answer_b's
+# and/or answer_c's `model:` block for one of the commented-out
+# alternatives below and set the matching API key — see
+# llm_pipeline/README.md's Auth/provider setup section.
 nodes:
   - id: answer_local
     depends_on: []
     model: { provider: ollama, model: qwen3-coder:30b, temperature: 0.1 }
     prompt_template: "Answer this question accurately and concisely: {{ input }}"
 
-  - id: answer_gpt
+  - id: answer_b
     depends_on: []
-    model: { provider: openai, model: gpt-4o, temperature: 0.1 }
+    model: { provider: ollama, model: llama3, temperature: 0.1 }
+    # Optional: swap in a real cloud provider for cross-provider consensus.
+    # Requires `poetry install --extras openai` and OPENAI_API_KEY set.
+    # model: { provider: openai, model: gpt-4o, temperature: 0.1 }
     prompt_template: "Answer this question accurately and concisely: {{ input }}"
 
-  - id: answer_claude
+  - id: answer_c
     depends_on: []
-    model: { provider: anthropic, model: claude-sonnet-4-5, temperature: 0.1 }
+    model: { provider: ollama, model: gemma3:12b, temperature: 0.1 }
+    # Optional: requires `poetry install --extras anthropic` and
+    # ANTHROPIC_API_KEY set.
+    # model: { provider: anthropic, model: claude-sonnet-4-5, temperature: 0.1 }
     prompt_template: "Answer this question accurately and concisely: {{ input }}"
 
   - id: reconcile
-    depends_on: [answer_local, answer_gpt, answer_claude]
-    model: { provider: anthropic, model: claude-sonnet-4-5, temperature: 0.0 }
+    depends_on: [answer_local, answer_b, answer_c]
+    model: { provider: ollama, model: llama3, temperature: 0.0 }
+    # Optional: a stronger reconciler is a reasonable place to spend a
+    # cloud-provider call even if the three generators above stay local.
+    # model: { provider: anthropic, model: claude-sonnet-4-5, temperature: 0.0 }
     prompt_template: |
       Question: {{ input }}
 
       Three independent answers were given:
-      1 (local model): {{ answer_local.output }}
-      2 (GPT-4o): {{ answer_gpt.output }}
-      3 (Claude): {{ answer_claude.output }}
+      1: {{ answer_local.output }}
+      2: {{ answer_b.output }}
+      3: {{ answer_c.output }}
 
       If they agree, confirm the answer. If they disagree, identify the
       discrepancy explicitly and state which is most likely correct and why.

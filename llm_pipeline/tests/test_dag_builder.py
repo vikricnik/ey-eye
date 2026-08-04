@@ -116,13 +116,13 @@ async def test_multi_root_pipeline_uses_synthetic_start_node(
     )
 
     outputs = result["node_outputs"]
-    assert set(outputs.keys()) == {"answer_local", "answer_gpt", "answer_claude", "reconcile"}
+    assert set(outputs.keys()) == {"answer_local", "answer_b", "answer_c", "reconcile"}
     assert "what year is it" in outputs["answer_local"]["output"]
-    assert "what year is it" in outputs["answer_gpt"]["output"]
-    assert "what year is it" in outputs["answer_claude"]["output"]
+    assert "what year is it" in outputs["answer_b"]["output"]
+    assert "what year is it" in outputs["answer_c"]["output"]
     assert outputs["answer_local"]["output"] in outputs["reconcile"]["output"]
-    assert outputs["answer_gpt"]["output"] in outputs["reconcile"]["output"]
-    assert outputs["answer_claude"]["output"] in outputs["reconcile"]["output"]
+    assert outputs["answer_b"]["output"] in outputs["reconcile"]["output"]
+    assert outputs["answer_c"]["output"] in outputs["reconcile"]["output"]
 
 
 @pytest.mark.asyncio
