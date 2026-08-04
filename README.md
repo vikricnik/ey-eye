@@ -1,13 +1,15 @@
 # LLM Pipeline Monorepo
 
-A multi-tier LLM orchestration system: requests are routed to a category, generated
-by N+ models configured for that category (any mix of Ollama/OpenAI/Anthropic/Gemini),
-validated by N+ validators, and judged to pick the best answer — all fully
-configurable, with two clients (CLI + web) to interact with it.
+A **YAML-defined DAG orchestration system** for LLM pipelines: any number of
+named nodes, each backed by any provider (Ollama, OpenAI, Anthropic, Gemini),
+wired together by simple `depends_on` edges. Parallel execution, sequential
+ordering, and cross-node collaboration all fall directly out of the DAG
+shape — there's no separate "mode" to configure.
 
 ```
 llm-pipeline-monorepo/
-├── llm_pipeline/   Python — FastAPI + LangGraph orchestration server
+├── llm_pipeline/   Python — FastAPI + LangGraph DAG orchestration server
+│   └── pipelines/    YAML pipeline definitions (consensus-qa, code-review, simple-local)
 ├── cli/             TypeScript — keyboard-driven terminal client
 └── web/             TypeScript + Vite — browser client
 ```
@@ -15,34 +17,48 @@ llm-pipeline-monorepo/
 ## Architecture at a glance
 
 ```
-                        ┌─────────────┐
-   prompt + history ──▶ │   Route     │  classifies into a Category
-                        └──────┬──────┘  (CODE / GENERAL / MATH / CREATIVE)
-                               │
-                               ▼
-                  ┌─────────────────────────┐
-                  │  Generate + Validate    │  N+ generator models run
-                  │  (per category)         │  (parallel or sequential,
-                  │                         │   optionally collaborative);
-                  │                         │  each answer is validated by
-                  │                         │  N+ validators (single or
-                  │                         │  multiple w/ quorum)
-                  └───────────┬─────────────┘
-                              │
-                              ▼
-                        ┌───────────┐
-                        │   Judge   │  picks the best candidate
-                        └─────┬─────┘
-                              │
-                              ▼
-                    final answer + which model
-                    did routing/generating/
-                    validating/judging
+YAML file (nodes + depends_on)
+            |
+            v
+  pipeline_config.py    validates: no cycles, no dangling deps,
+                          no unresolved template refs, valid output_node
+            |
+            v
+  dag_builder.py          one graph node per YAML node, one edge per
+                            depends_on entry — nothing else
+            |
+            v
+  compiled LangGraph       parallel siblings run concurrently (no edge
+                            between them); a join waits for ALL its
+                            dependencies; ordering/"collaboration" is just
+                            whether an edge exists and whether a template
+                            references it — no special-case handling anywhere
 ```
 
-Every model (router, N generators, N validators, judge) can be a different provider —
-Ollama running locally, OpenAI, Anthropic, or Google Gemini — configured per category
-in `llm_pipeline/llm_pipeline/model_registry.py`.
+### Example: A → (B, C) → D
+
+```yaml
+nodes:
+  - id: A
+    depends_on: []
+    ...
+  - id: B
+    depends_on: [A]      # B and C have no edge between them
+    ...                    #   -> they run in PARALLEL once A finishes
+  - id: C
+    depends_on: [A]
+    ...
+  - id: D
+    depends_on: [B, C]    # D waits for BOTH B and C — automatic join
+    ...
+output_node: D
+```
+
+Want B to run before C instead? Add `depends_on: [A, B]` to C — that's the
+entire difference between parallel and sequential. Want C's prompt to build on
+B's answer? Reference `{B.output}` in C's `prompt_template` while depending on
+it — that's the entire difference between independent and collaborative.
+Nothing else changes.
 
 ## Quickstart
 
@@ -52,11 +68,10 @@ in `llm_pipeline/llm_pipeline/model_registry.py`.
 cd llm_pipeline
 poetry install
 cp .env.example .env
-ollama pull llama3.2:3b llama3 qwen3-coder:30b gemma3:12b gemma3:4b
+ollama pull llama3.2:3b llama3 qwen3-coder:30b
 poetry run uvicorn llm_pipeline.main:app --reload --port 8000
 ```
 
-Verify it's up:
 ```bash
 curl http://localhost:8000/health
 ```
@@ -69,6 +84,19 @@ npm install
 npm start
 ```
 
+```
+(simple-local) › /pipelines
+Available pipelines (3)
+  simple-local — Single-node, all-Ollama pipeline for quick local testing
+  consensus-qa — Multi-provider consensus for factual Q&A
+  code-review-pipeline — Plan, then implement + test in parallel, then review and merge
+
+(simple-local) › /use consensus-qa
+switched to pipeline "consensus-qa" — conversation history cleared
+
+(consensus-qa) › What year did the Berlin Wall fall?
+```
+
 ### 3. Or use the web client
 
 ```bash
@@ -77,229 +105,155 @@ npm install
 npm run dev
 ```
 
-Open the printed URL (typically `http://localhost:5173`).
+Open the printed URL, pick a pipeline from the dropdown in the header, and
+start typing.
 
-Full setup/configuration/deployment details for each component are in their own
-READMEs: [`llm_pipeline/README.md`](llm_pipeline/README.md),
-[`cli/README.md`](cli/README.md), [`web/README.md`](web/README.md). This file covers
-the system as a whole.
+Full details for each component: [`llm_pipeline/README.md`](llm_pipeline/README.md),
+[`cli/README.md`](cli/README.md), [`web/README.md`](web/README.md).
 
-## Configuring the pipeline
+## Two example pipelines, two different DAG shapes
 
-Two kinds of configuration, deliberately kept separate:
+### `consensus-qa` — multi-model consensus
+Three models (local Ollama + GPT-4o + Claude) independently answer the same
+question in parallel (three roots, no edges between them), then a fourth node
+reconciles them into one authoritative answer. **Use case**: reducing
+hallucination risk on factual Q&A by cross-checking across independent models
+— if they disagree, the reconciler node has to say so explicitly rather than
+silently pick one.
 
-**Behavior toggles** — simple on/off switches, live in `.env` (copy from
-`llm_pipeline/.env.example`):
+### `code-review-pipeline` — task decomposition
+`plan` runs first; `implement` and `write_tests` both depend only on `plan`
+(parallel middle layer, since there's no edge between them); `review` depends
+on both and combines them. **Use case**: splitting a task into genuinely
+independent sub-steps (an implementation and its tests don't need each
+other's output, just a shared plan) that only need to converge at the very
+end.
 
-| Variable | Values | Effect |
-|---|---|---|
-| `LLM_PIPELINE_MODE` | `parallel` \| `sequential` | How generators for a category run relative to each other |
-| `LLM_GENERATION_COLLABORATION` | `independent` \| `collaborative` | Sequential generators refine each other's answers (requires `sequential`) |
-| `LLM_VALIDATION_MODE` | `single` \| `multiple` | One validator vs. all configured validators voting |
-| `LLM_VALIDATION_QUORUM` | `0.0`–`1.0` | Approval fraction needed in `multiple` mode |
-| `LLM_VALIDATION_CONCURRENCY` | `sequential` \| `parallel` | How multiple validators run |
-| `LLM_MAX_HISTORY_TURNS` | integer | Prior conversation turns folded into context (`0` disables) |
-| `OLLAMA_BASE_URL` | URL | Where Ollama is running |
-| `CORS_ALLOWED_ORIGINS` | comma-separated or `*` | Which browser origins may call the API (needed for the web client) |
+Same schema, same builder, structurally different shapes — validated by
+building both against the identical DAG mechanism rather than adding
+per-use-case special handling.
 
-**Model assignments** — which specific models (and providers) handle each category,
-live in code at `llm_pipeline/llm_pipeline/model_registry.py`, since expressing
-nested per-category model lists as environment variables gets unwieldy fast:
+## Phase 2: branches and loops
 
-```python
-GENERATOR_SPECS: dict[Category, list[ModelSpec]] = {
-    Category.CODE: [
-        ModelSpec(ProviderType.OLLAMA, "qwen3-coder:30b", temperature=0.2),
-        ModelSpec(ProviderType.OPENAI, "gpt-4o", temperature=0.2),
-        ModelSpec(ProviderType.ANTHROPIC, "claude-sonnet-4-5", temperature=0.2),
-    ],
-    Category.MATH: [...],
-    Category.GENERAL: [...],
-    Category.CREATIVE: [...],
-}
-```
+Two additional mechanisms layer conditional control flow on top of the base
+DAG, for cases a plain DAG can't express:
 
-Add a 5th category, add a 4th generator to CODE, or swap in a different provider —
-all pure config changes in that one file, no graph or node code needs to change.
+### `support-router.yaml` — conditional branching
+`classify` picks exactly ONE of `refund_flow` / `tech_support_flow` /
+`general_flow` — the other two never execute for that request. Routes are
+evaluated through a small **sandboxed expression language** (never `eval()`
+— see `llm_pipeline/safe_eval.py`), validated for safety and syntax at YAML
+load time.
 
-## Adding a new LLM provider
+### `iterative-refinement.yaml` — bounded revision loop
+`generate` → `critique` → loop back to `generate` up to 3 times until
+`critique` says APPROVE, then exit. Bounded by `max_iterations` so it can
+never run away; `on_max_iterations: proceed | fail` decides what happens if
+it never converges.
 
-The pipeline talks to every backend through one Protocol:
+Both compile to LangGraph conditional edges under the hood. Full schema
+reference: [`llm_pipeline/README.md`](llm_pipeline/README.md#branches--conditional-routing).
 
-```python
-class LLMProvider(Protocol):
-    async def generate(self, prompt: str) -> str: ...
-```
+## Where this fits in production (and where it doesn't)
 
-To add a new provider (say, a different cloud API):
-1. Add a value to `ProviderType` in `providers.py`.
-2. Write an adapter class implementing `generate()`.
-3. Add a branch in `get_provider()`'s factory.
-4. Reference it from `model_registry.py`.
+**Good fit:**
+- Multi-model consensus for anything where a wrong answer is costly
+- Task decomposition where sub-steps are genuinely independent enough to
+  parallelize (code + tests, draft + fact-check, extract + classify)
+- Cost/latency tiering — a cheap local model for a first-pass node, an
+  expensive frontier model only for the step that actually needs it
+- Provider resilience/evaluation — running the same prompt through two
+  providers to compare quality/cost/latency
 
-Nothing else in the pipeline needs to know it exists.
+**Not a good fit:**
+- Simple single-turn Q&A where one model call suffices — the orchestration
+  overhead (multiple network hops, DAG validation) adds cost/latency for no
+  quality gain
+- Low-latency conversational chat — each node is a real network round trip;
+  fine for report generation, not for sub-second responses
+- Workflows needing the model to decide its own next step dynamically — this
+  is a **static** DAG per YAML file; genuine runtime branching needs
+  `add_conditional_edges` layered on top (see "Deferred" below)
+
+## Writing your own pipeline
+
+See [`llm_pipeline/README.md`](llm_pipeline/README.md#writing-a-pipeline-yaml)
+for the full schema reference. The short version: define `nodes`, give each
+one an `id`, a `model` (provider + model + temperature), a `prompt_template`,
+and a `depends_on` list; pick which node is `output_node`. Validation catches
+cycles, dangling references, and unresolved template placeholders at load
+time, before the pipeline ever runs.
 
 ## Conversation history
 
-Both clients maintain a session-local conversation history and send it with every
-request; the server folds up to `LLM_MAX_HISTORY_TURNS` prior turns into context
-before routing. This is currently **raw replay** (every prior prompt + final answer
-sent as plain text on every request) — simple and accurate, but token cost grows with
-conversation length. See `llm_pipeline/README.md` for notes on summarization as a
-future improvement. Use `/reset` (CLI) or the "reset conversation" button (web) to
-clear history at any point.
+Both clients maintain session-local history and send it with every request;
+the server folds up to `execution.max_history_turns` (set per-pipeline in its
+YAML) prior turns into context. This is **raw replay** — simple, but token
+cost grows with conversation length. Switching pipelines (CLI's `/use`, the
+web client's dropdown) clears history automatically, since a different DAG
+shape likely has different context semantics. See the pipeline README for
+notes on summarization as a future improvement.
+
+## Stateless pipeline selection — why there's no "activate" endpoint
+
+Every `/ask` call specifies `pipeline_name` explicitly; the server has no
+server-side "currently active pipeline" to mutate. This was a deliberate
+choice over a stateful `/pipelines/{name}/activate` design: a global "active"
+variable would live independently in each worker process under
+`uvicorn --workers N`, so activating a pipeline would only affect whichever
+worker received that specific request — a real consistency bug the moment you
+scale beyond one process. Stateless per-request selection has no such shared
+state to disagree about.
+
+## Deliberately deferred
+
+**Loops and forward branching are now implemented** (see "Phase 2" above) —
+what's left, designed at a sketch level but intentionally not built yet, see
+[`llm_pipeline/README.md`](llm_pipeline/README.md#deliberately-deferred-not-in-this-version)
+for the full reasoning on each:
+
+- **Dynamic map-reduce fan-out** (run a node once per item in a runtime list)
+- **Non-LLM node types** (retrieval, tool execution, human-approval gates —
+  the `type` field exists now so adding these later isn't a breaking change)
+- **Streaming** `/ask` responses (currently one JSON blob at the end; both
+  clients' progress indicators are best-effort client-side pacing, not real
+  per-node events)
 
 ## Deployment notes
 
-This is set up for local development (Ollama on localhost, `--reload` dev servers).
-For anything beyond local use:
+- **Auth**: set `API_KEYS` (comma-separated) before exposing the server
+  beyond localhost — it's **empty by default** (no authentication), with a
+  startup warning logged when that's the case. Both clients need the
+  matching key set (`PIPELINE_API_KEY` for the CLI, `window.PIPELINE_API_KEY`
+  for the web client) once this is enabled.
+- **Pipeline server**: behind a process manager or containerized (see
+  `llm_pipeline/Dockerfile` and root `docker-compose.yml`); drop `--reload`;
+  set `CORS_ALLOWED_ORIGINS` to your actual client origin(s). Ship
+  `pipelines/*.yaml` as version-controlled, code-reviewed files baked into
+  the deployment — there's no upload/mutation endpoint by design.
+- **CI**: `.github/workflows/ci.yml` validates every `pipelines/*.yaml` file,
+  runs `mypy --strict` + `pytest`, and type-checks both TypeScript clients on
+  every push/PR.
+- **Ollama**: `OLLAMA_BASE_URL` for remote instances; match
+  `OLLAMA_MAX_LOADED_MODELS` (set in Ollama's own environment) to how many
+  Ollama-backed nodes might run concurrently across your pipelines.
+- **Cloud providers**: set `OPENAI_API_KEY`/`ANTHROPIC_API_KEY`/`GOOGLE_API_KEY`
+  in the server's environment if any pipeline YAML references those providers.
+- **Rate limiting**: `RATE_LIMIT_REQUESTS_PER_MINUTE` is enforced per
+  process — running multiple server instances behind a load balancer means
+  each enforces its own limit independently (see `rate_limit.py`'s docstring).
+- **CLI**: `npm run build && node dist/index.js`.
+- **Web**: `npm run build` → static files in `web/dist/`, served by any static
+  host, with `window.PIPELINE_BASE_URL` pointed at your deployed server.
 
-- **Pipeline server**: run behind a process manager (e.g. `systemd`, `supervisor`) or
-  containerize it; drop `--reload`; set `CORS_ALLOWED_ORIGINS` to your actual client
-  origin(s) instead of `*`.
-- **Ollama**: if models run remotely, point `OLLAMA_BASE_URL` at that host; make sure
-  `OLLAMA_MAX_LOADED_MODELS` (set in Ollama's own environment, not `.env`) matches how
-  many models you expect running concurrently.
-- **Cloud providers**: set `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GOOGLE_API_KEY` in
-  the pipeline server's environment if you add cloud models to `model_registry.py`.
-- **CLI**: `npm run build && node dist/index.js`, or run via `npx tsx` directly.
-- **Web**: `npm run build` produces static files in `web/dist/` — serve with any
-  static host (nginx, S3+CloudFront, Vercel, etc.), setting `window.PIPELINE_BASE_URL`
-  to point at your deployed server.
-
-## Example: full end-to-end run
+### Quick start with Docker Compose
 
 ```bash
-# Terminal 1 — server
-cd llm_pipeline
-poetry run uvicorn llm_pipeline.main:app --reload --port 8000
-
-# Terminal 2 — CLI
-cd cli
-npm start
+docker compose up
 ```
-
-```
-› Write a Python function that merges two sorted lists
-
-category: CODE   winner: ollama:qwen3-coder:30b
-router: ollama:llama3.2:3b   judge: ollama:llama3
-────────────────────────────────────────────────────────
-Final answer
-def merge_sorted_lists(a: list[int], b: list[int]) -> list[int]:
-    result = []
-    i = j = 0
-    while i < len(a) and j < len(b):
-        if a[i] <= b[j]:
-            result.append(a[i]); i += 1
-        else:
-            result.append(b[j]); j += 1
-    result.extend(a[i:])
-    result.extend(b[j:])
-    return result
-
-› now make it work with any iterable, not just lists
-```
-
-The second prompt has no explicit subject ("it") — the CLI sent the first turn as
-context automatically, so the pipeline knows what's being modified.
-
-## Async/await usage
-
-Every I/O-bound operation across all three components uses `async`/`await`:
-
-- **Pipeline**: every model call (`provider.generate()`), every FastAPI route handler,
-  every node function, and the graph's `pipeline.ainvoke()` call.
-- **CLI**: `readline`'s prompt loop, all `fetch` calls, and the entry point itself uses
-  real top-level `await` (not a `.then()`/`.catch()` chain) since Node 22 + ESM support it.
-- **Web**: all `fetch` calls; DOM event listeners are declared `async` directly rather
-  than wrapped with `void someAsyncFn()` where the listener body itself does the
-  awaiting; health polling uses a self-scheduling async loop (`await check(); await
-  delay(...)`) instead of `setInterval`, so a slow health check can't cause overlapping
-  concurrent requests to pile up.
-
-A few things are intentionally **not** async, because there's no I/O or awaitable work
-to wrap — forcing `async`/`await` onto them would be noise, not correctness:
-- The CLI's terminal spinner and the web client's relay-track animation are pure
-  `setInterval` frame tickers with nothing to await.
-- Pure/sync helpers like `Category.from_str()`, `build_contextual_prompt()`, and
-  `ModelSpec.identity` do no I/O.
-- Provider adapter constructors (`OllamaProvider.__init__`, etc.) just build client
-  objects — no network call happens until `.generate()` is actually awaited.
-
-## Robustness: what's implemented, and further recommendations
-
-### Implemented in this repo
-
-- **Per-model timeouts** (`LLM_MODEL_TIMEOUT_SECONDS`) — no single model call can hang
-  a request indefinitely; a hung model is treated as a failure and isolated.
-- **Failure isolation at every tier** — one bad generator, validator, or even the
-  router/judge failing doesn't crash the whole request; see
-  [`llm_pipeline/README.md`](llm_pipeline/README.md#failure-isolation--graceful-degradation)
-  for the full behavior table. Covered by `tests/test_graceful_degradation.py`.
-- **Distinct error surfaces** — `PipelineExecutionError` (a whole tier failed, `503`)
-  is now separate from generic unexpected errors (`502`), so clients can tell "every
-  model for this category is down" apart from "something else broke."
-- **CORS**, **mypy --strict**, **typed responses end-to-end** (Python ↔ CLI ↔ web all
-  share the same response shape).
-
-### Recommended next steps (not yet implemented — roughly in priority order)
-
-1. **Retries with backoff.** Timeouts currently isolate a failure but don't retry it.
-   A transient blip (Ollama briefly overloaded, a cloud API rate limit) will fail a
-   model that would have succeeded a second later. Wrapping `generate_with_timeout`
-   with something like [`tenacity`](https://github.com/jd/tenacity)
-   (`@retry(stop=stop_after_attempt(2), wait=wait_exponential(...))`) would meaningfully
-   cut failure rates for free.
-
-2. **Startup model validation.** Right now a typo'd model name in `model_registry.py`
-   only surfaces when a request hits that category. A startup check (ping each
-   configured model once, log which ones are unreachable) would catch misconfiguration
-   before it reaches a user.
-
-3. **Structured logging + request correlation IDs.** Logs currently interleave across
-   concurrent requests with no way to group "which log lines belong to this one
-   `/ask` call." Adding a request ID (via `contextvars` or FastAPI middleware) and
-   switching to structured (JSON) logs would make debugging production issues far
-   easier, and sets you up for real tracing (OpenTelemetry) later.
-
-4. **Rate limiting / backpressure.** Nothing currently stops a client from firing
-   concurrent requests that each fan out to N models — on a single Ollama instance
-   this can thrash memory (as discussed earlier for `OLLAMA_MAX_LOADED_MODELS`). A
-   simple in-process semaphore limiting concurrent `/ask` calls, or a proper rate
-   limiter (`slowapi`), would protect the server under load.
-
-5. **Circuit breaker per model.** If a specific model has failed the last N calls in
-   a row (e.g. an API key expired), retrying and timing out on every single request is
-   wasted latency. A simple circuit breaker (skip a model for a cooldown period after
-   repeated failures, log it clearly) would fail faster and cheaper.
-
-6. **Prompt/input safety.** There's currently no length cap or sanitization on
-   `prompt`/`history` beyond "not empty." Consider a max length, and think through
-   whether user-supplied history could be used to inject instructions into the
-   judge/validator prompts (since history text is concatenated directly into prompts
-   sent to every tier).
-
-7. **Conversation history summarization.** Already flagged in the pipeline README —
-   raw replay doesn't scale. Worth prioritizing once conversations regularly exceed a
-   handful of turns.
-
-8. **Tests against the live graph, not just unit tests.** `test_graceful_degradation.py`
-   tests `nodes.py` functions directly via dependency injection. An integration test
-   using FastAPI's `TestClient`/`httpx.AsyncClient` against the compiled `pipeline`
-   graph (with mocked providers) would catch wiring issues the unit tests can't see.
-
-9. **Containerization + CI.** A `Dockerfile`/`docker-compose.yml` (pipeline + Ollama)
-   would make deployment reproducible; a GitHub Actions workflow running
-   `mypy`, `pytest`, and `tsc --noEmit` for both clients on every push would catch
-   regressions automatically rather than relying on manual checks like the ones done
-   while building this out.
-
-10. **Observability on model performance.** Right now there's no record of which
-    models are actually winning judge votes over time, average latency per model, or
-    validation pass rates. Even simple counters (in-memory or a lightweight metrics
-    store) would tell you whether a configured model is pulling its weight or should be
-    swapped out.
+Runs the pipeline server + Ollama together. Set `API_KEYS` and any cloud
+provider keys as environment variables in `docker-compose.yml` before
+exposing this beyond your local machine.
 
 ## License
 

@@ -1,0 +1,10 @@
+name: missing-output-node
+version: 1
+
+nodes:
+  - id: A
+    depends_on: []
+    model: { provider: ollama, model: test-model }
+    prompt_template: "{{ input }}"
+
+output_node: B

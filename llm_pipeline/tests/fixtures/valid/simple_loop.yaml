@@ -1,0 +1,26 @@
+name: simple-loop
+version: 1
+
+nodes:
+  - id: generate
+    depends_on: []
+    model: { provider: ollama, model: gen-model }
+    prompt_template: |
+      {{ input }}
+      {% if critique is defined %}{{ critique.output }}{% endif %}
+
+  - id: critique
+    depends_on: [generate]
+    model: { provider: ollama, model: critique-model }
+    prompt_template: "{{ generate.output }}"
+
+loops:
+  - id: loop1
+    from: critique
+    back_to: generate
+    exit_to: END
+    exit_when: 'output.startswith("APPROVE")'
+    max_iterations: 3
+    on_max_iterations: proceed
+
+output_node: generate

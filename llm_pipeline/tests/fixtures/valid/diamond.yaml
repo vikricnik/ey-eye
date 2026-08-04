@@ -1,0 +1,26 @@
+name: diamond
+description: A -> (B, C) -> D
+version: 1
+
+nodes:
+  - id: A
+    depends_on: []
+    model: { provider: ollama, model: test-model }
+    prompt_template: "{{ input }}"
+
+  - id: B
+    depends_on: [A]
+    model: { provider: ollama, model: test-model }
+    prompt_template: "{{ A.output }}"
+
+  - id: C
+    depends_on: [A]
+    model: { provider: ollama, model: test-model }
+    prompt_template: "{{ A.output }}"
+
+  - id: D
+    depends_on: [B, C]
+    model: { provider: ollama, model: test-model }
+    prompt_template: "{{ B.output }} {{ C.output }}"
+
+output_node: D

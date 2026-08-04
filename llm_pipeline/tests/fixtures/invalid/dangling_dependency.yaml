@@ -1,0 +1,10 @@
+name: dangling-dependency
+version: 1
+
+nodes:
+  - id: A
+    depends_on: [does_not_exist]
+    model: { provider: ollama, model: test-model }
+    prompt_template: "{{ input }}"
+
+output_node: A

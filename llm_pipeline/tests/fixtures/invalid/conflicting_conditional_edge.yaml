@@ -1,0 +1,30 @@
+name: conflicting-conditional-edge
+version: 1
+
+nodes:
+  - id: classify
+    depends_on: []
+    model: { provider: ollama, model: test-model }
+    prompt_template: "{{ input }}"
+
+  - id: path_a
+    depends_on: []
+    model: { provider: ollama, model: test-model }
+    prompt_template: "{{ input }}"
+
+  # This node is NOT a declared route destination of branch1, but lists
+  # `classify` (a branch source) in depends_on anyway — invalid, since
+  # classify's outgoing edges are fully governed by the branch instead.
+  - id: sneaky_extra
+    depends_on: [classify]
+    model: { provider: ollama, model: test-model }
+    prompt_template: "{{ classify.output }}"
+
+branches:
+  - id: branch1
+    from: classify
+    routes:
+      - default: true
+        to: path_a
+
+output_node: [path_a, sneaky_extra]

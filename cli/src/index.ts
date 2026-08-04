@@ -2,26 +2,40 @@ import * as readline from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import chalk from "chalk";
 import { PipelineClient, PipelineApiError } from "./apiClient.js";
-import { formatAskResponse, formatHealth } from "./formatter.js";
+import {
+  formatAskResponse,
+  formatHealth,
+  formatPipelineList,
+  formatPipelineDetail,
+} from "./formatter.js";
 import type { ConversationTurn } from "./types.js";
 
 const BASE_URL = process.env.PIPELINE_BASE_URL ?? "http://localhost:8000";
+const API_KEY = process.env.PIPELINE_API_KEY; // only needed if the server has API_KEYS configured
 
-const HELP_TEXT = `
+function helpText(activePipeline: string): string {
+  return `
 ${chalk.bold("Commands:")}
-  ${chalk.yellow("/help")}     show this help
-  ${chalk.yellow("/health")}   show current pipeline configuration
-  ${chalk.yellow("/verbose")}  toggle showing all candidates vs. just the final answer
-  ${chalk.yellow("/reset")}    clear conversation history (start fresh)
-  ${chalk.yellow("/exit")}     quit (also: Ctrl+C or Ctrl+D)
+  ${chalk.yellow("/help")}              show this help
+  ${chalk.yellow("/health")}            show server info and available pipelines
+  ${chalk.yellow("/pipelines")}         list available pipelines
+  ${chalk.yellow("/pipeline")}          show the active pipeline's DAG (nodes + edges)
+  ${chalk.yellow("/use <name>")}         switch pipelines (clears conversation history)
+  ${chalk.yellow("/verbose")}           toggle showing every node's output vs. just the final answer
+  ${chalk.yellow("/reset")}             clear conversation history (start fresh)
+  ${chalk.yellow("/exit")}              quit (also: Ctrl+C or Ctrl+D)
 
-Anything else you type is sent to the pipeline as a prompt, with prior turns
-in this session included as conversation context.
+Currently using pipeline: ${chalk.blue(activePipeline)}
+
+Anything else you type is sent to the active pipeline as a prompt, with prior
+turns in this session included as conversation context.
 `;
+}
 
 async function main(): Promise<void> {
-  const client = new PipelineClient(BASE_URL);
+  const client = new PipelineClient(BASE_URL, API_KEY);
   let verbose = false;
+  let activePipeline: string;
   const history: ConversationTurn[] = [];
 
   console.log(chalk.bold.cyan("\nLLM Pipeline CLI"));
@@ -30,13 +44,16 @@ async function main(): Promise<void> {
 
   try {
     const health = await client.checkHealth();
+    activePipeline = health.default_pipeline_name;
     console.log(formatHealth(health));
     console.log();
+    console.log(chalk.gray(`Using pipeline "${activePipeline}" — switch with /use <name>\n`));
   } catch (err) {
     printError(err);
     console.log(
       chalk.yellow("Continuing anyway — you can still try prompts once the server is up.\n")
     );
+    activePipeline = "simple-local"; // best-effort fallback if the server was unreachable at startup
   }
 
   const rl = readline.createInterface({ input: stdin, output: stdout });
@@ -48,7 +65,7 @@ async function main(): Promise<void> {
   });
 
   while (true) {
-    const input = await rl.question(chalk.bold.green("› "));
+    const input = await rl.question(chalk.bold.green(`(${activePipeline}) › `));
     const trimmed = input.trim();
 
     if (trimmed.length === 0) {
@@ -60,7 +77,7 @@ async function main(): Promise<void> {
     }
 
     if (trimmed === "/help") {
-      console.log(HELP_TEXT);
+      console.log(helpText(activePipeline));
       continue;
     }
 
@@ -87,7 +104,48 @@ async function main(): Promise<void> {
       continue;
     }
 
-    await handlePrompt(client, trimmed, verbose, history);
+    if (trimmed === "/pipelines") {
+      try {
+        const { pipelines } = await client.listPipelines();
+        console.log(formatPipelineList(pipelines));
+        console.log();
+      } catch (err) {
+        printError(err);
+      }
+      continue;
+    }
+
+    if (trimmed === "/pipeline") {
+      try {
+        const detail = await client.getPipelineDetail(activePipeline);
+        console.log(formatPipelineDetail(detail));
+        console.log();
+      } catch (err) {
+        printError(err);
+      }
+      continue;
+    }
+
+    if (trimmed.startsWith("/use ")) {
+      const requestedName = trimmed.slice("/use ".length).trim();
+      if (!requestedName) {
+        console.log(chalk.yellow('usage: /use <pipeline-name> (see "/pipelines" for options)\n'));
+        continue;
+      }
+      try {
+        // Confirm the pipeline actually exists before switching — fails
+        // clearly now rather than on the next prompt.
+        await client.getPipelineDetail(requestedName);
+        activePipeline = requestedName;
+        history.length = 0; // different pipeline = different context; don't carry old turns forward
+        console.log(chalk.gray(`switched to pipeline "${activePipeline}" — conversation history cleared\n`));
+      } catch (err) {
+        printError(err);
+      }
+      continue;
+    }
+
+    await handlePrompt(client, trimmed, activePipeline, verbose, history);
   }
 
   rl.close();
@@ -97,19 +155,22 @@ async function main(): Promise<void> {
 async function handlePrompt(
   client: PipelineClient,
   prompt: string,
+  pipelineName: string,
   verbose: boolean,
   history: ConversationTurn[]
 ): Promise<void> {
   const spinner = startSpinner("thinking");
+  const startedAt = Date.now();
 
   try {
-    const response = await client.ask(prompt, history);
+    const response = await client.ask(prompt, pipelineName, history);
+    const elapsedMs = Date.now() - startedAt;
     stopSpinner(spinner);
     console.log();
-    console.log(formatAskResponse(response, verbose));
+    console.log(formatAskResponse(response, verbose, elapsedMs));
     console.log();
-    // Only the winning answer is kept as context for the next turn — the
-    // candidates that lost the judge vote are dropped from memory.
+    // Only the final answer (the output_node's result) is kept as context
+    // for the next turn — intermediate node outputs aren't carried forward.
     history.push({ prompt, final_answer: response.final_answer });
   } catch (err) {
     stopSpinner(spinner);

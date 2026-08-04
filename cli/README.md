@@ -1,6 +1,6 @@
 # LLM Pipeline CLI
 
-A keyboard-driven TypeScript CLI for the FastAPI + LangGraph pipeline.
+A keyboard-driven TypeScript CLI for the FastAPI + LangGraph DAG pipeline server.
 
 ## Setup
 
@@ -22,66 +22,166 @@ Point at a different server:
 PIPELINE_BASE_URL=http://localhost:9000 npm start
 ```
 
+If the server has `API_KEYS` configured (see the server README's Auth section),
+set `PIPELINE_API_KEY` so requests aren't rejected with `401`:
+
+```bash
+PIPELINE_API_KEY=your-key npm start
+```
+
 ## Usage
 
-Type a prompt and press Enter. Prior turns in the session are automatically sent as
-conversation context, so follow-ups like "make it faster" work without repeating
-yourself.
+On startup, the CLI shows server info and picks up the server's configured
+`default_pipeline_name`. Type a prompt and press Enter to run it through the
+active pipeline. Prior turns in the session are sent as conversation context
+automatically.
 
 ### Commands
 
 | Command | Description |
 |---|---|
 | `/help` | show available commands |
-| `/health` | show current config: execution/validation modes, and every generator/validator model configured per category |
-| `/verbose` | toggle showing all candidate answers + validator votes vs. just the final answer |
-| `/reset` | clear conversation history and start fresh |
+| `/health` | show server info: pipelines directory, default pipeline, all available pipelines |
+| `/pipelines` | list every pipeline the server can run |
+| `/pipeline` | show the **active** pipeline's DAG — every node, its model, and its dependencies |
+| `/use <name>` | switch to a different pipeline (confirms it exists first; clears conversation history since a different DAG likely has different context semantics) |
+| `/verbose` | toggle showing every node's output vs. just the final answer |
+| `/reset` | clear conversation history without switching pipelines |
 | `/exit` | quit (also works: Ctrl+C or Ctrl+D) |
 
 ### Example session
 
 ```
-› Write a Kotlin function that checks if a string is a palindrome
+LLM Pipeline server
+pipelines dir:        pipelines
+default pipeline:     simple-local
 
-category: CODE   winner: ollama:qwen3-coder:30b
-router: ollama:llama3.2:3b   judge: ollama:llama3
+Available pipelines (5)
+  simple-local — Single-node, all-Ollama pipeline for quick local testing
+  consensus-qa — Multi-provider consensus for factual Q&A
+  code-review-pipeline — Plan, then implement + test in parallel, then review and merge
+  iterative-refinement — Generate, critique, and loop back to revise up to 3 times
+  support-router — Classify a support request, then route to a specialized responder
+
+Using pipeline "simple-local" — switch with /use <name>
+
+(simple-local) › /use consensus-qa
+switched to pipeline "consensus-qa" — conversation history cleared
+
+(consensus-qa) › What year did the Berlin Wall fall?
+
+pipeline: consensus-qa   took: 4.2s
 ────────────────────────────────────────────────────────
 Final answer
-fun isPalindrome(s: String): Boolean {
-    val cleaned = s.filter { it.isLetterOrDigit() }.lowercase()
-    return cleaned == cleaned.reversed()
-}
-
-› make it case-sensitive
+All three sources agree: the Berlin Wall fell on November 9, 1989.
 ```
 
-The second prompt has no explicit subject — the server receives it along with the
-first turn as context, so it knows "it" refers to the palindrome function.
+### Loops in action
 
-Toggle `/verbose` to see every candidate model's answer, validation status, and
-individual validator votes (populated when running in `multiple` validation mode).
+`iterative-refinement.yaml` shows how many times it looped back before
+settling on a final answer:
+
+```
+(consensus-qa) › /use iterative-refinement
+switched to pipeline "iterative-refinement" — conversation history cleared
+
+(iterative-refinement) › Write a one-sentence pitch for a coffee shop
+
+pipeline: iterative-refinement   took: 6.1s
+────────────────────────────────────────────────────────
+Final answer
+A cozy neighborhood coffee shop pouring meticulously sourced single-origin
+beans for people who want their morning ritual to actually taste like
+something.
+────────────────────────────────────────────────────────
+Loop iterations
+  revise_until_approved: 2 time(s)
+```
+
+### Branches in action
+
+`support-router.yaml` routes to exactly one of three responders — `/verbose`
+shows only the matching route ran, not all three:
+
+```
+(iterative-refinement) › /use support-router
+switched to pipeline "support-router" — conversation history cleared
+
+(support-router) › /verbose
+verbose mode: on
+
+(support-router) › I want a refund for my last order
+
+pipeline: support-router   took: 3.1s
+────────────────────────────────────────────────────────
+Final answer
+I'm sorry to hear that — I've started your refund request...
+────────────────────────────────────────────────────────
+Node outputs (2)
+
+classify (ollama:llama3.2:3b, 0.6s)
+  REFUND
+
+refund_flow (ollama:llama3, 2.5s)  ← output node
+  I'm sorry to hear that — I've started your refund request...
+```
+
+Notice `tech_support_flow` and `general_flow` never appear — only the route
+that actually matched executed.
+
+Toggle `/verbose` to see every node's individual output (useful for
+`consensus-qa` to see what each of the three models actually answered before
+reconciliation, or for `code-review-pipeline` to see the plan/implementation/
+tests/review stages separately):
+
+```
+(consensus-qa) › /verbose
+verbose mode: on
+
+(consensus-qa) › What year did the Berlin Wall fall?
+
+pipeline: consensus-qa   took: 4.4s
+────────────────────────────────────────────────────────
+Final answer
+All three sources agree: the Berlin Wall fell on November 9, 1989.
+────────────────────────────────────────────────────────
+Node outputs (4)
+
+answer_local (ollama:qwen3-coder:30b, 1.8s)
+  The Berlin Wall fell in 1989.
+
+answer_gpt (openai:gpt-4o, 2.1s)
+  November 9, 1989.
+
+answer_claude (anthropic:claude-sonnet-4-5, 2.3s)
+  The Berlin Wall fell on November 9, 1989.
+
+reconcile (anthropic:claude-sonnet-4-5, 4.2s)  ← output node
+  All three sources agree: the Berlin Wall fell on November 9, 1989.
+```
 
 ## Response fields
 
-Every answer now reports which model handled each pipeline tier:
+Every answer now reports:
+- `pipeline_name` — which pipeline actually served this request
+- `output_node` — which node's output became the final answer (for pipelines
+  with branches, this is whichever candidate actually resolved — see the
+  server README's notes on `output_node` as a list of candidates)
+- `node_outputs` — every node that ran, keyed by node id, each with `model_name`
+  (`provider:model`, e.g. `ollama:qwen3-coder:30b`), `output`, and `duration_ms`
+- `loop_iterations` — for pipelines using loops, how many times each loop
+  looped back before exiting (`{}` for pipelines with no loops)
 
-- `router_model` — classified the request into a category
-- `winning_model` — generated the answer the judge picked
-- `judge_model` — picked the winner among candidates
-- each candidate's `model_name` — which generator produced it
-- each vote's `validator_name` — which validator approved/rejected it
-
-Model identities are formatted as `provider:model`, e.g. `ollama:qwen3-coder:30b` or
-`openai:gpt-4o`, so it's clear at a glance which provider handled which step —
-useful once you configure a mix of Ollama/OpenAI/Anthropic/Gemini models per category
-in the server's `model_registry.py`.
+This replaces the old fixed `category`/`router_model`/`winning_model`/`judge_model`/
+`candidates`/`votes` shape from the pre-DAG design — there's no fixed set of
+tiers anymore, since a pipeline's shape is whatever its YAML defines.
 
 ## Known limitation: history isn't summarized
 
-Conversation history is sent as raw prior turns (prompt + final answer), capped by
-the server's `LLM_MAX_HISTORY_TURNS` setting. For very long conversations this means
-growing token cost per request — use `/reset` to clear it, or see the server README's
-notes on summarization as a future improvement.
+Conversation history is sent as raw prior turns, capped by the active
+pipeline's `execution.max_history_turns` (defined per-pipeline in its YAML).
+Use `/reset` to clear it, or switch pipelines with `/use` (which clears it
+automatically).
 
 ## Build a standalone binary (optional)
 

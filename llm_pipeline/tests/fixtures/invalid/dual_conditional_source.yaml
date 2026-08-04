@@ -1,0 +1,34 @@
+name: dual-conditional-source
+version: 1
+
+nodes:
+  - id: shared_source
+    depends_on: []
+    model: { provider: ollama, model: test-model }
+    prompt_template: "{{ input }}"
+
+  - id: path_a
+    depends_on: []
+    model: { provider: ollama, model: test-model }
+    prompt_template: "{{ input }}"
+
+  - id: back_target
+    depends_on: []
+    model: { provider: ollama, model: test-model }
+    prompt_template: "{{ input }}"
+
+branches:
+  - id: branch1
+    from: shared_source
+    routes:
+      - default: true
+        to: path_a
+
+loops:
+  - id: loop1
+    from: shared_source
+    back_to: back_target
+    exit_to: END
+    exit_when: 'output.startswith("APPROVE")'
+
+output_node: [path_a, back_target]

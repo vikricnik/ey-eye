@@ -7,10 +7,12 @@ import type { ConversationTurn } from "./types";
 declare global {
   interface Window {
     PIPELINE_BASE_URL?: string;
+    PIPELINE_API_KEY?: string;
   }
 }
 
 const BASE_URL: string = window.PIPELINE_BASE_URL ?? "http://localhost:8000";
+const API_KEY: string | undefined = window.PIPELINE_API_KEY; // only needed if the server has API_KEYS configured
 
 function requireElement<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id);
@@ -30,16 +32,74 @@ const statusDot = requireElement<HTMLElement>("status-dot");
 const statusText = requireElement<HTMLElement>("status-text");
 const serverUrlLabel = requireElement<HTMLElement>("server-url");
 const relayContainer = requireElement<HTMLElement>("relay");
+const pipelineSelect = requireElement<HTMLSelectElement>("pipeline-select");
 
-const client = new PipelineClient(BASE_URL);
+const client = new PipelineClient(BASE_URL, API_KEY);
 const relay = new RelayAnimator(relayContainer);
 
 let isLoading = false;
-// Conversation memory for this session — only the winning answer from each
-// turn is kept as context for the next request (losing candidates are dropped).
+let activePipelineName = "";
+// Conversation memory for this session — only the final answer from each
+// turn is kept as context for the next request; cleared whenever the
+// active pipeline changes, since a different DAG likely has different
+// context semantics.
 const history: ConversationTurn[] = [];
 
 serverUrlLabel.textContent = BASE_URL;
+
+// ---------- pipeline discovery ----------
+async function loadPipelineOptions(): Promise<void> {
+  try {
+    const { pipelines } = await client.listPipelines();
+    pipelineSelect.innerHTML = "";
+
+    if (pipelines.length === 0) {
+      const opt = document.createElement("option");
+      opt.value = "";
+      opt.textContent = "no pipelines found";
+      pipelineSelect.appendChild(opt);
+      return;
+    }
+
+    for (const p of pipelines) {
+      const opt = document.createElement("option");
+      opt.value = p.name;
+      opt.textContent = p.name;
+      opt.title = p.description;
+      pipelineSelect.appendChild(opt);
+    }
+
+    const health = await client.checkHealth();
+    const defaultName = pipelines.some((p) => p.name === health.default_pipeline_name)
+      ? health.default_pipeline_name
+      : pipelines[0]!.name;
+
+    pipelineSelect.value = defaultName;
+    await switchToPipeline(defaultName, { clearHistory: false });
+  } catch {
+    pipelineSelect.innerHTML = '<option value="">server unreachable</option>';
+  }
+}
+
+async function switchToPipeline(name: string, opts: { clearHistory: boolean }): Promise<void> {
+  activePipelineName = name;
+  if (opts.clearHistory) {
+    history.length = 0;
+  }
+
+  try {
+    const detail = await client.getPipelineDetail(name);
+    relay.setStages(detail.nodes.map((n) => n.id));
+  } catch {
+    relay.setStages([]);
+  }
+}
+
+pipelineSelect.addEventListener("change", () => {
+  void switchToPipeline(pipelineSelect.value, { clearHistory: true });
+});
+
+void loadPipelineOptions();
 
 // ---------- health check ----------
 // A self-scheduling async loop instead of setInterval: if a health check is
@@ -54,7 +114,7 @@ async function checkHealth(): Promise<void> {
   try {
     const health = await client.checkHealth();
     statusDot.className = "status-dot online";
-    statusText.textContent = `online · ${health.execution_mode} / ${health.validation_mode}`;
+    statusText.textContent = `online · ${health.available_pipelines.length} pipeline(s) available`;
   } catch {
     statusDot.className = "status-dot offline";
     statusText.textContent = "offline — is the server running?";
@@ -79,8 +139,7 @@ input.addEventListener("input", () => {
 // Note: DOM event listeners can't be awaited by their caller (the browser
 // fires them and moves on regardless), so declaring the listener itself
 // `async` and letting it run to completion internally is the idiomatic
-// async/await equivalent of a synchronous handler here — there's no `void`
-// trick needed since we're not calling out to a separate async function.
+// async/await equivalent of a synchronous handler here.
 input.addEventListener("keydown", async (e: KeyboardEvent) => {
   if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
@@ -93,9 +152,6 @@ sendBtn.addEventListener("click", async () => {
 });
 
 // ---------- reset conversation ----------
-// No async work here (just DOM/array mutation), so this stays a plain
-// synchronous handler — forcing async/await where there's nothing to await
-// would be noise, not clarity.
 resetBtn.addEventListener("click", () => {
   history.length = 0;
   transcript.innerHTML = "";
@@ -106,7 +162,7 @@ resetBtn.addEventListener("click", () => {
 // ---------- send flow ----------
 async function handleSend(): Promise<void> {
   const prompt = input.value.trim();
-  if (!prompt || isLoading) return;
+  if (!prompt || isLoading || !activePipelineName) return;
 
   input.value = "";
   input.style.height = "auto";
@@ -116,11 +172,15 @@ async function handleSend(): Promise<void> {
   emptyState.style.display = "none";
   relay.start();
 
+  const startedAt = performance.now();
+
   try {
-    const response = await client.ask(prompt, history);
+    const response = await client.ask(prompt, activePipelineName, history);
+    const elapsedMs = performance.now() - startedAt;
     relay.finish();
-    renderTurn(transcript, prompt, response, verboseToggle.checked);
-    // Only the winning answer is kept as context for the next turn.
+    renderTurn(transcript, prompt, response, verboseToggle.checked, elapsedMs);
+    // Only the final answer is kept as context for the next turn —
+    // intermediate node outputs aren't carried forward.
     history.push({ prompt, final_answer: response.final_answer });
   } catch (err) {
     relay.finish();

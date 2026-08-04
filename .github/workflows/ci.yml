@@ -1,0 +1,111 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  pipeline-server:
+    name: Python — lint, typecheck, test, validate pipelines
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: llm_pipeline
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry
+        run: pipx install poetry
+
+      - name: Cache Poetry dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pypoetry
+          key: poetry-${{ runner.os }}-${{ hashFiles('llm_pipeline/poetry.lock') }}
+
+      - name: Install dependencies
+        run: poetry install --no-interaction
+
+      - name: mypy --strict
+        run: poetry run mypy llm_pipeline/
+
+      - name: pytest
+        run: poetry run pytest -v
+
+      - name: Validate every pipeline YAML file
+        # Same check test_pipeline_config.py's test_real_pipeline_examples_are_valid
+        # runs, but as an explicit standalone step so a broken pipeline file
+        # fails CI with an unambiguous, dedicated log section rather than
+        # only showing up as one assertion among many in the pytest run.
+        run: |
+          poetry run python -c "
+          from pathlib import Path
+          from llm_pipeline.pipeline_config import load_pipeline_definition
+
+          pipelines_dir = Path('pipelines')
+          failures = []
+          for yaml_path in sorted(pipelines_dir.glob('*.yaml')):
+              try:
+                  definition = load_pipeline_definition(yaml_path)
+                  print(f'OK: {yaml_path.name} -> {definition.name}')
+              except Exception as e:
+                  failures.append((yaml_path.name, e))
+                  print(f'FAILED: {yaml_path.name} -> {e}')
+
+          if failures:
+              raise SystemExit(f'{len(failures)} pipeline(s) failed validation')
+          "
+
+  cli-client:
+    name: CLI client — typecheck
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cli
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: cli/package-lock.json
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: TypeScript check
+        run: npx tsc --noEmit
+
+  web-client:
+    name: Web client — typecheck
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: TypeScript check
+        run: npx tsc --noEmit

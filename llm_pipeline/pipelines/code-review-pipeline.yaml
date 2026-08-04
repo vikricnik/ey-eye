@@ -1,0 +1,54 @@
+name: code-review-pipeline
+description: Plan, then implement + test in parallel, then review and merge
+version: 1
+
+execution:
+  model_timeout_seconds: 90
+  max_history_turns: 4
+
+nodes:
+  - id: plan
+    depends_on: []
+    model: { provider: ollama, model: llama3.2:3b, temperature: 0.0 }
+    prompt_template: |
+      Break this coding request into a short plan: what needs to be built,
+      key edge cases, and what should be tested.
+
+      Request: {{ input }}
+
+  - id: implement
+    depends_on: [plan]
+    model: { provider: openai, model: gpt-4o, temperature: 0.2 }
+    prompt_template: |
+      Plan: {{ plan.output }}
+
+      Original request: {{ input }}
+
+      Write the implementation. Code only, with brief inline comments.
+
+  - id: write_tests
+    depends_on: [plan]
+    model: { provider: ollama, model: qwen3-coder:30b, temperature: 0.2 }
+    prompt_template: |
+      Plan: {{ plan.output }}
+
+      Original request: {{ input }}
+
+      Write test cases covering the plan's edge cases. Don't wait for an
+      implementation — write tests against the expected interface/behavior.
+
+  - id: review
+    depends_on: [implement, write_tests]
+    model: { provider: anthropic, model: claude-sonnet-4-5, temperature: 0.0 }
+    prompt_template: |
+      Implementation:
+      {{ implement.output }}
+
+      Tests:
+      {{ write_tests.output }}
+
+      Review both together. Check the tests actually cover the implementation's
+      behavior, flag any bugs or mismatches, and produce the final combined
+      output: implementation + tests + a one-paragraph review summary.
+
+output_node: review

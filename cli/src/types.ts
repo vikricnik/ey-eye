@@ -5,42 +5,70 @@ export interface ConversationTurn {
 
 export interface AskRequest {
   prompt: string;
+  pipeline_name: string;
   history: ConversationTurn[];
 }
 
-export interface ValidatorVote {
-  validator_name: string;
-  is_valid: boolean;
-  feedback: string | null;
-}
-
-export interface Candidate {
+export interface NodeOutput {
+  node_id: string;
   model_name: string;
-  answer: string;
-  is_valid: boolean;
-  feedback: string | null;
-  votes: ValidatorVote[];
+  output: string;
+  duration_ms: number;
 }
 
 export interface AskResponse {
-  category: string;
+  pipeline_name: string;
+  output_node: string; // whichever output_node candidate actually resolved
   final_answer: string;
-  winning_model: string;
-  router_model: string;
-  judge_model: string;
-  candidates: Candidate[];
+  node_outputs: Record<string, NodeOutput>;
+  loop_iterations: Record<string, number>;
+}
+
+export interface PipelineSummary {
+  name: string;
+  description: string;
+  filename: string;
+}
+
+export interface PipelineNodeInfo {
+  id: string;
+  type: string;
+  depends_on: string[];
+  model: string;
+}
+
+export interface PipelineBranchInfo {
+  id: string;
+  from: string;
+  routes: string[];
+}
+
+export interface PipelineLoopInfo {
+  id: string;
+  from: string;
+  back_to: string;
+  exit_to: string;
+  max_iterations: number;
+}
+
+export interface PipelineDetail {
+  name: string;
+  description: string;
+  // One or more candidates — only ONE actually resolves per request once
+  // branches mean mutually exclusive terminal nodes.
+  output_node_candidates: string[];
+  nodes: PipelineNodeInfo[];
+  branches: PipelineBranchInfo[];
+  loops: PipelineLoopInfo[];
 }
 
 export interface HealthResponse {
   status: string;
-  execution_mode: string;
-  generation_collaboration: string;
-  validation_mode: string;
-  validation_quorum: number;
-  validation_concurrency: string;
-  max_history_turns: number;
-  router_model: string;
-  judge_model: string;
-  generators_by_category: Record<string, string[]>;
-  validators_by_category: Record<string, string[]>;
+  pipelines_dir: string;
+  default_pipeline_name: string;
+  available_pipelines: PipelineSummary[];
+}
+
+export interface PipelinesListResponse {
+  pipelines: PipelineSummary[];
 }

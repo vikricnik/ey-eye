@@ -1,7 +1,8 @@
 # LLM Pipeline — Web Client (TypeScript + Vite)
 
-A typed, modular web client for the FastAPI + LangGraph pipeline. HTML, CSS, and
-TypeScript are kept in separate files; Vite handles bundling and dev-server hot reload.
+A typed, modular web client for the FastAPI + LangGraph DAG pipeline server.
+HTML, CSS, and TypeScript are kept in separate files; Vite handles bundling
+and dev-server hot reload.
 
 ## Project structure
 
@@ -13,10 +14,10 @@ web/
 └── src/
     ├── style.css        # all styling
     ├── types.ts         # shared types matching the FastAPI response schema
-    ├── apiClient.ts     # typed fetch wrapper for /health and /ask, sends conversation history
-    ├── relayAnimator.ts # pipeline-stage indicator animation
-    ├── render.ts         # DOM rendering (transcript entries, candidates, errors)
-    └── main.ts           # entry point — wires everything together, conversation memory
+    ├── apiClient.ts     # typed fetch wrapper: /health, /pipelines, /ask
+    ├── relayAnimator.ts # builds & animates stage indicators dynamically per pipeline
+    ├── render.ts         # DOM rendering (transcript entries, node outputs, errors)
+    └── main.ts           # entry point — pipeline picker, conversation memory, event wiring
 ```
 
 ## Setup
@@ -50,31 +51,78 @@ the `<script type="module" src="/src/main.ts">` line:
 <script>window.PIPELINE_BASE_URL = "http://localhost:9000";</script>
 ```
 
+If the server has `API_KEYS` configured (see the server README's Auth
+section), set `window.PIPELINE_API_KEY` the same way:
+
+```html
+<script>window.PIPELINE_API_KEY = "your-key";</script>
+```
+
+⚠️ Anything set here is visible to anyone with browser devtools — this is a
+"shared team secret" pattern suitable for an internal tool already behind
+its own access control (VPN, internal network, etc.), **not** a real
+security boundary for a public-facing deployment.
+
 ## ⚠️ CORS — required server-side change
 
-This client runs in a browser, so the FastAPI server needs CORS enabled. The server
-in this monorepo already has it configured via `CORS_ALLOWED_ORIGINS` in `.env` — see
-the root README and `llm_pipeline/.env.example`.
+This client runs in a browser, so the FastAPI server needs CORS enabled —
+already configured server-side via `CORS_ALLOWED_ORIGINS` in `.env`.
 
 ## Features
 
+- **Pipeline picker** in the header — populated from `GET /pipelines` on load,
+  defaults to the server's `default_pipeline_name`. Switching pipelines clears
+  conversation history automatically, since a different DAG shape likely has
+  different context semantics.
 - Type a prompt, press **Enter** to send (**Shift+Enter** for a newline)
-- Live health indicator in the header (polls `/health` every 15s)
-- A "relay track" animates through Route → Generate → Validate → Judge while a request
-  is in flight — client-side pacing only, since the API returns one JSON response
-  rather than streamed per-stage events; it snaps to complete the moment the real
-  response lands
-- **Conversation memory** — prior turns in the session are sent as context with each
-  request, so follow-ups like "make it faster" work without repeating yourself.
-  Click **"reset conversation"** to clear history and start fresh.
-- **"show all candidates"** checkbox reveals every generator's answer, validation
-  status, and individual validator votes
-- Every response shows which model handled routing (`router`), which generated the
-  winning answer (`winner`), and which judged the candidates (`judge`) — formatted as
-  `provider:model`, e.g. `ollama:qwen3-coder:30b`
+- Live health indicator in the header (self-scheduling async poll every 15s —
+  not `setInterval`, so a slow health check can't cause overlapping requests)
+- A **dynamic relay track** shows the active pipeline's actual node list
+  (fetched from `GET /pipelines/{name}`) and animates through them while a
+  request is in flight. This is client-side pacing only — the API returns a
+  single JSON response rather than streamed per-node events — so once the
+  last node is reached, its indicator keeps pulsing indefinitely (rather than
+  freezing) until the real response arrives, however long that takes.
+- **Conversation memory** — prior turns in the session are sent as context.
+  Click **"reset conversation"** to clear it manually.
+- **"show all node outputs"** checkbox reveals every node's output and which
+  model produced it, alongside its execution time.
+- Every response shows `pipeline_name`, `output_node`, how long the whole run
+  took, and (for pipelines using loops, like `iterative-refinement.yaml`) how
+  many times each loop looped back before exiting.
+- Pipelines using **branches** (like `support-router.yaml`) only ever show the
+  node(s) that actually ran for that request — the routes that weren't taken
+  never appear, since they never executed.
+
+## Response fields
+
+This client renders the DAG-based response shape:
+
+```json
+{
+  "pipeline_name": "consensus-qa",
+  "output_node": "reconcile",
+  "final_answer": "...",
+  "node_outputs": {
+    "answer_local": { "node_id": "answer_local", "model_name": "ollama:qwen3-coder:30b", "output": "...", "duration_ms": 1820 },
+    "answer_gpt": { "node_id": "answer_gpt", "model_name": "openai:gpt-4o", "output": "...", "duration_ms": 2140 },
+    "reconcile": { "node_id": "reconcile", "model_name": "anthropic:claude-sonnet-4-5", "output": "...", "duration_ms": 4230 }
+  },
+  "loop_iterations": {}
+}
+```
+
+`loop_iterations` maps each loop id to how many times it looped back — `{}`
+for pipelines with no loops, populated for pipelines like
+`iterative-refinement.yaml`.
+
+This replaces the old fixed `category`/`router_model`/`winner_model`/`judge_model`/
+`candidates`/`votes` shape from the pre-DAG design — there's no fixed set of
+pipeline tiers anymore, since a pipeline's shape is whatever its YAML defines.
 
 ## Known limitation: history isn't summarized
 
-History is sent as raw prior turns, capped server-side by `LLM_MAX_HISTORY_TURNS`.
-Long conversations mean growing token cost per request — use "reset conversation" to
-clear it, or see the server README's notes on summarization as a future improvement.
+History is sent as raw prior turns, capped server-side by the active
+pipeline's `execution.max_history_turns` (set per-pipeline in its YAML). Long
+conversations mean growing token cost per request — use "reset conversation"
+or switch pipelines to clear it.

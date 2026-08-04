@@ -43,6 +43,28 @@ header {
   background: var(--panel);
 }
 
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.pipeline-select {
+  background: var(--panel-raised);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 6px 10px;
+  cursor: pointer;
+  max-width: 220px;
+}
+.pipeline-select:focus {
+  outline: none;
+  border-color: var(--accent-dim);
+}
+
 .title-block {
   display: flex;
   align-items: baseline;

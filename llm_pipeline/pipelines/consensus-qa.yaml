@@ -1,0 +1,40 @@
+name: consensus-qa
+description: Multi-provider consensus for factual Q&A — three models answer independently, one reconciles
+version: 1
+
+execution:
+  model_timeout_seconds: 45
+  max_history_turns: 6
+
+nodes:
+  - id: answer_local
+    depends_on: []
+    model: { provider: ollama, model: qwen3-coder:30b, temperature: 0.1 }
+    prompt_template: "Answer this question accurately and concisely: {{ input }}"
+
+  - id: answer_gpt
+    depends_on: []
+    model: { provider: openai, model: gpt-4o, temperature: 0.1 }
+    prompt_template: "Answer this question accurately and concisely: {{ input }}"
+
+  - id: answer_claude
+    depends_on: []
+    model: { provider: anthropic, model: claude-sonnet-4-5, temperature: 0.1 }
+    prompt_template: "Answer this question accurately and concisely: {{ input }}"
+
+  - id: reconcile
+    depends_on: [answer_local, answer_gpt, answer_claude]
+    model: { provider: anthropic, model: claude-sonnet-4-5, temperature: 0.0 }
+    prompt_template: |
+      Question: {{ input }}
+
+      Three independent answers were given:
+      1 (local model): {{ answer_local.output }}
+      2 (GPT-4o): {{ answer_gpt.output }}
+      3 (Claude): {{ answer_claude.output }}
+
+      If they agree, confirm the answer. If they disagree, identify the
+      discrepancy explicitly and state which is most likely correct and why.
+      Give one final, authoritative answer.
+
+output_node: reconcile

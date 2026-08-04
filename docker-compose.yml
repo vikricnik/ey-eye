@@ -1,0 +1,41 @@
+services:
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+    # Match this to how many Ollama-backed nodes might run concurrently
+    # across your pipelines (see llm_pipeline/README.md) — e.g.
+    # consensus-qa.yaml has 3 parallel Ollama-backed root nodes.
+    environment:
+      OLLAMA_MAX_LOADED_MODELS: "3"
+
+  pipeline-server:
+    build:
+      context: ./llm_pipeline
+      dockerfile: Dockerfile
+      # Uncomment to bake in cloud provider support:
+      # args:
+      #   POETRY_EXTRAS: "openai anthropic gemini"
+    ports:
+      - "8000:8000"
+    environment:
+      OLLAMA_BASE_URL: "http://ollama:11434"
+      PIPELINES_DIR: "pipelines"
+      DEFAULT_PIPELINE_NAME: "simple-local"
+      CORS_ALLOWED_ORIGINS: "*"
+      # Set a real value before exposing this beyond localhost — see
+      # llm_pipeline/.env.example for the full auth explanation.
+      API_KEYS: ""
+      RATE_LIMIT_REQUESTS_PER_MINUTE: "60"
+      VALIDATE_PIPELINES_ON_STARTUP: "true"
+      # Uncomment and set if any pipeline YAML references cloud providers:
+      # OPENAI_API_KEY: ""
+      # ANTHROPIC_API_KEY: ""
+      # GOOGLE_API_KEY: ""
+    depends_on:
+      - ollama
+
+volumes:
+  ollama-models:

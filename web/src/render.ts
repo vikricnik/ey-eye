@@ -1,4 +1,4 @@
-import type { AskResponse, Candidate, ValidatorVote } from "./types";
+import type { AskResponse, NodeOutput } from "./types";
 
 function escapeHtml(str: string): string {
   const div = document.createElement("div");
@@ -6,35 +6,23 @@ function escapeHtml(str: string): string {
   return div.innerHTML;
 }
 
-function renderVoteRow(vote: ValidatorVote): string {
-  const icon = vote.is_valid ? "✓" : "✗";
-  const feedback = vote.feedback
-    ? `<span>— ${escapeHtml(vote.feedback.slice(0, 90))}</span>`
-    : "";
-  return `
-    <div class="vote-row">
-      <span>${icon}</span>
-      <span class="vname">${escapeHtml(vote.validator_name)}</span>
-      ${feedback}
-    </div>
-  `;
+export function formatDuration(ms: number): string {
+  if (ms < 1000) {
+    return `${Math.round(ms)}ms`;
+  }
+  return `${(ms / 1000).toFixed(1)}s`;
 }
 
-function renderCandidate(candidate: Candidate, winningModel: string): string {
-  const isWinner = candidate.model_name === winningModel;
-  const votesHtml = candidate.votes.map(renderVoteRow).join("");
-
+function renderNode(nodeId: string, node: NodeOutput, isOutputNode: boolean): string {
   return `
-    <div class="candidate ${isWinner ? "winner" : ""}">
+    <div class="candidate ${isOutputNode ? "winner" : ""}">
       <div class="candidate-header">
-        <span class="model-name">${escapeHtml(candidate.model_name)}</span>
-        <span class="badge ${candidate.is_valid ? "valid" : "invalid"}">
-          ${candidate.is_valid ? "valid" : "invalid"}
-        </span>
-        ${isWinner ? '<span class="badge winner-badge">chosen</span>' : ""}
+        <span class="model-name">${escapeHtml(nodeId)}</span>
+        <span class="badge valid">${escapeHtml(node.model_name)}</span>
+        <span class="badge valid">${formatDuration(node.duration_ms)}</span>
+        ${isOutputNode ? '<span class="badge winner-badge">output node</span>' : ""}
       </div>
-      <div class="candidate-answer">${escapeHtml(candidate.answer)}</div>
-      ${votesHtml ? `<div class="votes">${votesHtml}</div>` : ""}
+      <div class="candidate-answer">${escapeHtml(node.output)}</div>
     </div>
   `;
 }
@@ -43,32 +31,46 @@ export function renderTurn(
   transcript: HTMLElement,
   prompt: string,
   response: AskResponse,
-  verbose: boolean
+  verbose: boolean,
+  elapsedMs: number
 ): void {
   const turn = document.createElement("div");
   turn.className = "turn";
 
-  const showCandidates = verbose && response.candidates.length > 1;
-  const candidatesHtml = showCandidates
-    ? `
-      <div class="candidates">
-        <div class="candidates-label">All candidates (${response.candidates.length})</div>
-        ${response.candidates.map((c) => renderCandidate(c, response.winning_model)).join("")}
-      </div>
-    `
-    : "";
+  const nodeIds = Object.keys(response.node_outputs);
+  const nodesHtml =
+    verbose && nodeIds.length > 0
+      ? `
+        <div class="candidates">
+          <div class="candidates-label">Node outputs (${nodeIds.length})</div>
+          ${nodeIds
+            .map((id) =>
+              renderNode(id, response.node_outputs[id]!, id === response.output_node)
+            )
+            .join("")}
+        </div>
+      `
+      : "";
+
+  const loopIds = Object.keys(response.loop_iterations);
+  const loopTags = loopIds
+    .map(
+      (id) =>
+        `<span class="tag">${escapeHtml(id)}: <b>${response.loop_iterations[id]}× looped</b></span>`
+    )
+    .join("");
 
   turn.innerHTML = `
     <div class="turn-prompt"><span class="marker">›</span><span>${escapeHtml(prompt)}</span></div>
     <div class="turn-response">
       <div class="turn-meta">
-        <span class="tag">category: <b>${escapeHtml(response.category)}</b></span>
-        <span class="tag">winner: <b>${escapeHtml(response.winning_model)}</b></span>
-        <span class="tag">router: <b>${escapeHtml(response.router_model)}</b></span>
-        <span class="tag">judge: <b>${escapeHtml(response.judge_model)}</b></span>
+        <span class="tag">pipeline: <b>${escapeHtml(response.pipeline_name)}</b></span>
+        <span class="tag">output node: <b>${escapeHtml(response.output_node)}</b></span>
+        <span class="tag">took: <b>${escapeHtml(formatDuration(elapsedMs))}</b></span>
+        ${loopTags}
       </div>
       <div class="final-answer">${escapeHtml(response.final_answer)}</div>
-      ${candidatesHtml}
+      ${nodesHtml}
     </div>
   `;
 

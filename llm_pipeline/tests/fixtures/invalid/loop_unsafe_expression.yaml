@@ -1,0 +1,22 @@
+name: loop-unsafe-expression
+version: 1
+
+nodes:
+  - id: generate
+    depends_on: []
+    model: { provider: ollama, model: test-model }
+    prompt_template: "{{ input }}"
+
+  - id: critique
+    depends_on: [generate]
+    model: { provider: ollama, model: test-model }
+    prompt_template: "{{ generate.output }}"
+
+loops:
+  - id: loop1
+    from: critique
+    back_to: generate
+    exit_to: END
+    exit_when: '__import__("os").system("echo pwned")'
+
+output_node: generate

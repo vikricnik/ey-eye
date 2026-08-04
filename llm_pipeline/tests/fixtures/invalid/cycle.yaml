@@ -1,0 +1,15 @@
+name: has-cycle
+version: 1
+
+nodes:
+  - id: A
+    depends_on: [B]
+    model: { provider: ollama, model: test-model }
+    prompt_template: "{{ B.output }}"
+
+  - id: B
+    depends_on: [A]
+    model: { provider: ollama, model: test-model }
+    prompt_template: "{{ A.output }}"
+
+output_node: B

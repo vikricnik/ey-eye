@@ -1,0 +1,15 @@
+name: unresolved-reference
+version: 1
+
+nodes:
+  - id: A
+    depends_on: []
+    model: { provider: ollama, model: test-model }
+    prompt_template: "{{ input }}"
+
+  - id: B
+    depends_on: []
+    model: { provider: ollama, model: test-model }
+    prompt_template: "{{ A.output }}"
+
+output_node: B

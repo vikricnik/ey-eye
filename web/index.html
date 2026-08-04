@@ -16,26 +16,26 @@
       <h1>LLM Pipeline</h1>
       <span class="subtitle" id="server-url"></span>
     </div>
-    <div class="status">
-      <span class="status-dot" id="status-dot"></span>
-      <span id="status-text">connecting…</span>
+    <div class="header-right">
+      <select id="pipeline-select" class="pipeline-select" aria-label="Active pipeline">
+        <option value="">loading pipelines…</option>
+      </select>
+      <div class="status">
+        <span class="status-dot" id="status-dot"></span>
+        <span id="status-text">connecting…</span>
+      </div>
     </div>
   </header>
 
-  <div class="relay" id="relay">
-    <div class="relay-stage" data-stage="route"><span class="dot"></span><span>Route</span></div>
-    <div class="relay-line"></div>
-    <div class="relay-stage" data-stage="generate"><span class="dot"></span><span>Generate</span></div>
-    <div class="relay-line"></div>
-    <div class="relay-stage" data-stage="validate"><span class="dot"></span><span>Validate</span></div>
-    <div class="relay-line"></div>
-    <div class="relay-stage" data-stage="judge"><span class="dot"></span><span>Judge</span></div>
-  </div>
+  <!-- Stage indicators are built dynamically per active pipeline's node
+       list (see relayAnimator.ts) — a DAG's shape varies per pipeline, so
+       there's no fixed set of stages to hardcode here anymore. -->
+  <div class="relay" id="relay"></div>
 
   <main id="transcript">
     <div class="empty-state" id="empty-state">
       Type a prompt below and press <span class="accent">Enter</span> to send it through the
-      pipeline — router, generators, validators, and judge, in sequence.
+      active pipeline's DAG of nodes.
     </div>
   </main>
 
@@ -52,7 +52,7 @@
       <div class="footer-right">
         <label class="toggle">
           <input type="checkbox" id="verbose-toggle" />
-          show all candidates
+          show all node outputs
         </label>
         <button id="reset-btn" class="reset-link">reset conversation</button>
       </div>
