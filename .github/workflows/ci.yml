@@ -8,7 +8,7 @@ on:
 
 jobs:
   pipeline-server:
-    name: Python — lint, typecheck (mypy + pyright), test, validate pipelines
+    name: Python — lint (ruff), typecheck (mypy + pyright), test, validate pipelines
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -33,6 +33,17 @@ jobs:
 
       - name: Install dependencies
         run: poetry install --no-interaction
+
+      - name: ruff check
+        # Runs first and fast — catches unused imports, import-order
+        # issues, and common bug-prone patterns (flake8-bugbear) before
+        # spending time on the two slower type checkers below. Not a
+        # replacement for mypy/pyright: ruff's own annotation-completeness
+        # rules (ANN) are deliberately excluded from this project's config
+        # since mypy --strict and pyright already cover that far more
+        # thoroughly — ruff here is for everything neither type checker
+        # looks at (import hygiene, common bug patterns, style).
+        run: poetry run ruff check .
 
       - name: mypy --strict
         run: poetry run mypy llm_pipeline/

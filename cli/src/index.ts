@@ -22,6 +22,7 @@ ${chalk.bold("Commands:")}
   ${chalk.yellow("/pipeline")}          show the active pipeline's DAG (nodes + edges)
   ${chalk.yellow("/use <name>")}         switch pipelines (clears conversation history)
   ${chalk.yellow("/verbose")}           toggle showing every node's output vs. just the final answer
+  ${chalk.yellow("/stream")}            toggle streaming node-by-node progress as the pipeline runs
   ${chalk.yellow("/reset")}             clear conversation history (start fresh)
   ${chalk.yellow("/exit")}              quit (also: Ctrl+C or Ctrl+D)
 
@@ -35,6 +36,7 @@ turns in this session included as conversation context.
 async function main(): Promise<void> {
   const client = new PipelineClient(BASE_URL, API_KEY);
   let verbose = false;
+  let streaming = false;
   let activePipeline: string;
   const history: ConversationTurn[] = [];
 
@@ -84,6 +86,12 @@ async function main(): Promise<void> {
     if (trimmed === "/verbose") {
       verbose = !verbose;
       console.log(chalk.gray(`verbose mode: ${verbose ? "on" : "off"}\n`));
+      continue;
+    }
+
+    if (trimmed === "/stream") {
+      streaming = !streaming;
+      console.log(chalk.gray(`streaming mode: ${streaming ? "on" : "off"}\n`));
       continue;
     }
 
@@ -145,7 +153,11 @@ async function main(): Promise<void> {
       continue;
     }
 
-    await handlePrompt(client, trimmed, activePipeline, verbose, history);
+    if (streaming) {
+      await handlePromptStreaming(client, trimmed, activePipeline, verbose, history);
+    } else {
+      await handlePrompt(client, trimmed, activePipeline, verbose, history);
+    }
   }
 
   rl.close();
@@ -175,6 +187,66 @@ async function handlePrompt(
   } catch (err) {
     stopSpinner(spinner);
     printError(err);
+  }
+}
+
+/**
+ * Streaming variant — prints each graph node's result as soon as it
+ * completes rather than waiting for the whole pipeline to finish. Node-level
+ * progress, not token-level: for a single-node pipeline this looks
+ * basically identical to non-streaming mode (one node, one line, then the
+ * final answer); the difference shows for multi-node pipelines like
+ * consensus-qa or code-review-pipeline, where you see each independent
+ * generator finish as it happens rather than staring at one spinner until
+ * the slowest of them all completes.
+ */
+async function handlePromptStreaming(
+  client: PipelineClient,
+  prompt: string,
+  pipelineName: string,
+  verbose: boolean,
+  history: ConversationTurn[]
+): Promise<void> {
+  const startedAt = Date.now();
+  console.log();
+
+  let finalAnswer: string | undefined;
+
+  try {
+    for await (const event of client.askStream(prompt, pipelineName, history)) {
+      if (event.type === "node_complete") {
+        const { node } = event.data;
+        const seconds = (node.duration_ms / 1000).toFixed(1);
+        console.log(
+          chalk.green("✓ ") +
+            chalk.bold(node.node_id) +
+            chalk.gray(` (${node.model_name}, ${seconds}s)`)
+        );
+        if (verbose) {
+          console.log(`  ${node.output}\n`);
+        }
+      } else if (event.type === "loop_iteration") {
+        console.log(
+          chalk.gray(`↻ ${event.data.loop_id} — starting iteration ${event.data.iteration}`)
+        );
+      } else if (event.type === "done") {
+        finalAnswer = event.data.final_answer;
+      }
+    }
+  } catch (err) {
+    printError(err);
+    return;
+  }
+
+  const elapsedMs = Date.now() - startedAt;
+  console.log();
+  console.log(chalk.bold.cyan("Final answer"));
+  console.log(finalAnswer ?? chalk.yellow("(stream ended without a final answer)"));
+  console.log(chalk.gray(`(${(elapsedMs / 1000).toFixed(1)}s total)`));
+  console.log();
+
+  if (finalAnswer !== undefined) {
+    history.push({ prompt, final_answer: finalAnswer });
   }
 }
 

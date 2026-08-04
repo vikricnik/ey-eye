@@ -224,6 +224,23 @@ main {
   word-wrap: break-word;
 }
 
+/* Streaming turn placeholder state — before finish() fills in the real
+   summary/final-answer, shown while node_complete events are still
+   arriving. */
+.turn-meta-pending .tag {
+  font-style: italic;
+  opacity: 0.7;
+}
+.final-answer-pending {
+  min-height: 1.2em;
+}
+.final-answer-pending::before {
+  content: "waiting for the final node…";
+  color: var(--text-faint);
+  font-size: 12px;
+  font-style: italic;
+}
+
 .error-banner {
   background: rgba(248, 113, 113, 0.08);
   border: 1px solid rgba(248, 113, 113, 0.3);

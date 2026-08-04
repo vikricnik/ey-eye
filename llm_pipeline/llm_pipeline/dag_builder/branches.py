@@ -1,10 +1,9 @@
 from collections.abc import Hashable
-
 from langgraph.graph import StateGraph
 
-from llm_pipeline.dag_builder.node_types import RouterCallable
 from llm_pipeline.pipeline_config import BranchConfig, BranchRoute
 from llm_pipeline.safe_eval import evaluate_condition
+from llm_pipeline.dag_builder.node_types import RouterCallable
 from llm_pipeline.state import PipelineState
 
 

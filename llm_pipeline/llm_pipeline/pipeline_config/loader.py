@@ -1,9 +1,8 @@
 from pathlib import Path
-
 import yaml
 
-from llm_pipeline.api_schemas import PipelineSummary
 from llm_pipeline.pipeline_config.schema import PipelineDefinition
+from llm_pipeline.api_schemas import PipelineSummary
 
 
 def load_pipeline_definition(path: Path) -> PipelineDefinition:
@@ -22,7 +21,7 @@ def list_available_pipelines(directory: Path) -> list[PipelineSummary]:
     for yaml_path in sorted(directory.glob("*.yaml")):
         try:
             definition = load_pipeline_definition(yaml_path)
-        except Exception:  # noqa: BLE001
+        except Exception:
             continue
         results.append(
             PipelineSummary(

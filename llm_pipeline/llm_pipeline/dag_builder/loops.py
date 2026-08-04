@@ -1,16 +1,11 @@
 from collections.abc import Hashable
+from langgraph.graph import StateGraph, END
 
-from langgraph.graph import END, StateGraph
-
-from llm_pipeline.dag_builder.node_types import (
-    LoopIncrementCallable,
-    NodeCallable,
-    RouterCallable,
-)
-from llm_pipeline.errors import PipelineExecutionError
 from llm_pipeline.pipeline_config import LoopConfig
 from llm_pipeline.safe_eval import evaluate_condition
-from llm_pipeline.state import NodeResult, PipelineState
+from llm_pipeline.errors import PipelineExecutionError
+from llm_pipeline.dag_builder.node_types import NodeCallable, RouterCallable, LoopIncrementCallable
+from llm_pipeline.state import PipelineState, NodeResult
 
 
 def _make_loop_router(loop: LoopConfig) -> RouterCallable:

@@ -289,9 +289,11 @@ for the full reasoning on each:
 - **Dynamic map-reduce fan-out** (run a node once per item in a runtime list)
 - **Non-LLM node types** (retrieval, tool execution, human-approval gates —
   the `type` field exists now so adding these later isn't a breaking change)
-- **Streaming** `/ask` responses (currently one JSON blob at the end; both
-  clients' progress indicators are best-effort client-side pacing, not real
-  per-node events)
+- **Token-level streaming** from each individual LLM call — node-level
+  streaming (`POST /ask/stream`, both clients have a streaming toggle) is
+  implemented; per-token streaming within a single node would mean every
+  provider adapter implementing its own streaming API individually, a
+  larger separate undertaking
 
 ## Deployment notes
 

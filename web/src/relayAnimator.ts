@@ -55,10 +55,11 @@ export class RelayAnimator {
 
   /**
    * Starts a best-effort visual pace through the current stage list.
-   * This is client-side pacing only — the API returns a single JSON
-   * response rather than streamed per-node progress events, and with an
-   * arbitrary DAG shape (unlike the old fixed 4 tiers) there's no way to
-   * know real parallel-vs-sequential timing from the client side alone.
+   * This is client-side pacing only — used as a fallback for non-streaming
+   * requests, where the API returns a single JSON response rather than
+   * per-node progress events, so there's no way to know real parallel-vs-
+   * sequential timing from the client side alone. Prefer startReal() +
+   * markComplete() when streaming is available — see main.ts.
    *
    * Once the last stage is reached, it stays "active" (and thus pulsing via
    * the CSS `infinite` keyframe) indefinitely, for however long the actual
@@ -92,6 +93,47 @@ export class RelayAnimator {
 
     advance();
     this.timer = window.setInterval(advance, 1400);
+  }
+
+  /**
+   * Starts REAL progress tracking, driven by actual node_complete SSE
+   * events rather than a simulated timer — call this instead of start()
+   * when using askStream(). Marks the first stage active and waits for
+   * markComplete() calls to drive the rest; no timer runs.
+   */
+  startReal(): void {
+    this.reset();
+    if (this.stageIds.length === 0) {
+      return;
+    }
+    const first = this.stageEl(this.stageIds[0]!);
+    first?.classList.add("active");
+  }
+
+  /**
+   * Marks one specific stage complete in response to a real node_complete
+   * event, and activates the next not-yet-complete stage in the (fixed,
+   * left-to-right) display order. This is a visual approximation, not a
+   * true DAG renderer — parallel nodes and branches don't have one
+   * "correct" linear order, so stages simply complete in whatever order
+   * their node_complete events actually arrive, which for a genuinely
+   * parallel pipeline (e.g. consensus-qa's three independent roots) may
+   * not match their left-to-right display position. Good enough as a
+   * progress indicator; not a claim about true execution topology.
+   */
+  markComplete(stageId: string): void {
+    const el = this.stageEl(stageId);
+    if (!el) return;
+    el.classList.remove("active");
+    el.classList.add("complete");
+
+    const next = this.stageIds.find((id) => {
+      const candidate = this.stageEl(id);
+      return candidate && !candidate.classList.contains("complete");
+    });
+    if (next) {
+      this.stageEl(next)?.classList.add("active");
+    }
   }
 
   /** Snaps all stages to "complete" the moment the real response arrives. */

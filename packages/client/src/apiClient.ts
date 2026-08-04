@@ -2,6 +2,7 @@ import type {
   ApiErrorBody,
   AskRequest,
   AskResponse,
+  AskStreamEvent,
   ConversationTurn,
   HealthResponse,
   PipelineDetail,
@@ -37,6 +38,26 @@ async function buildApiError(response: Response): Promise<PipelineApiError> {
     // an error.
     return new PipelineApiError(fallbackMessage, response.status);
   }
+}
+
+/**
+ * Parses one raw SSE event block (everything between two "\n\n" separators)
+ * into its `event:` type and `data:` payload. Returns null for a block with
+ * no data line (SSE allows comment-only or keep-alive blocks, which carry
+ * no `data:` line — safe to ignore rather than treat as malformed).
+ */
+function parseSseEvent(raw: string): { event: string; data: string } | null {
+  let event = "message"; // SSE spec default when no explicit `event:` line is present
+  const dataLines: string[] = [];
+  for (const line of raw.split("\n")) {
+    if (line.startsWith("event:")) {
+      event = line.slice("event:".length).trim();
+    } else if (line.startsWith("data:")) {
+      dataLines.push(line.slice("data:".length).trim());
+    }
+  }
+  if (dataLines.length === 0) return null;
+  return { event, data: dataLines.join("\n") };
 }
 
 /**
@@ -120,5 +141,103 @@ export class PipelineClient {
     }
 
     return (await response.json()) as AskResponse;
+  }
+
+  /**
+   * Streaming variant of ask() — yields one event per graph node as it
+   * completes (node-level streaming, not token-level; see the server's
+   * routers/ask.py docstring for why). Browser's native EventSource only
+   * supports GET requests, so this parses Server-Sent Events manually from
+   * fetch()'s streaming response body instead — works identically in
+   * Node.js (CLI) and browsers (web client).
+   *
+   * Throws PipelineApiError for both pre-stream failures (auth, rate
+   * limit, pipeline not found — same as ask()) AND mid-stream execution
+   * failures (the server sends an `error` SSE event in that case, which
+   * this method converts into a thrown error rather than yielding it as a
+   * normal event — see AskStreamEvent's doc comment for why).
+   */
+  async *askStream(
+    prompt: string,
+    pipelineName: string,
+    history: ConversationTurn[] = []
+  ): AsyncGenerator<AskStreamEvent, void, undefined> {
+    const body: AskRequest = { prompt, pipeline_name: pipelineName, history };
+
+    let response: Response;
+    try {
+      response = await fetch(`${this.baseUrl}/ask/stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...this.authHeaders() },
+        body: JSON.stringify(body),
+      });
+    } catch {
+      throw new PipelineApiError(
+        `Could not reach pipeline server at ${this.baseUrl}. Is it running?`
+      );
+    }
+
+    if (!response.ok) {
+      // Pre-stream errors (400/401/404/422/429) arrive as a normal JSON
+      // error body, not an SSE stream — same shape buildApiError already
+      // handles for ask().
+      throw await buildApiError(response);
+    }
+
+    if (!response.body) {
+      throw new PipelineApiError("Streaming response had no body");
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        // SSE events are separated by a blank line.
+        let boundary: number;
+        while ((boundary = buffer.indexOf("\n\n")) !== -1) {
+          const rawEvent = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + 2);
+          const parsed = parseSseEvent(rawEvent);
+          if (!parsed) continue;
+
+          if (parsed.event === "error") {
+            const errBody = JSON.parse(parsed.data) as Partial<ApiErrorBody>;
+            throw new PipelineApiError(
+              errBody.message ?? "Pipeline execution failed",
+              errBody.status,
+              errBody.exceptionUID,
+              errBody.validations
+            );
+          }
+          if (
+            parsed.event === "node_complete" ||
+            parsed.event === "loop_iteration" ||
+            parsed.event === "done"
+          ) {
+            yield { type: parsed.event, data: JSON.parse(parsed.data) } as AskStreamEvent;
+          }
+          // Any other event type is ignored rather than treated as an
+          // error — forward-compatible if the server adds a new event
+          // type this client doesn't know about yet.
+        }
+      }
+    } catch (err) {
+      // Re-throw a PipelineApiError (from the `error` event branch above)
+      // unchanged; wrap anything else (a genuine network/parse failure
+      // mid-stream) so every failure mode from this method is consistently
+      // a PipelineApiError, matching ask()'s contract.
+      if (err instanceof PipelineApiError) throw err;
+      throw new PipelineApiError(
+        `Stream reading failed: ${err instanceof Error ? err.message : String(err)}`
+      );
+    } finally {
+      reader.releaseLock();
+    }
   }
 }

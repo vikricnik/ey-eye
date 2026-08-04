@@ -3,7 +3,7 @@ from llm_pipeline.providers.base import ModelSpec
 
 class GeminiProvider:
     def __init__(self, spec: ModelSpec) -> None:
-        from langchain_google_genai import ChatGoogleGenerativeAI  # pyright: ignore[reportMissingImports]
+        from langchain_google_genai import ChatGoogleGenerativeAI  # pyright: ignore[reportMissingImports]  # noqa: E501
 
         self._llm = ChatGoogleGenerativeAI(model=spec.model, temperature=spec.temperature)
 

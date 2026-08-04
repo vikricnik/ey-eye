@@ -414,6 +414,61 @@ relevant to distinguish from the definition's list when a pipeline uses
 branches). `loop_iterations` maps each loop id to how many times it looped
 back — `{}` for pipelines with no loops.
 
+### `POST /ask/stream`
+
+Same request body as `/ask`. Streams **node-level** progress via
+Server-Sent Events as the pipeline runs, rather than waiting for the whole
+DAG to finish — not token-level streaming from each LLM call (that would
+mean every provider adapter implementing streaming individually; node-level
+works uniformly across all of them via LangGraph's own `astream()`).
+
+```bash
+curl -N -X POST http://localhost:8000/ask/stream \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $API_KEY" \
+  -d '{"prompt": "What year did the Berlin Wall fall?", "pipeline_name": "consensus-qa", "history": []}'
+```
+
+Response body (`Content-Type: text/event-stream`), one SSE event per line-block:
+
+```
+event: node_complete
+data: {"node": {"node_id": "answer_local", "model_name": "ollama:qwen3-coder:30b", "output": "...", "duration_ms": 1820.4}}
+
+event: node_complete
+data: {"node": {"node_id": "answer_b", "model_name": "ollama:llama3", "output": "...", "duration_ms": 2140.1}}
+
+event: node_complete
+data: {"node": {"node_id": "answer_c", "model_name": "ollama:gemma3:12b", "output": "...", "duration_ms": 1990.3}}
+
+event: node_complete
+data: {"node": {"node_id": "reconcile", "model_name": "ollama:llama3", "output": "...", "duration_ms": 4230.6}}
+
+event: done
+data: {"pipeline_name": "consensus-qa", "output_node": "reconcile", "final_answer": "...", "node_outputs": {...all four, same shape as /ask...}, "loop_iterations": {}}
+
+```
+
+Event types:
+
+| Event | Payload | When |
+|---|---|---|
+| `node_complete` | `{"node": NodeOutput}` | Every time a graph node finishes. Synthetic internal nodes (the multi-root fan-out node, loop increment nodes) are filtered out — only real pipeline-defined nodes appear here. |
+| `loop_iteration` | `{"loop_id": str, "iteration": int}` | A loop's increment node fired — it's about to run another iteration. |
+| `done` | Same shape as `AskResponse` | The pipeline finished successfully. Included in full, not just a delta, so a client that only cares about the final result doesn't need to have accumulated every `node_complete` event. |
+| `error` | Same `ErrorResponse` shape as every other error in this API | Something failed mid-run. |
+
+**The one thing that's genuinely different from every other endpoint in this
+API**: once a `/ask/stream` response starts, the HTTP status is locked at
+`200` — headers have already gone out, so there's no way to send back a
+different status code partway through. A pipeline failure therefore can't
+`raise HTTPException` the way `/ask` does; it's sent as an `error` SSE event
+within that `200` response instead, carrying the exact same `ErrorResponse`
+payload `/ask` would have returned as an HTTP error body. **Pre-stream**
+failures (unknown pipeline, empty prompt, missing API key, rate limit) still
+behave exactly like `/ask` — real `401`/`404`/`400`/`429`/`422` responses —
+since those are all resolved before any streaming has begun.
+
 ## Error handling
 
 **Every response — success or failure — is a Pydantic model, including
@@ -479,10 +534,27 @@ already enforce the shape at runtime regardless of what's declared.
 ## Testing
 
 ```bash
+poetry run ruff check .
 poetry run pytest
 poetry run mypy llm_pipeline/
 poetry run pyright
 ```
+
+`ruff` covers what neither type checker looks at: unused imports, import
+ordering, and common bug-prone patterns (`flake8-bugbear` — e.g. mutable
+default arguments). It's deliberately **not** configured to duplicate
+`mypy`/`pyright`'s job — annotation-completeness rules (`ANN`) are excluded
+from `[tool.ruff.lint]` in `pyproject.toml` for exactly that reason. One
+FastAPI-specific gotcha it's pre-configured around: `flake8-bugbear`'s B008
+rule normally flags any function call used as a default argument value,
+which is precisely FastAPI's own recommended DI pattern
+(`x: X = Depends(get_x)`) — `extend-immutable-calls` in the ruff config
+tells it `Depends`/`Header`/`Query`/`Path` are safe here.
+
+`ruff format` isn't enforced in CI yet — this codebase predates ruff and
+hasn't had a full formatting pass run against it once, so turning that on
+immediately would surface a wall of formatting diffs unrelated to any real
+change. Worth adding once that one-time pass has happened.
 
 Both type checkers are run deliberately, not redundantly — they use different
 type-checking algorithms and occasionally disagree, which is useful signal
@@ -578,7 +650,13 @@ providers — no live network needed).
   in a runtime-determined list") — needed for batch/RAG-style workloads.
 - **Non-`llm_call` node types** (retrieval, tool execution, human-approval
   gates) — the `type` field exists now to make adding these a non-breaking change.
-- **Streaming** `/ask` responses — currently one JSON blob at the end.
+- **Token-level streaming** from each individual LLM call — `POST
+  /ask/stream` streams node-level progress (see the API section above),
+  which works uniformly across every provider via LangGraph's own
+  `astream()`. Streaming individual tokens within a single node's LLM call
+  would mean every provider adapter (`providers/ollama.py`, `openai.py`,
+  etc.) implementing its own streaming API individually — a larger,
+  separate undertaking left for later.
 
 ## Conversation history
 

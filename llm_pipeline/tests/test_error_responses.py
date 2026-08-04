@@ -19,7 +19,7 @@ EXPECTED_KEYS = {
 
 
 @pytest.fixture(autouse=True)
-def _reset_shared_state(monkeypatch: pytest.MonkeyPatch) -> None:  # pyright: ignore[reportUnusedFunction]
+def _reset_shared_state(monkeypatch: pytest.MonkeyPatch) -> None:  # pyright: ignore[reportUnusedFunction]  # noqa: E501
     """Auth and rate-limit state are still process-wide singletons (not yet
     dependency-injected the way the pipeline cache now is — see
     pipeline_loader.PipelineCache) — reset them around every test so one

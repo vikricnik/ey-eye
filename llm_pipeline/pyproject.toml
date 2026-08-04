@@ -34,6 +34,7 @@ httpx = "^0.27.0"
 mypy = "^1.13.0"
 types-pyyaml = "^6.0.12"
 pyright = "^1.1.390"
+ruff = "^0.8.0"
 
 [build-system]
 requires = ["poetry-core"]
@@ -138,3 +139,52 @@ reportUnknownLambdaType = false
 # via its overrides above, and a redundant `# type: ignore` there would
 # trip mypy's own `warn_unused_ignores`. Using pyright's own comment syntax
 # means each tool only reacts to the suppression meant for it.
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+extend-exclude = ["pipelines"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes — unused imports/variables, undefined names
+    "I",    # isort — import sorting/grouping
+    "UP",   # pyupgrade — modernize syntax for the target Python version
+    "B",    # flake8-bugbear — common bug-prone patterns
+    "C4",   # flake8-comprehensions — unnecessary comprehension patterns
+    "SIM",  # flake8-simplify
+    "RUF",  # ruff-specific rules
+]
+ignore = [
+    # Deliberately does NOT include any ANN (flake8-annotations) rules —
+    # mypy --strict and pyright (both already in this project) already
+    # enforce complete type annotations far more thoroughly than ruff's
+    # annotation checks do; adding ANN here would be pure duplication.
+]
+
+[tool.ruff.lint.flake8-bugbear]
+# B008 normally flags any function call used as a default argument value
+# (the classic "mutable default argument" gotcha, extended to any call).
+# FastAPI's own recommended dependency-injection pattern is EXACTLY this
+# shape — `def endpoint(x: X = Depends(get_x)):` — and relies on FastAPI
+# evaluating each Depends() call per-request rather than once at
+# def-time, which is precisely what makes it safe here despite the
+# general pattern being risky elsewhere. Without this, B008 would fire on
+# every dependency-injected endpoint parameter in routers/health.py and
+# routers/ask.py, and on every Header()-based parameter in auth.py and
+# rate_limit.py.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Header", "fastapi.Query", "fastapi.Path"]
+
+[tool.ruff.lint.per-file-ignores]
+# Nothing needed yet — checked against the actual test suite (every
+# pytest.raises() call already names a specific exception type, no broad
+# `except Exception` patterns exist) rather than adding a speculative
+# exception preemptively. Add entries here if/when a real one is needed.
+
+[tool.ruff.format]
+# Not currently enforced in CI (see ci.yml) — `ruff check` runs, `ruff
+# format --check` doesn't, since this codebase predates ruff and hasn't
+# had a full formatting pass run against it yet. Safe to add once that's
+# been done once, since after that it's a no-op maintenance guard.

@@ -52,6 +52,7 @@ automatically.
 | `/pipeline` | show the **active** pipeline's DAG — every node, its model, and its dependencies |
 | `/use <name>` | switch to a different pipeline (confirms it exists first; clears conversation history since a different DAG likely has different context semantics) |
 | `/verbose` | toggle showing every node's output vs. just the final answer |
+| `/stream` | toggle streaming node-by-node progress as the pipeline runs, instead of waiting for the whole thing to finish (off by default) |
 | `/reset` | clear conversation history without switching pipelines |
 | `/exit` | quit (also works: Ctrl+C or Ctrl+D) |
 
@@ -165,6 +166,36 @@ answer_c (ollama:gemma3:12b, 2.3s)
 reconcile (ollama:llama3, 4.2s)  ← output node
   All three sources agree: the Berlin Wall fell on November 9, 1989.
 ```
+
+Toggle `/stream` to see each node complete in real time as the pipeline
+runs, instead of one spinner until everything finishes — the difference is
+most visible on multi-node pipelines like `consensus-qa`, where you see
+each of the three independent generators finish as they actually do,
+rather than only once the slowest one completes:
+
+```
+(consensus-qa) › /stream
+streaming mode: on
+
+(consensus-qa) › What year did the Berlin Wall fall?
+
+✓ answer_local (ollama:qwen3-coder:30b, 1.8s)
+✓ answer_b (ollama:llama3, 2.1s)
+✓ answer_c (ollama:gemma3:12b, 2.3s)
+✓ reconcile (ollama:llama3, 4.2s)
+
+Final answer
+All three sources agree: the Berlin Wall fell on November 9, 1989.
+(4.4s total)
+```
+
+`/stream` and `/verbose` combine: with both on, each node's output prints
+immediately below its completion line rather than only in a final summary.
+This is **node-level** progress, not token-level — each line appears when
+that node finishes, not as the model streams individual words. See
+`llm_pipeline/README.md`'s `POST /ask/stream` section for why (token-level
+streaming would mean every provider adapter implementing it individually;
+node-level works uniformly across all of them).
 
 ## Response fields
 

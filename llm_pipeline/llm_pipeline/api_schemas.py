@@ -7,8 +7,7 @@ state.py's internal PipelineState shape is not.
 """
 
 from datetime import datetime
-
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class ConversationTurn(BaseModel):
@@ -38,6 +37,54 @@ class NodeOutputDTO(BaseModel):
 class AskResponse(BaseModel):
     pipeline_name: str
     output_node: str  # whichever output_node candidate actually resolved
+    final_answer: str
+    node_outputs: dict[str, NodeOutputDTO]
+    loop_iterations: dict[str, int] = {}
+
+
+# ---------------------------------------------------------------------------
+# Streaming (POST /ask/stream) — Server-Sent Events, one event per line below
+# ---------------------------------------------------------------------------
+#
+# Node-level streaming, not token-level: each event fires when a graph node
+# FINISHES, not as an individual LLM streams its own tokens. This works
+# uniformly across every provider (Ollama/OpenAI/Anthropic/Gemini/Copilot)
+# via LangGraph's own astream() without needing each provider adapter to
+# implement token streaming individually — see dag_builder's module docs
+# for why that's a deliberately separate, larger undertaking left for later.
+#
+# Wire format per event:
+#   event: <event_type>
+#   data: <one of the models below, JSON-encoded>
+#   \n
+# (blank line terminates each event, per the SSE spec)
+
+class NodeCompleteEvent(BaseModel):
+    """One graph node just finished. Synthetic/internal nodes (the
+    multi-root fan-out node, loop increment/failed nodes) are filtered out
+    before reaching the client — this only ever describes a real
+    pipeline-defined node, the same NodeOutputDTO shape AskResponse uses."""
+
+    node: NodeOutputDTO
+
+
+class LoopIterationEvent(BaseModel):
+    """A loop's increment node fired — the loop is about to run another
+    iteration (or has just exhausted max_iterations, in which case a
+    node_complete or error event for the loop's exit/fail path follows)."""
+
+    loop_id: str
+    iteration: int
+
+
+class StreamDoneEvent(BaseModel):
+    """The pipeline finished successfully. Same information AskResponse
+    carries — included in full (not just a delta) so a client that only
+    cares about the final result doesn't need to have accumulated every
+    node_complete event along the way."""
+
+    pipeline_name: str
+    output_node: str
     final_answer: str
     node_outputs: dict[str, NodeOutputDTO]
     loop_iterations: dict[str, int] = {}

@@ -9,18 +9,18 @@ pipeline_loader.py.
 """
 
 import logging
-from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from collections.abc import AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from llm_pipeline.error_handling import register_exception_handlers
-from llm_pipeline.logging_context import configure_logging, request_id_middleware
 from llm_pipeline.pipeline_config import load_pipeline_definition
-from llm_pipeline.pipeline_loader import PipelineCache
-from llm_pipeline.routers import ask, health
 from llm_pipeline.settings import settings
+from llm_pipeline.logging_context import configure_logging, request_id_middleware
+from llm_pipeline.error_handling import register_exception_handlers
+from llm_pipeline.pipeline_loader import PipelineCache
+from llm_pipeline.routers import health, ask
 
 configure_logging()
 logger: logging.Logger = logging.getLogger("llm_pipeline")

@@ -12,8 +12,8 @@ including it.
 
 import logging
 import uuid
-from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
+from collections.abc import Awaitable, Callable
 
 from fastapi import Request, Response
 

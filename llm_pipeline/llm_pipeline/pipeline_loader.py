@@ -20,10 +20,10 @@ from pathlib import Path
 from fastapi import Request
 from langgraph.graph.state import CompiledStateGraph
 
-from llm_pipeline.dag_builder import build_graph
-from llm_pipeline.errors import PipelineNotFoundError
 from llm_pipeline.pipeline_config import PipelineDefinition, load_pipeline_definition
 from llm_pipeline.providers.resilience import CircuitBreaker
+from llm_pipeline.dag_builder import build_graph
+from llm_pipeline.errors import PipelineNotFoundError
 
 # Only safe filename characters — pipeline_name comes straight from client
 # input and is used to build a filesystem path, so this closes off any
@@ -53,7 +53,9 @@ class PipelineCache:
         cooldown_seconds: float = 30.0,
     ) -> None:
         self.pipelines_dir = pipelines_dir
-        self.circuit_breaker = circuit_breaker or CircuitBreaker(failure_threshold, cooldown_seconds)
+        self.circuit_breaker = circuit_breaker or CircuitBreaker(
+            failure_threshold, cooldown_seconds
+        )
         self._cache: dict[str, tuple[PipelineDefinition, CompiledStateGraph]] = {}
 
     def get(self, name: str) -> tuple[PipelineDefinition, CompiledStateGraph]:

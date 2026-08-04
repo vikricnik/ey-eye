@@ -1,7 +1,7 @@
 import "./style.css";
 import { PipelineClient, PipelineApiError } from "@llm-pipeline/client";
 import { RelayAnimator } from "./relayAnimator";
-import { renderTurn, renderError } from "./render";
+import { renderTurn, renderError, beginStreamingTurn } from "./render";
 import type { ConversationTurn } from "@llm-pipeline/client";
 
 declare global {
@@ -27,6 +27,7 @@ const emptyState = requireElement<HTMLElement>("empty-state");
 const input = requireElement<HTMLTextAreaElement>("prompt-input");
 const sendBtn = requireElement<HTMLButtonElement>("send-btn");
 const verboseToggle = requireElement<HTMLInputElement>("verbose-toggle");
+const streamToggle = requireElement<HTMLInputElement>("stream-toggle");
 const resetBtn = requireElement<HTMLButtonElement>("reset-btn");
 const statusDot = requireElement<HTMLElement>("status-dot");
 const statusText = requireElement<HTMLElement>("status-text");
@@ -170,10 +171,25 @@ async function handleSend(): Promise<void> {
   sendBtn.disabled = true;
   sendBtn.classList.add("loading");
   emptyState.style.display = "none";
-  relay.start();
 
   const startedAt = performance.now();
 
+  try {
+    if (streamToggle.checked) {
+      await handleSendStreaming(prompt, startedAt);
+    } else {
+      await handleSendBuffered(prompt, startedAt);
+    }
+  } finally {
+    isLoading = false;
+    sendBtn.disabled = false;
+    sendBtn.classList.remove("loading");
+    input.focus();
+  }
+}
+
+async function handleSendBuffered(prompt: string, startedAt: number): Promise<void> {
+  relay.start();
   try {
     const response = await client.ask(prompt, activePipelineName, history);
     const elapsedMs = performance.now() - startedAt;
@@ -184,17 +200,47 @@ async function handleSend(): Promise<void> {
     history.push({ prompt, final_answer: response.final_answer });
   } catch (err) {
     relay.finish();
-    const message = err instanceof PipelineApiError || err instanceof Error
-      ? err.message
-      : String(err);
-    const exceptionUID = err instanceof PipelineApiError ? err.exceptionUID : undefined;
-    renderError(transcript, prompt, message, exceptionUID);
-  } finally {
-    isLoading = false;
-    sendBtn.disabled = false;
-    sendBtn.classList.remove("loading");
-    input.focus();
+    renderCaughtError(prompt, err);
   }
+}
+
+/**
+ * Streaming variant: drives the relay track from REAL node_complete events
+ * (relay.markComplete()) instead of a simulated timer, AND renders each
+ * node's output card the moment it arrives (via beginStreamingTurn) rather
+ * than waiting for the whole pipeline to finish — the DOM equivalent of the
+ * CLI's line-by-line streaming output.
+ */
+async function handleSendStreaming(prompt: string, startedAt: number): Promise<void> {
+  relay.startReal();
+  const turnHandle = beginStreamingTurn(transcript, prompt, verboseToggle.checked);
+
+  try {
+    for await (const event of client.askStream(prompt, activePipelineName, history)) {
+      if (event.type === "node_complete") {
+        relay.markComplete(event.data.node.node_id);
+        turnHandle.addNodeOutput(event.data.node.node_id, event.data.node);
+      } else if (event.type === "done") {
+        const elapsedMs = performance.now() - startedAt;
+        relay.finish();
+        turnHandle.finish(event.data, elapsedMs);
+        history.push({ prompt, final_answer: event.data.final_answer });
+      }
+      // loop_iteration events don't have a corresponding relay stage (loops
+      // aren't part of the static node list the relay track is built from)
+      // — nothing to update for those here.
+    }
+  } catch (err) {
+    relay.finish();
+    renderCaughtError(prompt, err);
+  }
+}
+
+function renderCaughtError(prompt: string, err: unknown): void {
+  const message =
+    err instanceof PipelineApiError || err instanceof Error ? err.message : String(err);
+  const exceptionUID = err instanceof PipelineApiError ? err.exceptionUID : undefined;
+  renderError(transcript, prompt, message, exceptionUID);
 }
 
 input.focus();

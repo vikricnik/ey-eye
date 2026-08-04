@@ -126,14 +126,26 @@ already configured server-side via `CORS_ALLOWED_ORIGINS` in `.env`.
   not `setInterval`, so a slow health check can't cause overlapping requests)
 - A **dynamic relay track** shows the active pipeline's actual node list
   (fetched from `GET /pipelines/{name}`) and animates through them while a
-  request is in flight. This is client-side pacing only — the API returns a
-  single JSON response rather than streamed per-node events — so once the
-  last node is reached, its indicator keeps pulsing indefinitely (rather than
+  request is in flight. With **"stream progress"** on (see below), this
+  reflects REAL node completions as they happen (`relay.markComplete()`,
+  driven by actual `node_complete` SSE events) rather than simulated
+  pacing; with it off, it's client-side pacing only — the non-streaming API
+  returns a single JSON response with no per-node timing — so once the last
+  node is reached, its indicator keeps pulsing indefinitely (rather than
   freezing) until the real response arrives, however long that takes.
+- **"stream progress"** checkbox (off by default) switches to `POST
+  /ask/stream`, showing each node as it actually completes instead of one
+  spinner until the whole pipeline finishes. This is **node-level**
+  progress, not token-level — each relay stage completes when that node
+  finishes, not as the model streams individual words. See
+  `llm_pipeline/README.md`'s `POST /ask/stream` section for why (token-level
+  streaming would mean every provider adapter implementing it individually;
+  node-level works uniformly across all of them).
 - **Conversation memory** — prior turns in the session are sent as context.
   Click **"reset conversation"** to clear it manually.
 - **"show all node outputs"** checkbox reveals every node's output and which
-  model produced it, alongside its execution time.
+  model produced it, alongside its execution time. Combines with streaming —
+  with both on, each node's output appears as soon as that node completes.
 - Every response shows `pipeline_name`, `output_node`, how long the whole run
   took, and (for pipelines using loops, like `iterative-refinement.yaml`) how
   many times each loop looped back before exiting.

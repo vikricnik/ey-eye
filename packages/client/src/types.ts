@@ -24,6 +24,40 @@ export interface AskResponse {
   loop_iterations: Record<string, number>;
 }
 
+// ---------------------------------------------------------------------------
+// Streaming (POST /ask/stream) — Server-Sent Events. Node-level streaming,
+// not token-level: one event per graph node completion, not per LLM token.
+// See PipelineClient.askStream() for how these are consumed.
+// ---------------------------------------------------------------------------
+
+export interface NodeCompleteEvent {
+  node: NodeOutput;
+}
+
+export interface LoopIterationEvent {
+  loop_id: string;
+  iteration: number;
+}
+
+export interface StreamDoneEvent {
+  pipeline_name: string;
+  output_node: string;
+  final_answer: string;
+  node_outputs: Record<string, NodeOutput>;
+  loop_iterations: Record<string, number>;
+}
+
+// A discriminated union over every event askStream() yields — consumers
+// switch on `.type` to narrow to the right payload shape. Note there's no
+// "error" variant here: askStream() throws a PipelineApiError when the
+// server sends an error event mid-stream, matching ask()'s existing
+// Promise-rejection ergonomics rather than requiring consumers to
+// remember to check `.type === "error"` on every iteration.
+export type AskStreamEvent =
+  | { type: "node_complete"; data: NodeCompleteEvent }
+  | { type: "loop_iteration"; data: LoopIterationEvent }
+  | { type: "done"; data: StreamDoneEvent };
+
 export interface PipelineSummary {
   name: string;
   description: string;
