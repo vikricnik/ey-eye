@@ -207,3 +207,11 @@ $RECYCLE.BIN/
 *.bak
 *.old
 *.orig
+#spec-kit
+.specify
+#claude
+.claude
+
+# ==========================
+# Project-specific
+# ==========================
