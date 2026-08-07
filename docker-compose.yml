@@ -17,7 +17,7 @@ services:
       dockerfile: Dockerfile
       # Uncomment to bake in cloud provider support:
       # args:
-      #   POETRY_EXTRAS: "openai anthropic gemini"
+      #   UV_EXTRAS: "openai anthropic gemini"
     ports:
       - "8000:8000"
     environment:

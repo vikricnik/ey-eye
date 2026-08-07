@@ -70,7 +70,7 @@ llm-pipeline-monorepo/
 │                                  request/response contract both clients depend on
 ├── cli/                           keyboard-driven terminal client
 ├── web/                            browser client
-└── llm_pipeline/                    Python package (Poetry)
+└── llm_pipeline/                    Python package (uv)
     ├── providers/                    LLMProvider Protocol + one adapter module per
     │                                 backend (ollama.py, openai.py, anthropic.py,
     │                                 gemini.py, copilot.py) + registry.py (factory)
@@ -127,10 +127,10 @@ A few design decisions worth calling out:
 
 ```bash
 cd llm_pipeline
-poetry install
+uv sync
 cp .env.example .env
 ollama pull llama3.2:3b llama3 qwen3-coder:30b
-poetry run uvicorn llm_pipeline.main:app --reload --port 8000
+uv run uvicorn llm_pipeline.main:app --reload --port 8000
 ```
 
 ```bash

@@ -129,7 +129,7 @@ nodes:
     # Any node can use a different provider — e.g.
     # { provider: openai, model: gpt-4o, temperature: 0.3 } — see
     # pipelines/consensus-qa.yaml for a worked example with commented-out
-    # cloud alternatives. Requires the matching `poetry install --extras`
+    # cloud alternatives. Requires the matching `uv sync --extra`
     # and API key; see "Requirements" below.
     prompt_template: |
       Analysis: {{ analyze.output }}
@@ -254,7 +254,7 @@ output_node: generate   # NOT critique — critique's text is just APPROVE/REVIS
 
 Run this validation yourself any time with:
 ```bash
-poetry run python -c "from pathlib import Path; from llm_pipeline.pipeline_config import load_pipeline_definition; load_pipeline_definition(Path('pipelines/your-file.yaml'))"
+uv run python -c "from pathlib import Path; from llm_pipeline.pipeline_config import load_pipeline_definition; load_pipeline_definition(Path('pipelines/your-file.yaml'))"
 ```
 (Worth wiring into CI as a step that validates every file in `pipelines/*.yaml`
 on every push.)
@@ -291,23 +291,23 @@ the loop, bounded so it can't run away.
 
 ## Requirements
 
-- Python 3.11+, [Poetry](https://python-poetry.org/)
+- Python 3.11+, [uv](https://docs.astral.sh/uv/)
 - [Ollama](https://ollama.com/) running locally, if any pipeline uses Ollama models
 - API keys for any cloud providers referenced in your pipeline YAMLs
 
 ## Setup
 
 ```bash
-poetry install
+uv sync
 cp .env.example .env
 ```
 
 For cloud providers:
 ```bash
-poetry install --extras openai       # GPT models
-poetry install --extras anthropic    # Claude models
-poetry install --extras gemini       # Gemini models
-poetry install --extras all-providers
+uv sync --extra openai       # GPT models
+uv sync --extra anthropic    # Claude models
+uv sync --extra gemini       # Gemini models
+uv sync --extra all-providers
 ```
 
 Pull Ollama models referenced by the shipped example pipelines:
@@ -324,7 +324,7 @@ headroom while you tune this.
 ## Run
 
 ```bash
-poetry run uvicorn llm_pipeline.main:app --reload --port 8000
+uv run uvicorn llm_pipeline.main:app --reload --port 8000
 ```
 
 ### Or with Docker
@@ -534,10 +534,10 @@ already enforce the shape at runtime regardless of what's declared.
 ## Testing
 
 ```bash
-poetry run ruff check .
-poetry run pytest
-poetry run mypy llm_pipeline/
-poetry run pyright
+uv run ruff check .
+uv run pytest
+uv run mypy llm_pipeline/
+uv run pyright
 ```
 
 `ruff` covers what neither type checker looks at: unused imports, import
@@ -565,10 +565,10 @@ already see live in the editor. `pyright`'s scope (`llm_pipeline/` +
 the test suite was brought to the same strict standard as the package
 itself — see `tests/conftest.py` and friends for examples of that.
 
-**VSCode/Pylance**: select the Poetry-managed interpreter explicitly
-(`Cmd/Ctrl+Shift+P` → "Python: Select Interpreter") rather than relying on
-`pyrightconfig`'s venv detection — run `poetry env info --path` to find it
-if it's not already listed.
+**VSCode/Pylance**: select the uv-managed interpreter explicitly
+(`Cmd/Ctrl+Shift+P` → "Python: Select Interpreter") — it's the `.venv/bin/python`
+inside this project folder, since `uv sync` always creates its virtualenv
+there.
 
 - `tests/test_safe_eval.py` — the sandboxed expression evaluator: allowed
   operations, and explicit rejection of chaining and code-injection attempts.

@@ -17,22 +17,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v9
         with:
+          enable-cache: true
+          cache-dependency-glob: "llm_pipeline/uv.lock"
           python-version: "3.12"
 
-      - name: Install Poetry
-        run: pipx install poetry
-
-      - name: Cache Poetry dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pypoetry
-          key: poetry-${{ runner.os }}-${{ hashFiles('llm_pipeline/poetry.lock') }}
-
       - name: Install dependencies
-        run: poetry install --no-interaction
+        # Deliberately no --all-extras: mirrors a plain `poetry install` with
+        # no extras, which is exactly why the three optional cloud provider
+        # SDKs need mypy/pyright ignore_missing_imports overrides in
+        # pyproject.toml — they're intentionally absent here.
+        run: uv sync --locked
 
       - name: ruff check
         # Runs first and fast — catches unused imports, import-order
@@ -43,10 +40,10 @@ jobs:
         # since mypy --strict and pyright already cover that far more
         # thoroughly — ruff here is for everything neither type checker
         # looks at (import hygiene, common bug patterns, style).
-        run: poetry run ruff check .
+        run: uv run ruff check .
 
       - name: mypy --strict
-        run: poetry run mypy llm_pipeline/
+        run: uv run mypy llm_pipeline/
 
       - name: pyright --strict
         # Complements mypy rather than replacing it — different type-checking
@@ -54,10 +51,10 @@ jobs:
         # also what VSCode/Pylance uses live in the editor (see pyrightconfig
         # in pyproject.toml), so this CI step keeps that in sync with what
         # the editor already shows locally.
-        run: poetry run pyright
+        run: uv run pyright
 
       - name: pytest
-        run: poetry run pytest -v
+        run: uv run pytest -v
 
       - name: Validate every pipeline YAML file
         # Same check test_pipeline_config.py's test_real_pipeline_examples_are_valid
@@ -65,7 +62,7 @@ jobs:
         # fails CI with an unambiguous, dedicated log section rather than
         # only showing up as one assertion among many in the pytest run.
         run: |
-          poetry run python -c "
+          uv run python -c "
           from pathlib import Path
           from llm_pipeline.pipeline_config import load_pipeline_definition
 

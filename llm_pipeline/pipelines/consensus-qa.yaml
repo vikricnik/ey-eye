@@ -21,14 +21,14 @@ nodes:
     depends_on: []
     model: { provider: ollama, model: llama3, temperature: 0.1 }
     # Optional: swap in a real cloud provider for cross-provider consensus.
-    # Requires `poetry install --extras openai` and OPENAI_API_KEY set.
+    # Requires `uv sync --extra openai` and OPENAI_API_KEY set.
     # model: { provider: openai, model: gpt-4o, temperature: 0.1 }
     prompt_template: "Answer this question accurately and concisely: {{ input }}"
 
   - id: answer_c
     depends_on: []
     model: { provider: ollama, model: gemma3:12b, temperature: 0.1 }
-    # Optional: requires `poetry install --extras anthropic` and
+    # Optional: requires `uv sync --extra anthropic` and
     # ANTHROPIC_API_KEY set.
     # model: { provider: anthropic, model: claude-sonnet-4-5, temperature: 0.1 }
     prompt_template: "Answer this question accurately and concisely: {{ input }}"

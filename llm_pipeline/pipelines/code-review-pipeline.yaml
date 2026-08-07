@@ -23,7 +23,7 @@ nodes:
   - id: implement
     depends_on: [plan]
     model: { provider: ollama, model: qwen3-coder:30b, temperature: 0.2 }
-    # Optional: requires `poetry install --extras openai` and
+    # Optional: requires `uv sync --extra openai` and
     # OPENAI_API_KEY set — see llm_pipeline/README.md.
     # model: { provider: openai, model: gpt-4o, temperature: 0.2 }
     prompt_template: |
@@ -47,7 +47,7 @@ nodes:
   - id: review
     depends_on: [implement, write_tests]
     model: { provider: ollama, model: gemma3:12b, temperature: 0.0 }
-    # Optional: requires `poetry install --extras anthropic` and
+    # Optional: requires `uv sync --extra anthropic` and
     # ANTHROPIC_API_KEY set.
     # model: { provider: anthropic, model: claude-sonnet-4-5, temperature: 0.0 }
     prompt_template: |

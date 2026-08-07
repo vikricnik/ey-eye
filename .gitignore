@@ -33,10 +33,6 @@ venv/
 env/
 ENV/
 
-# Poetry
-poetry.lock.backup
-.poetry/
-
 # Pyenv
 .python-version
 

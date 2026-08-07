@@ -1,44 +1,46 @@
-[tool.poetry]
+[project]
 name = "llm-pipeline"
 version = "0.1.0"
 description = "Multi-tier LLM orchestration with FastAPI + LangGraph + Ollama"
-authors = ["Your Name <you@example.com>"]
+authors = [{ name = "Your Name", email = "you@example.com" }]
 readme = "README.md"
-packages = [{ include = "llm_pipeline" }]
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0,<0.116.0",
+    "uvicorn[standard]>=0.32.0,<0.33.0",
+    "langgraph>=0.2.60,<0.3.0",
+    "langchain-ollama>=0.2.0,<0.3.0",
+    "langchain-core>=0.3.21,<0.4.0",
+    "pydantic>=2.9.0,<3.0.0",
+    "pydantic-settings>=2.6.0,<3.0.0",
+    "pyyaml>=6.0.2,<7.0.0",
+    "jinja2>=3.1.4,<4.0.0",
+]
 
-[tool.poetry.dependencies]
-python = "^3.11"
-fastapi = "^0.115.0"
-uvicorn = { extras = ["standard"], version = "^0.32.0" }
-langgraph = "^0.2.60"
-langchain-ollama = "^0.2.0"
-langchain-core = "^0.3.21"
-pydantic = "^2.9.0"
-pydantic-settings = "^2.6.0"
-pyyaml = "^6.0.2"
-jinja2 = "^3.1.4"
-langchain-openai = { version = "^0.2.0", optional = true }
-langchain-anthropic = { version = "^0.3.0", optional = true }
-langchain-google-genai = { version = "^2.0.0", optional = true }
+[project.optional-dependencies]
+openai = ["langchain-openai>=0.2.0,<0.3.0"]
+anthropic = ["langchain-anthropic>=0.3.0,<0.4.0"]
+gemini = ["langchain-google-genai>=2.0.0,<3.0.0"]
+all-providers = [
+    "langchain-openai>=0.2.0,<0.3.0",
+    "langchain-anthropic>=0.3.0,<0.4.0",
+    "langchain-google-genai>=2.0.0,<3.0.0",
+]
 
-[tool.poetry.extras]
-openai = ["langchain-openai"]
-anthropic = ["langchain-anthropic"]
-gemini = ["langchain-google-genai"]
-all-providers = ["langchain-openai", "langchain-anthropic", "langchain-google-genai"]
-
-[tool.poetry.group.dev.dependencies]
-pytest = "^8.3.0"
-pytest-asyncio = "^0.24.0"
-httpx = "^0.27.0"
-mypy = "^1.13.0"
-types-pyyaml = "^6.0.12"
-pyright = "^1.1.390"
-ruff = "^0.8.0"
+[dependency-groups]
+dev = [
+    "pytest>=8.3.0,<9.0.0",
+    "pytest-asyncio>=0.24.0,<0.25.0",
+    "httpx>=0.27.0,<0.28.0",
+    "mypy>=1.13.0,<2.0.0",
+    "types-pyyaml>=6.0.12,<7.0.0",
+    "pyright>=1.1.390,<2.0.0",
+    "ruff>=0.8.0,<0.9.0",
+]
 
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [tool.mypy]
 python_version = "3.11"
@@ -70,10 +72,10 @@ ignore_missing_imports = true
 module = "langchain_ollama.*"
 ignore_missing_imports = true
 
-# These three are OPTIONAL dependencies (only installed via `poetry install
-# --extras ...`), imported lazily inside providers/openai.py, anthropic.py,
+# These three are OPTIONAL dependencies (only installed via `uv sync
+# --extra ...`), imported lazily inside providers/openai.py, anthropic.py,
 # and gemini.py's adapter classes. Without these overrides, mypy fails on a
-# plain `poetry install` (no extras) with "Cannot find implementation or
+# plain `uv sync` (no extras) with "Cannot find implementation or
 # library stub" for each — regardless of whether the import is lazy/local,
 # mypy still resolves every reachable import statement.
 [[tool.mypy.overrides]]
@@ -120,14 +122,11 @@ reportUnknownParameterType = false
 # so this would otherwise fire on every mocked lambda in the test suite.
 reportUnknownLambdaType = false
 
-# Deliberately NOT setting venvPath/venv here: that only makes sense if
-# Poetry creates the virtualenv inside this project folder, which depends
-# on `virtualenvs.in-project` being enabled — true in the Docker build (see
-# Dockerfile), but not guaranteed for your local Poetry config. Running via
-# `poetry run pyright` already activates the correct interpreter without
-# needing this; for VSCode/Pylance, select the Poetry-managed interpreter
-# explicitly instead (see README) rather than relying on this config to
-# guess its location.
+# Deliberately NOT setting venvPath/venv here: `uv run pyright` already
+# activates the correct interpreter without needing this. uv always creates
+# its virtualenv at `.venv` inside the project folder, so for VSCode/Pylance
+# just select that interpreter directly (see README) rather than relying on
+# this config to guess its location.
 
 # NOTE on the three optional cloud provider imports (langchain_openai,
 # langchain_anthropic, langchain_google_genai) in providers/openai.py,
