@@ -2,19 +2,20 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from llm_pipeline.api_schemas import (
     HealthResponse,
-    PipelinesListResponse,
-    PipelineDetailResponse,
-    PipelineNodeInfo,
     PipelineBranchInfo,
+    PipelineBranchRouteInfo,
+    PipelineDetailResponse,
     PipelineLoopInfo,
+    PipelineNodeInfo,
+    PipelinesListResponse,
 )
-from llm_pipeline.pipeline_config import list_available_pipelines
-from llm_pipeline.errors import PipelineNotFoundError
-from llm_pipeline.settings import settings
 from llm_pipeline.auth import require_api_key
-from llm_pipeline.rate_limit import enforce_rate_limit
 from llm_pipeline.error_handling import ERROR_RESPONSES
+from llm_pipeline.errors import PipelineNotFoundError
+from llm_pipeline.pipeline_config import list_available_pipelines
 from llm_pipeline.pipeline_loader import PipelineCache, get_pipeline_cache
+from llm_pipeline.rate_limit import enforce_rate_limit
+from llm_pipeline.settings import settings
 
 router = APIRouter()
 
@@ -83,7 +84,14 @@ async def get_pipeline_definition(
             # a keyword name, not the populate_by_name-permitted "from_".
             # A dict keyed by the alias sidesteps that mismatch entirely.
             PipelineBranchInfo.model_validate(
-                {"id": b.id, "from": b.from_, "routes": [r.to for r in b.routes]}
+                {
+                    "id": b.id,
+                    "from": b.from_,
+                    "routes": [
+                        PipelineBranchRouteInfo(to=r.to, when=r.when, default=r.default)
+                        for r in b.routes
+                    ],
+                }
             )
             for b in definition.branches
         ],
@@ -95,6 +103,7 @@ async def get_pipeline_definition(
                     "back_to": l.back_to,
                     "exit_to": l.exit_to,
                     "max_iterations": l.max_iterations,
+                    "on_max_iterations": l.on_max_iterations,
                 }
             )
             for l in definition.loops

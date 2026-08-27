@@ -1,14 +1,22 @@
 import * as readline from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import chalk from "chalk";
-import { PipelineClient, PipelineApiError } from "@llm-pipeline/client";
+import {
+  PipelineClient,
+  PipelineApiError,
+  buildGraphModel,
+  createGraphViewState,
+  applyStreamEvent,
+  applyStreamError,
+} from "@llm-pipeline/client";
 import {
   formatAskResponse,
   formatHealth,
   formatPipelineList,
   formatPipelineDetail,
 } from "./formatter.js";
-import type { ConversationTurn } from "@llm-pipeline/client";
+import { renderGraphText } from "./graphRenderer.js";
+import type { ConversationTurn, GraphModel, GraphViewState } from "@llm-pipeline/client";
 
 const BASE_URL = process.env.PIPELINE_BASE_URL ?? "http://localhost:8000";
 const API_KEY = process.env.PIPELINE_API_KEY; // only needed if the server has API_KEYS configured
@@ -19,10 +27,10 @@ ${chalk.bold("Commands:")}
   ${chalk.yellow("/help")}              show this help
   ${chalk.yellow("/health")}            show server info and available pipelines
   ${chalk.yellow("/pipelines")}         list available pipelines
-  ${chalk.yellow("/pipeline")}          show the active pipeline's DAG (nodes + edges)
+  ${chalk.yellow("/pipeline")}          show the active pipeline's DAG diagram (nodes + edges)
   ${chalk.yellow("/use <name>")}         switch pipelines (clears conversation history)
   ${chalk.yellow("/verbose")}           toggle showing every node's output vs. just the final answer
-  ${chalk.yellow("/stream")}            toggle streaming node-by-node progress as the pipeline runs
+  ${chalk.yellow("/stream")}            toggle live diagram updates as the pipeline runs, instead of waiting
   ${chalk.yellow("/reset")}             clear conversation history (start fresh)
   ${chalk.yellow("/exit")}              quit (also: Ctrl+C or Ctrl+D)
 
@@ -33,11 +41,29 @@ turns in this session included as conversation context.
 `;
 }
 
+/** Fetches a pipeline's structure and builds its GraphModel — cached by
+ * the caller so a streaming run doesn't need to re-fetch it (User Story
+ * 3's independent test explicitly requires this). Returns undefined (and
+ * prints an inline error marker, per FR-015) on failure rather than
+ * throwing, since a failed structure fetch shouldn't block the pipeline
+ * switch/startup that triggered it — /pipeline and streaming just fall
+ * back to having no diagram to show. */
+async function loadGraph(client: PipelineClient, name: string): Promise<GraphModel | undefined> {
+  try {
+    const detail = await client.getPipelineDetail(name);
+    return buildGraphModel(detail);
+  } catch (err) {
+    printError(err);
+    return undefined;
+  }
+}
+
 async function main(): Promise<void> {
   const client = new PipelineClient(BASE_URL, API_KEY);
   let verbose = false;
   let streaming = false;
   let activePipeline: string;
+  let activeGraph: GraphModel | undefined;
   const history: ConversationTurn[] = [];
 
   console.log(chalk.bold.cyan("\nLLM Pipeline CLI"));
@@ -50,6 +76,7 @@ async function main(): Promise<void> {
     console.log(formatHealth(health));
     console.log();
     console.log(chalk.gray(`Using pipeline "${activePipeline}" — switch with /use <name>\n`));
+    activeGraph = await loadGraph(client, activePipeline);
   } catch (err) {
     printError(err);
     console.log(
@@ -143,18 +170,20 @@ async function main(): Promise<void> {
       try {
         // Confirm the pipeline actually exists before switching — fails
         // clearly now rather than on the next prompt.
-        await client.getPipelineDetail(requestedName);
+        const detail = await client.getPipelineDetail(requestedName);
         activePipeline = requestedName;
+        activeGraph = buildGraphModel(detail);
         history.length = 0; // different pipeline = different context; don't carry old turns forward
         console.log(chalk.gray(`switched to pipeline "${activePipeline}" — conversation history cleared\n`));
       } catch (err) {
+        activeGraph = undefined;
         printError(err);
       }
       continue;
     }
 
     if (streaming) {
-      await handlePromptStreaming(client, trimmed, activePipeline, verbose, history);
+      await handlePromptStreaming(client, trimmed, activePipeline, activeGraph, verbose, history);
     } else {
       await handlePrompt(client, trimmed, activePipeline, verbose, history);
     }
@@ -190,20 +219,69 @@ async function handlePrompt(
   }
 }
 
+/** Wraps any caught value into a PipelineApiError so applyStreamError()
+ * always has a `.message`/`.details` to read. */
+function toApiError(err: unknown): PipelineApiError {
+  if (err instanceof PipelineApiError) return err;
+  return new PipelineApiError(err instanceof Error ? err.message : String(err));
+}
+
 /**
- * Streaming variant — prints each graph node's result as soon as it
- * completes rather than waiting for the whole pipeline to finish. Node-level
- * progress, not token-level: for a single-node pipeline this looks
- * basically identical to non-streaming mode (one node, one line, then the
- * final answer); the difference shows for multi-node pipelines like
- * consensus-qa or code-review-pipeline, where you see each independent
- * generator finish as it happens rather than staring at one spinner until
- * the slowest of them all completes.
+ * Redraws the live graph diagram in place: erases exactly the lines the
+ * previous call printed (tracked in `printedLines`), then prints `lines`
+ * fresh. On a terminal resize mid-run, a partial cursor-relative clear
+ * based on the OLD (stale) line count would be wrong — wrapping at the
+ * new width means the previous content may no longer occupy that many
+ * terminal rows — so a resize instead triggers a full screen clear
+ * (`console.clear()`) and starts the tracked count over from zero.
+ */
+class DiagramRedraw {
+  private printedLines = 0;
+  private resized = false;
+  private readonly onResize = (): void => {
+    this.resized = true;
+  };
+
+  start(): void {
+    stdout.on("resize", this.onResize);
+  }
+
+  stop(): void {
+    stdout.off("resize", this.onResize);
+  }
+
+  async print(lines: string[]): Promise<void> {
+    if (this.resized) {
+      console.clear();
+      this.printedLines = 0;
+      this.resized = false;
+    } else if (this.printedLines > 0) {
+      const out = new readline.Readline(stdout);
+      await out.moveCursor(0, -this.printedLines).clearScreenDown().commit();
+      this.printedLines = 0;
+    }
+    for (const line of lines) {
+      console.log(line);
+    }
+    this.printedLines = lines.length;
+  }
+}
+
+/**
+ * Streaming variant. When the active pipeline's structure is known
+ * (`graph`), redraws its diagram in place — live per-node status, taken
+ * branch route, loop progress, and any connection error (FR-009–FR-012,
+ * FR-015) — instead of the old scrolling per-event log; falls back to
+ * that plain log when the structure never loaded, so streaming still
+ * degrades gracefully rather than showing nothing. Verbose node output
+ * text prints permanently ABOVE the diagram's redraw region so it isn't
+ * erased by the next redraw.
  */
 async function handlePromptStreaming(
   client: PipelineClient,
   prompt: string,
   pipelineName: string,
+  graph: GraphModel | undefined,
   verbose: boolean,
   history: ConversationTurn[]
 ): Promise<void> {
@@ -211,32 +289,56 @@ async function handlePromptStreaming(
   console.log();
 
   let finalAnswer: string | undefined;
+  let state: GraphViewState | undefined = graph ? createGraphViewState(graph, { running: true }) : undefined;
+  const redraw = new DiagramRedraw();
+  redraw.start();
+  if (graph && state) {
+    await redraw.print(renderGraphText(graph, state));
+  }
 
   try {
     for await (const event of client.askStream(prompt, pipelineName, history)) {
+      if (graph && state) {
+        state = applyStreamEvent(state, event);
+      }
+
       if (event.type === "node_complete") {
-        const { node } = event.data;
-        const seconds = (node.duration_ms / 1000).toFixed(1);
-        console.log(
-          chalk.green("✓ ") +
-            chalk.bold(node.node_id) +
-            chalk.gray(` (${node.model_name}, ${seconds}s)`)
-        );
         if (verbose) {
+          const { node } = event.data;
+          const seconds = (node.duration_ms / 1000).toFixed(1);
+          console.log(
+            chalk.green("✓ ") +
+              chalk.bold(node.node_id) +
+              chalk.gray(` (${node.model_name}, ${seconds}s)`)
+          );
           console.log(`  ${node.output}\n`);
         }
+      } else if (event.type === "done") {
+        finalAnswer = event.data.final_answer;
+      }
+
+      if (graph && state) {
+        await redraw.print(renderGraphText(graph, state));
+      } else if (event.type === "node_complete") {
+        // No structure loaded — fall back to the plain completion log.
+        console.log(chalk.green("✓ ") + chalk.bold(event.data.node.node_id));
       } else if (event.type === "loop_iteration") {
         console.log(
           chalk.gray(`↻ ${event.data.loop_id} — starting iteration ${event.data.iteration}`)
         );
-      } else if (event.type === "done") {
-        finalAnswer = event.data.final_answer;
       }
     }
   } catch (err) {
+    if (graph && state) {
+      state = applyStreamError(state, toApiError(err));
+      await redraw.print(renderGraphText(graph, state));
+    }
+    redraw.stop();
     printError(err);
     return;
   }
+
+  redraw.stop();
 
   const elapsedMs = Date.now() - startedAt;
   console.log();

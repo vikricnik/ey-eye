@@ -71,10 +71,16 @@ export interface PipelineNodeInfo {
   model: string;
 }
 
+export interface PipelineBranchRouteInfo {
+  to: string;
+  when: string | null;
+  default: boolean;
+}
+
 export interface PipelineBranchInfo {
   id: string;
   from: string;
-  routes: string[];
+  routes: PipelineBranchRouteInfo[];
 }
 
 export interface PipelineLoopInfo {
@@ -83,6 +89,7 @@ export interface PipelineLoopInfo {
   back_to: string;
   exit_to: string;
   max_iterations: number;
+  on_max_iterations: "proceed" | "fail";
 }
 
 export interface PipelineDetail {
@@ -125,4 +132,72 @@ export interface ApiErrorBody {
   exceptionUID: string;
   details: Record<string, unknown>;
   validations: ValidationIssue[];
+}
+
+// ---------------------------------------------------------------------------
+// Graph model — the shared, structural representation of a pipeline's DAG
+// shape, built once from PipelineDetail by graphModel.ts's buildGraphModel()
+// and rendered by both cli (as text) and web (as SVG). See
+// specs/001-visual-dag-graph/data-model.md for the full field-by-field
+// rationale; kept here rather than duplicated per-consumer for the same
+// reason PipelineDetail itself lives in this shared package.
+// ---------------------------------------------------------------------------
+
+export interface GraphNode {
+  id: string;
+  model: string;
+  /** Layout depth: 0 for a root, otherwise 1 + max(level of structural predecessors). */
+  level: number;
+  isOutputCandidate: boolean;
+}
+
+export type GraphEdgeKind = "plain" | "branch" | "loop-continue" | "loop-exit";
+
+export interface GraphEdge {
+  from: string;
+  to: string;
+  kind: GraphEdgeKind;
+  /** Branch: the route's `when` expression, or "default". Loop: id + target/max-iterations. Null for plain edges. */
+  label: string | null;
+  branchId: string | null;
+  isDefaultRoute: boolean;
+  loopId: string | null;
+  /** The loop's configured max_iterations, structured (not just baked into
+   * `label`'s text) so live-status folding can initialize/compare
+   * LoopProgress.maxIterations numerically. Null for non-loop edges. */
+  loopMaxIterations: number | null;
+}
+
+export interface GraphModel {
+  pipelineName: string;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}
+
+// ---------------------------------------------------------------------------
+// Live, per-run view state — folded from AskStreamEvents/errors on top of a
+// GraphModel. Transient: reset whenever the pipeline changes or a new
+// prompt starts (FR-013).
+// ---------------------------------------------------------------------------
+
+export type NodeExecutionStatus = "not-started" | "running" | "complete" | "failed";
+
+export interface BranchRouteOutcome {
+  branchId: string;
+  takenTo: string | null;
+}
+
+export interface LoopProgress {
+  loopId: string;
+  iteration: number;
+  maxIterations: number;
+  exhausted: boolean;
+}
+
+export interface GraphViewState {
+  graph: GraphModel;
+  nodeStatus: Record<string, NodeExecutionStatus>;
+  branchOutcomes: Record<string, BranchRouteOutcome>;
+  loopProgress: Record<string, LoopProgress>;
+  connectionError: string | null;
 }

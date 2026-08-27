@@ -49,10 +49,10 @@ automatically.
 | `/help` | show available commands |
 | `/health` | show server info: pipelines directory, default pipeline, all available pipelines |
 | `/pipelines` | list every pipeline the server can run |
-| `/pipeline` | show the **active** pipeline's DAG — every node, its model, and its dependencies |
+| `/pipeline` | show the **active** pipeline's DAG as a box-drawing diagram — every node with its model, plain `depends_on` edges, and branch/loop edges each rendered visually distinct and labeled (condition/"default" for branches, max iterations for loops) |
 | `/use <name>` | switch to a different pipeline (confirms it exists first; clears conversation history since a different DAG likely has different context semantics) |
 | `/verbose` | toggle showing every node's output vs. just the final answer |
-| `/stream` | toggle streaming node-by-node progress as the pipeline runs, instead of waiting for the whole thing to finish (off by default) |
+| `/stream` | toggle streaming node-by-node progress as the pipeline runs, instead of waiting for the whole thing to finish (off by default). When on, the pipeline's diagram (same one `/pipeline` shows) redraws in place with live per-node status, the branch route actually taken, and loop iteration counts, instead of a scrolling per-node log |
 | `/reset` | clear conversation history without switching pipelines |
 | `/exit` | quit (also works: Ctrl+C or Ctrl+D) |
 

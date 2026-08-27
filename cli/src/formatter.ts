@@ -1,4 +1,5 @@
 import chalk from "chalk";
+import { buildGraphModel } from "@llm-pipeline/client";
 import type {
   AskResponse,
   HealthResponse,
@@ -6,6 +7,7 @@ import type {
   PipelineDetail,
   PipelineSummary,
 } from "@llm-pipeline/client";
+import { renderGraphText } from "./graphRenderer.js";
 
 const DIVIDER = chalk.gray("─".repeat(60));
 
@@ -42,38 +44,13 @@ export function formatPipelineList(pipelines: PipelineSummary[]): string {
 }
 
 export function formatPipelineDetail(detail: PipelineDetail): string {
+  const graph = buildGraphModel(detail);
   const lines: string[] = [
     chalk.bold.cyan(detail.name),
     chalk.gray(detail.description || "no description"),
     "",
-    chalk.bold.cyan("Nodes"),
+    ...renderGraphText(graph),
   ];
-  for (const node of detail.nodes) {
-    const isOutput = detail.output_node_candidates.includes(node.id);
-    const deps = node.depends_on.length > 0 ? node.depends_on.join(", ") : "(root)";
-    const tag = isOutput ? chalk.bold.magenta("  ← possible output") : "";
-    lines.push(
-      `  ${chalk.blue(node.id)} ${chalk.gray(`[${node.model}]`)} depends_on: ${chalk.yellow(deps)}${tag}`
-    );
-  }
-
-  if (detail.branches.length > 0) {
-    lines.push("", chalk.bold.cyan("Branches"));
-    for (const b of detail.branches) {
-      lines.push(`  ${chalk.blue(b.id)}: ${b.from} → ${b.routes.join(" | ")}`);
-    }
-  }
-
-  if (detail.loops.length > 0) {
-    lines.push("", chalk.bold.cyan("Loops"));
-    for (const l of detail.loops) {
-      lines.push(
-        `  ${chalk.blue(l.id)}: ${l.from} → (loop) ${l.back_to} / (exit) ${l.exit_to} ` +
-          `${chalk.gray(`[max ${l.max_iterations} iterations]`)}`
-      );
-    }
-  }
-
   return lines.join("\n");
 }
 

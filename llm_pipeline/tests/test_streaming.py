@@ -1,15 +1,18 @@
-from collections.abc import Iterator
+import asyncio
 import json
+from collections.abc import Iterator
 
 import pytest
 from fastapi.testclient import TestClient
 
-from llm_pipeline.main import app
 import llm_pipeline.dag_builder.node_types as node_types_module
 import llm_pipeline.rate_limit as rate_limit_module
-from llm_pipeline.settings import settings
-from llm_pipeline.providers import ModelSpec, LLMProvider
+from llm_pipeline.dag_builder.loops import _make_loop_failed_node
+from llm_pipeline.errors import PipelineExecutionError
+from llm_pipeline.main import app
+from llm_pipeline.providers import LLMProvider, ModelSpec
 from llm_pipeline.routers.ask import _extract_chunk
+from llm_pipeline.settings import settings
 
 
 def test_extract_chunk_handles_plain_dict_shape() -> None:
@@ -50,7 +53,7 @@ class _FailingProvider:
 
 
 @pytest.fixture(autouse=True)
-def _reset_shared_state(monkeypatch: pytest.MonkeyPatch) -> None:  # pyright: ignore[reportUnusedFunction]  # noqa: E501
+def _reset_shared_state(monkeypatch: pytest.MonkeyPatch) -> None:  # pyright: ignore[reportUnusedFunction]
     """Same reasoning as test_error_responses.py's fixture of the same name
     — auth/rate-limit are still process-wide singletons needing an explicit
     reset; the pipeline cache resets itself via lifespan re-running for
@@ -182,6 +185,28 @@ def test_stream_provider_failure_yields_error_event_with_200_status(
         "validations",
     }
     assert data["status"] == 503
+    # FR-012 (visual DAG graph): a live-status client needs to know WHICH
+    # node failed, not just that the run as a whole did — simple-local has
+    # exactly one node, "answer".
+    assert data["details"] == {"node_id": "answer"}
+
+
+def test_loop_exhaustion_failure_carries_loop_id() -> None:
+    """PipelineExecutionError raised when a loop exceeds max_iterations
+    under on_max_iterations=fail must carry loop_id, not just node_id —
+    there's no real failing node in that case (it's the loop's own
+    synthetic failed-path node), so loop_id is the only way a live-status
+    client can attribute the failure to something concrete. Exercised
+    directly against the loop-failed node builder rather than through a
+    full HTTP run, since none of the shipped/fixture pipelines configure
+    on_max_iterations: fail."""
+    node_fn = _make_loop_failed_node("revise_until_approved")
+
+    with pytest.raises(PipelineExecutionError) as exc_info:
+        asyncio.run(node_fn({}))  # type: ignore[arg-type]
+
+    assert exc_info.value.loop_id == "revise_until_approved"
+    assert exc_info.value.node_id is None
 
 
 def test_stream_pipeline_not_found_returns_normal_404_before_streaming(

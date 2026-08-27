@@ -15,7 +15,13 @@ export class PipelineApiError extends Error {
     message: string,
     public readonly statusCode?: number,
     public readonly exceptionUID?: string,
-    public readonly validations?: ValidationIssue[]
+    public readonly validations?: ValidationIssue[],
+    // Structured extra context — for a pipeline execution failure, this is
+    // where node_id/loop_id live (see api_schemas.py's ErrorResponse.details
+    // and specs/001-visual-dag-graph/contracts/pipeline-detail-api.md),
+    // letting a live-status client mark the SPECIFIC node/loop a failure
+    // is attributable to instead of only knowing the run as a whole failed.
+    public readonly details?: Record<string, unknown>
   ) {
     super(message);
     this.name = "PipelineApiError";
@@ -31,7 +37,13 @@ async function buildApiError(response: Response): Promise<PipelineApiError> {
       const fieldDetails = body.validations.map((v) => `${v.field}: ${v.message}`).join("; ");
       message = `${message} (${fieldDetails})`;
     }
-    return new PipelineApiError(message, response.status, body.exceptionUID, body.validations);
+    return new PipelineApiError(
+      message,
+      response.status,
+      body.exceptionUID,
+      body.validations,
+      body.details
+    );
   } catch {
     // response body wasn't JSON (or didn't match the expected shape) —
     // fall back to a generic message rather than throwing while handling
@@ -212,7 +224,8 @@ export class PipelineClient {
               errBody.message ?? "Pipeline execution failed",
               errBody.status,
               errBody.exceptionUID,
-              errBody.validations
+              errBody.validations,
+              errBody.details
             );
           }
           if (

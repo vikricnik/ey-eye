@@ -13,6 +13,16 @@
   --warn: #F5C061;
   --radius: 3px;
   --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  /* Graph diagram edge kinds — kept visually distinct from one another
+     (FR-003): plain edges use --text-dim (understated, the "default"
+     edge), branch edges use --accent (matches the app's existing accent
+     color for anything decision-like), loop edges use --warn (a
+     different hue entirely, so a loop-continue edge is never mistaken
+     for a branch route at a glance). */
+  --graph-plain: var(--text-dim);
+  --graph-branch: var(--accent);
+  --graph-loop: var(--warn);
 }
 
 * { box-sizing: border-box; }
@@ -102,65 +112,147 @@ header {
 .status-dot.online { background: var(--valid); box-shadow: 0 0 6px var(--valid); }
 .status-dot.offline { background: var(--invalid); box-shadow: 0 0 6px var(--invalid); }
 
-/* ---------- Relay track (signature element) ---------- */
-.relay {
-  display: flex;
-  align-items: center;
-  gap: 0;
-  padding: 10px 20px;
-  background: var(--panel);
+/* ---------- Pipeline graph diagram ---------- */
+.graph-container {
   border-bottom: 1px solid var(--border);
+  background: var(--panel);
   flex-shrink: 0;
+  /* FR-016: basic scroll/pan for diagrams larger than the viewport — no
+     zoom controls required. max-height keeps the container from pushing
+     the transcript/input area off-screen for a tall (many-parallel-node)
+     pipeline; overflow: auto gives both scrollbars as needed. */
+  max-height: 300px;
+  overflow: auto;
+  cursor: grab;
+}
+.graph-container:active {
+  cursor: grabbing;
+}
+.graph-container:empty {
+  display: none;
 }
 
-.relay-stage {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 5px 10px;
-  font-size: 10px;
-  letter-spacing: 0.06em;
+.graph-svg {
+  display: block;
+  padding: 10px 14px;
+}
+
+.graph-node-box {
+  fill: var(--panel-raised);
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.graph-node-id {
+  fill: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+}
+.graph-node-model {
+  fill: var(--text-faint);
+  font-family: var(--mono);
+  font-size: 9px;
+}
+.graph-node-output-badge {
+  fill: var(--accent);
+  font-family: var(--mono);
+  font-size: 9px;
   text-transform: uppercase;
-  color: var(--text-faint);
+  letter-spacing: 0.03em;
+}
+.graph-node.output-candidate .graph-node-box {
+  stroke: var(--accent-dim);
+  stroke-width: 1.5;
+}
+
+/* ---------- Live per-node status (User Story 3) ---------- */
+.graph-node.status-running .graph-node-box {
+  stroke: var(--warn);
+  stroke-width: 2;
+  animation: node-pulse 1.1s ease-in-out infinite;
+}
+.graph-node.status-complete .graph-node-box {
+  stroke: var(--valid);
+  stroke-width: 2;
+}
+.graph-node.status-failed .graph-node-box {
+  stroke: var(--invalid);
+  stroke-width: 2;
+}
+.graph-node.status-failed .graph-node-id {
+  fill: var(--invalid);
+}
+
+@keyframes node-pulse {
+  0%, 100% { stroke-opacity: 1; }
+  50% { stroke-opacity: 0.45; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .graph-node.status-running .graph-node-box { animation: none; }
+}
+
+/* ---------- Branch route outcome (User Story 3) ---------- */
+.graph-edge-group.route-not-taken .graph-edge,
+.graph-edge-group.route-not-taken .graph-edge-label {
+  opacity: 0.3;
+}
+.graph-edge-group.route-taken .graph-edge {
+  stroke-width: 2.5;
+  stroke-dasharray: none;
+}
+.graph-edge-group.route-taken .graph-edge-label {
+  font-weight: 700;
+}
+
+.graph-edge.plain {
+  stroke: var(--graph-plain);
+  stroke-width: 1.5;
+  fill: none;
+}
+.graph-edge.branch {
+  stroke: var(--graph-branch);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 3;
+  fill: none;
+}
+.graph-edge.loop {
+  stroke: var(--graph-loop);
+  stroke-width: 1.5;
+  stroke-dasharray: 1.5 3.5;
+  stroke-linecap: round;
+  fill: none;
+}
+
+.graph-edge-label {
+  font-family: var(--mono);
+  font-size: 9px;
+}
+.graph-edge-label.branch {
+  fill: var(--graph-branch);
+}
+.graph-edge-label.loop {
+  fill: var(--graph-loop);
+}
+
+.graph-arrow.plain path {
+  fill: var(--graph-plain);
+}
+.graph-arrow.branch path {
+  fill: var(--graph-branch);
+}
+.graph-arrow.loop path {
+  fill: var(--graph-loop);
+}
+
+.graph-error {
+  margin: 12px 14px;
+  background: rgba(248, 113, 113, 0.08);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  color: var(--invalid);
+  padding: 10px 14px;
   border-radius: var(--radius);
-  transition: color 0.3s ease, background 0.3s ease;
-}
-
-.relay-stage .dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--text-faint);
-  transition: background 0.3s ease, box-shadow 0.3s ease;
-}
-
-.relay-stage.active {
-  color: var(--accent);
-  background: rgba(79, 209, 197, 0.08);
-}
-.relay-stage.active .dot {
-  background: var(--accent);
-  box-shadow: 0 0 6px var(--accent);
-  animation: pulse 1s ease-in-out infinite;
-}
-
-.relay-stage.complete {
-  color: var(--text-dim);
-}
-.relay-stage.complete .dot {
-  background: var(--valid);
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
-}
-
-.relay-line {
-  flex: 1;
-  height: 1px;
-  background: var(--border);
-  max-width: 28px;
+  font-size: 12px;
 }
 
 /* ---------- Transcript ---------- */
@@ -481,7 +573,3 @@ button.loading .btn-spinner {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-faint); }
-
-@media (prefers-reduced-motion: reduce) {
-  .relay-stage.active .dot { animation: none; }
-}

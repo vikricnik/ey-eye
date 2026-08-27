@@ -1,8 +1,20 @@
 import "./style.css";
-import { PipelineClient, PipelineApiError } from "@llm-pipeline/client";
-import { RelayAnimator } from "./relayAnimator";
+import {
+  PipelineClient,
+  PipelineApiError,
+  buildGraphModel,
+  createGraphViewState,
+  applyStreamEvent,
+  applyStreamError,
+} from "@llm-pipeline/client";
 import { renderTurn, renderError, beginStreamingTurn } from "./render";
-import type { ConversationTurn } from "@llm-pipeline/client";
+import {
+  renderGraphSvg,
+  renderGraphErrorMarker,
+  applyGraphViewState,
+  enableDragPan,
+} from "./graphView";
+import type { ConversationTurn, GraphModel, GraphViewState } from "@llm-pipeline/client";
 
 declare global {
   interface Window {
@@ -32,14 +44,16 @@ const resetBtn = requireElement<HTMLButtonElement>("reset-btn");
 const statusDot = requireElement<HTMLElement>("status-dot");
 const statusText = requireElement<HTMLElement>("status-text");
 const serverUrlLabel = requireElement<HTMLElement>("server-url");
-const relayContainer = requireElement<HTMLElement>("relay");
 const pipelineSelect = requireElement<HTMLSelectElement>("pipeline-select");
+const graphContainer = requireElement<HTMLElement>("graph-container");
 
 const client = new PipelineClient(BASE_URL, API_KEY);
-const relay = new RelayAnimator(relayContainer);
+enableDragPan(graphContainer);
 
 let isLoading = false;
 let activePipelineName = "";
+let activeGraph: GraphModel | undefined;
+let graphViewState: GraphViewState | undefined;
 // Conversation memory for this session — only the final answer from each
 // turn is kept as context for the next request; cleared whenever the
 // active pipeline changes, since a different DAG likely has different
@@ -90,9 +104,19 @@ async function switchToPipeline(name: string, opts: { clearHistory: boolean }): 
 
   try {
     const detail = await client.getPipelineDetail(name);
-    relay.setStages(detail.nodes.map((n) => n.id));
-  } catch {
-    relay.setStages([]);
+    activeGraph = buildGraphModel(detail);
+    // FR-013: a fresh, all-not-started view state every time the pipeline
+    // changes — no in-flight or completed run's status leaks onto it.
+    graphViewState = createGraphViewState(activeGraph);
+    graphContainer.innerHTML = "";
+    graphContainer.appendChild(renderGraphSvg(activeGraph));
+  } catch (err) {
+    activeGraph = undefined;
+    graphViewState = undefined;
+    const message =
+      err instanceof PipelineApiError || err instanceof Error ? err.message : String(err);
+    graphContainer.innerHTML = "";
+    graphContainer.appendChild(renderGraphErrorMarker(`couldn't load pipeline structure: ${message}`));
   }
 }
 
@@ -188,50 +212,91 @@ async function handleSend(): Promise<void> {
   }
 }
 
+/** Wraps any caught value into a PipelineApiError so applyStreamError()
+ * always has a `.message`/`.details` to read, regardless of what the
+ * underlying failure actually was. */
+function toApiError(err: unknown): PipelineApiError {
+  if (err instanceof PipelineApiError) return err;
+  return new PipelineApiError(err instanceof Error ? err.message : String(err));
+}
+
+/** Starts a fresh, "running" live view state for the active graph — every
+ * root node immediately eligible, since it starts executing the instant
+ * the request is sent (FR-013's per-run reset). No-op if the pipeline's
+ * structure never loaded. */
+function beginRun(): void {
+  if (!activeGraph) return;
+  graphViewState = createGraphViewState(activeGraph, { running: true });
+  applyGraphViewState(graphContainer, graphViewState);
+}
+
 async function handleSendBuffered(prompt: string, startedAt: number): Promise<void> {
-  relay.start();
+  beginRun();
   try {
     const response = await client.ask(prompt, activePipelineName, history);
     const elapsedMs = performance.now() - startedAt;
-    relay.finish();
+    // /ask has no per-node events to stream live — but once the response
+    // arrives, folding each node's completion (and every loop's final
+    // iteration count) through the same applyStreamEvent() used by
+    // streaming gets the graph to the correct FINAL state (route taken,
+    // loop counts, every node complete) rather than leaving it stuck
+    // showing "running" forever.
+    if (graphViewState) {
+      for (const node of Object.values(response.node_outputs)) {
+        graphViewState = applyStreamEvent(graphViewState, { type: "node_complete", data: { node } });
+      }
+      for (const [loopId, iteration] of Object.entries(response.loop_iterations)) {
+        graphViewState = applyStreamEvent(graphViewState, {
+          type: "loop_iteration",
+          data: { loop_id: loopId, iteration },
+        });
+      }
+      applyGraphViewState(graphContainer, graphViewState);
+    }
     renderTurn(transcript, prompt, response, verboseToggle.checked, elapsedMs);
     // Only the final answer is kept as context for the next turn —
     // intermediate node outputs aren't carried forward.
     history.push({ prompt, final_answer: response.final_answer });
   } catch (err) {
-    relay.finish();
+    if (graphViewState) {
+      graphViewState = applyStreamError(graphViewState, toApiError(err));
+      applyGraphViewState(graphContainer, graphViewState);
+    }
     renderCaughtError(prompt, err);
   }
 }
 
 /**
- * Streaming variant: drives the relay track from REAL node_complete events
- * (relay.markComplete()) instead of a simulated timer, AND renders each
- * node's output card the moment it arrives (via beginStreamingTurn) rather
- * than waiting for the whole pipeline to finish — the DOM equivalent of the
- * CLI's line-by-line streaming output.
+ * Streaming variant: renders each node's output card the moment it
+ * arrives (via beginStreamingTurn) rather than waiting for the whole
+ * pipeline to finish — the DOM equivalent of the CLI's line-by-line
+ * streaming output. Also drives the live graph view (FR-009–FR-012):
+ * every event is folded through applyStreamEvent() and immediately
+ * re-applied to the diagram.
  */
 async function handleSendStreaming(prompt: string, startedAt: number): Promise<void> {
-  relay.startReal();
   const turnHandle = beginStreamingTurn(transcript, prompt, verboseToggle.checked);
+  beginRun();
 
   try {
     for await (const event of client.askStream(prompt, activePipelineName, history)) {
+      if (graphViewState) {
+        graphViewState = applyStreamEvent(graphViewState, event);
+        applyGraphViewState(graphContainer, graphViewState);
+      }
       if (event.type === "node_complete") {
-        relay.markComplete(event.data.node.node_id);
         turnHandle.addNodeOutput(event.data.node.node_id, event.data.node);
       } else if (event.type === "done") {
         const elapsedMs = performance.now() - startedAt;
-        relay.finish();
         turnHandle.finish(event.data, elapsedMs);
         history.push({ prompt, final_answer: event.data.final_answer });
       }
-      // loop_iteration events don't have a corresponding relay stage (loops
-      // aren't part of the static node list the relay track is built from)
-      // — nothing to update for those here.
     }
   } catch (err) {
-    relay.finish();
+    if (graphViewState) {
+      graphViewState = applyStreamError(graphViewState, toApiError(err));
+      applyGraphViewState(graphContainer, graphViewState);
+    }
     renderCaughtError(prompt, err);
   }
 }

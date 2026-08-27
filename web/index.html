@@ -27,10 +27,10 @@
     </div>
   </header>
 
-  <!-- Stage indicators are built dynamically per active pipeline's node
-       list (see relayAnimator.ts) — a DAG's shape varies per pipeline, so
-       there's no fixed set of stages to hardcode here anymore. -->
-  <div class="relay" id="relay"></div>
+  <!-- The pipeline's DAG structure diagram (see graphView.ts) — rebuilt
+       whenever the active pipeline changes, and updated in place with
+       live per-node status while a streaming run is in progress. -->
+  <div class="graph-container" id="graph-container"></div>
 
   <main id="transcript">
     <div class="empty-state" id="empty-state">

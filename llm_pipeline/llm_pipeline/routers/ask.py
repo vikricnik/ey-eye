@@ -16,15 +16,15 @@ from llm_pipeline.api_schemas import (
     NodeOutputDTO,
     StreamDoneEvent,
 )
-from llm_pipeline.state import PipelineState, NodeResult
-from llm_pipeline.pipeline_config import PipelineDefinition
-from llm_pipeline.history import build_contextual_input
-from llm_pipeline.errors import PipelineExecutionError, PipelineNotFoundError
-from llm_pipeline.settings import settings
 from llm_pipeline.auth import require_api_key
-from llm_pipeline.rate_limit import enforce_rate_limit
 from llm_pipeline.error_handling import ERROR_RESPONSES, build_error_response
+from llm_pipeline.errors import PipelineExecutionError, PipelineNotFoundError
+from llm_pipeline.history import build_contextual_input
+from llm_pipeline.pipeline_config import PipelineDefinition
 from llm_pipeline.pipeline_loader import PipelineCache, get_pipeline_cache
+from llm_pipeline.rate_limit import enforce_rate_limit
+from llm_pipeline.settings import settings
+from llm_pipeline.state import NodeResult, PipelineState
 
 logger: logging.Logger = logging.getLogger("llm_pipeline")
 
@@ -233,7 +233,16 @@ async def _stream_pipeline_run(
                 # `{}` update) carries no client-visible information — skip.
     except PipelineExecutionError as e:
         logger.exception(f"Pipeline '{req.pipeline_name}' stream failed")
-        yield _sse("error", build_error_response(request, 503, str(e)))
+        # Lets a live-status client (the visual DAG graph) mark the
+        # SPECIFIC node/loop this failure is attributable to, when known —
+        # see PipelineExecutionError's docstring and
+        # specs/001-visual-dag-graph/contracts/pipeline-detail-api.md.
+        details: dict[str, object] = {}
+        if e.node_id is not None:
+            details["node_id"] = e.node_id
+        elif e.loop_id is not None:
+            details["loop_id"] = e.loop_id
+        yield _sse("error", build_error_response(request, 503, str(e), details=details))
         return
     except Exception as e:
         logger.exception(f"Pipeline '{req.pipeline_name}' stream failed unexpectedly")

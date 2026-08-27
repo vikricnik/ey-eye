@@ -7,7 +7,9 @@ state.py's internal PipelineState shape is not.
 """
 
 from datetime import datetime
-from pydantic import BaseModel, Field, ConfigDict
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ConversationTurn(BaseModel):
@@ -118,12 +120,18 @@ class PipelineNodeInfo(BaseModel):
     model: str  # "provider:model" identity string
 
 
+class PipelineBranchRouteInfo(BaseModel):
+    to: str
+    when: str | None  # None for the branch's default route
+    default: bool
+
+
 class PipelineBranchInfo(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     id: str
     from_: str = Field(alias="from")  # "from" is a reserved word in Python
-    routes: list[str]
+    routes: list[PipelineBranchRouteInfo]
 
 
 class PipelineLoopInfo(BaseModel):
@@ -134,6 +142,7 @@ class PipelineLoopInfo(BaseModel):
     back_to: str
     exit_to: str
     max_iterations: int
+    on_max_iterations: Literal["proceed", "fail"]
 
 
 class PipelineDetailResponse(BaseModel):

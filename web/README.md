@@ -124,20 +124,26 @@ already configured server-side via `CORS_ALLOWED_ORIGINS` in `.env`.
 - Type a prompt, press **Enter** to send (**Shift+Enter** for a newline)
 - Live health indicator in the header (self-scheduling async poll every 15s —
   not `setInterval`, so a slow health check can't cause overlapping requests)
-- A **dynamic relay track** shows the active pipeline's actual node list
-  (fetched from `GET /pipelines/{name}`) and animates through them while a
-  request is in flight. With **"stream progress"** on (see below), this
-  reflects REAL node completions as they happen (`relay.markComplete()`,
-  driven by actual `node_complete` SSE events) rather than simulated
-  pacing; with it off, it's client-side pacing only — the non-streaming API
-  returns a single JSON response with no per-node timing — so once the last
-  node is reached, its indicator keeps pulsing indefinitely (rather than
-  freezing) until the real response arrives, however long that takes.
+- A **DAG diagram** (built from `GET /pipelines/{name}`) shows the active
+  pipeline's actual node/edge structure — plain `depends_on` edges, branch
+  routes (labeled with their condition or "default"), and loop edges
+  (labeled with max iterations) each rendered visually distinct. Basic
+  scroll/pan (click-and-drag or your browser's native scrolling) reaches
+  anything larger than the viewport.
+- With **"stream progress"** on (see below), the same diagram updates live
+  while a request is in flight: each node's border shows
+  not-started/running/complete/failed status, the branch route that was
+  actually taken is highlighted while the others dim, and a loop's edge
+  label shows its current iteration count against its configured max —
+  all driven by real `node_complete`/`loop_iteration` SSE events, not
+  simulated pacing. With streaming off, the diagram jumps straight to
+  showing the final state once the single JSON response arrives, since the
+  non-streaming API has no per-node timing to show progressively.
 - **"stream progress"** checkbox (off by default) switches to `POST
   /ask/stream`, showing each node as it actually completes instead of one
   spinner until the whole pipeline finishes. This is **node-level**
-  progress, not token-level — each relay stage completes when that node
-  finishes, not as the model streams individual words. See
+  progress, not token-level — the diagram updates when a node finishes,
+  not as the model streams individual words. See
   `llm_pipeline/README.md`'s `POST /ask/stream` section for why (token-level
   streaming would mean every provider adapter implementing it individually;
   node-level works uniformly across all of them).

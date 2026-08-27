@@ -1,11 +1,12 @@
 from collections.abc import Hashable
-from langgraph.graph import StateGraph, END
 
+from langgraph.graph import END, StateGraph
+
+from llm_pipeline.dag_builder.node_types import LoopIncrementCallable, NodeCallable, RouterCallable
+from llm_pipeline.errors import PipelineExecutionError
 from llm_pipeline.pipeline_config import LoopConfig
 from llm_pipeline.safe_eval import evaluate_condition
-from llm_pipeline.errors import PipelineExecutionError
-from llm_pipeline.dag_builder.node_types import NodeCallable, RouterCallable, LoopIncrementCallable
-from llm_pipeline.state import PipelineState, NodeResult
+from llm_pipeline.state import NodeResult, PipelineState
 
 
 def _make_loop_router(loop: LoopConfig) -> RouterCallable:
@@ -37,7 +38,8 @@ def _make_loop_failed_node(loop_id: str) -> NodeCallable:
     async def node_fn(state: PipelineState) -> dict[str, dict[str, NodeResult]]:
         raise PipelineExecutionError(
             f"loop '{loop_id}' exceeded max_iterations without meeting exit_when "
-            f"(on_max_iterations=fail)"
+            f"(on_max_iterations=fail)",
+            loop_id=loop_id,
         )
 
     return node_fn
