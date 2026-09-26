@@ -42,8 +42,15 @@ jobs:
         # looks at (import hygiene, common bug patterns, style).
         run: uv run ruff check .
 
+      - name: ruff format --check
+        # Formatting is checked, not applied: run `uv run ruff format .`
+        # locally when this fails.
+        run: uv run ruff format --check .
+
       - name: mypy --strict
-        run: uv run mypy llm_pipeline/
+        # The tests too, not just the package — a test can hide a real type
+        # problem as easily as the code it tests.
+        run: uv run mypy .
 
       - name: pyright --strict
         # Complements mypy rather than replacing it — different type-checking
@@ -80,12 +87,9 @@ jobs:
               raise SystemExit(f'{len(failures)} pipeline(s) failed validation')
           "
 
-  cli-client:
-    name: CLI client — typecheck
+  typescript:
+    name: TypeScript — typecheck, tests, web build
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: cli
 
     steps:
       - uses: actions/checkout@v4
@@ -95,33 +99,37 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-          cache-dependency-path: cli/package-lock.json
+          # The only lockfile: this is one npm workspace (packages/client,
+          # cli, web), installed from the repo root.
+          cache-dependency-path: package-lock.json
 
-      - name: Install dependencies
-        run: npm install
+      - name: Install workspace dependencies
+        run: npm ci
 
-      - name: TypeScript check
-        run: npx tsc --noEmit
+      - name: Typecheck — shared client, CLI, web (source and tests)
+        run: |
+          npx tsc --noEmit -p packages/client
+          npm run typecheck --workspace=cli
+          npm run typecheck --workspace=web
 
-  web-client:
-    name: Web client — typecheck
+      - name: Tests — shared client, CLI (incl. piped input) and web
+        run: |
+          npm test --workspace=packages/client
+          npm test --workspace=cli
+          npm test --workspace=web
+
+      - name: Web — production build
+        run: npm run build --workspace=web
+
+  docker-build:
+    name: Docker — build server and web images
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: "npm"
-          cache-dependency-path: web/package-lock.json
+      - name: Build images (no push)
+        run: docker compose build pipeline-server web
 
-      - name: Install dependencies
-        run: npm install
-
-      - name: TypeScript check
-        run: npx tsc --noEmit
+      - name: Build the CLI image
+        run: docker build -f cli/Dockerfile -t llm-pipeline-cli .

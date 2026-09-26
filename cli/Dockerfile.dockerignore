@@ -1,0 +1,10 @@
+# Build context is the repo root; send only what cli/Dockerfile copies.
+**/node_modules
+**/dist
+.git
+llm_pipeline
+specs
+.specify
+.claude
+.github
+**/*.md

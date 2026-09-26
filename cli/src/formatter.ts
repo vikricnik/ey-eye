@@ -1,10 +1,11 @@
 import chalk from "chalk";
-import { buildGraphModel } from "@llm-pipeline/client";
+import { buildGraphModel, describeUsage } from "@llm-pipeline/client";
 import type {
   AskResponse,
   HealthResponse,
   NodeOutput,
   PipelineDetail,
+  PreviewPromptResponse,
   PipelineSummary,
 } from "@llm-pipeline/client";
 import { renderGraphText } from "./graphRenderer.js";
@@ -62,9 +63,25 @@ function indent(text: string, spaces: number): string {
     .join("\n");
 }
 
+/** "(model, 1.2s · 3,900 in · 12 out · 50 tok/s · context 4,096 (95% used))" */
+export function nodeStats(node: NodeOutput): string {
+  const usage = describeUsage(node.usage);
+  const stats = `(${node.model_name}, ${formatDuration(node.duration_ms)}${usage?.summary ? ` · ${usage.summary}` : ""})`;
+  return usage?.level === "full" ? chalk.red(stats) : usage?.level === "near" ? chalk.yellow(stats) : chalk.gray(stats);
+}
+
+/** One line per node whose prompt filled its context window — shown even
+ * without /verbose, because the cut-off happens silently. */
+export function contextWarnings(nodes: NodeOutput[]): string[] {
+  return nodes.flatMap((node) => {
+    const usage = describeUsage(node.usage);
+    return usage?.level === "full" ? [chalk.yellow(`⚠ ${node.node_id}: ${usage.warning}`)] : [];
+  });
+}
+
 function formatNode(nodeId: string, node: NodeOutput, isOutputNode: boolean): string {
   const tag = isOutputNode ? chalk.bold.magenta("  ← output node") : "";
-  const header = `${chalk.bold.blue(nodeId)} ${chalk.gray(`(${node.model_name}, ${formatDuration(node.duration_ms)})`)}${tag}`;
+  const header = `${chalk.bold.blue(nodeId)} ${nodeStats(node)}${tag}`;
   return `${header}\n${indent(node.output, 2)}`;
 }
 
@@ -96,6 +113,9 @@ export function formatAskResponse(
     }
   }
 
+  const warnings = contextWarnings(Object.values(response.node_outputs));
+  if (warnings.length > 0) sections.push("", ...warnings);
+
   const loopIds = Object.keys(response.loop_iterations);
   if (loopIds.length > 0) {
     sections.push(DIVIDER);
@@ -106,4 +126,19 @@ export function formatAskResponse(
   }
 
   return sections.join("\n");
+}
+
+/** /preview: what a node would receive. `basis` says which message it was
+ * rendered for (null: placeholders — nothing has run yet). */
+export function formatPreview(nodeId: string, preview: PreviewPromptResponse, basis: string | null): string {
+  const lines = [
+    chalk.bold.cyan(`What ${nodeId} would receive`) +
+      chalk.gray(` — ${basis ?? "with placeholders until the first run"}, ${preview.prompt.length.toLocaleString("en-US")} characters`),
+  ];
+  if (preview.system) lines.push(chalk.gray("system:"), indent(preview.system, 2));
+  lines.push(chalk.gray("prompt:"), indent(preview.prompt, 2));
+  if (preview.missing.length > 0) {
+    lines.push(chalk.gray(`(no output yet from ${preview.missing.join(", ")} — shown as placeholders)`));
+  }
+  return lines.join("\n") + "\n";
 }

@@ -1,28 +1,38 @@
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
+from contextlib import aclosing
 from typing import cast
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel
 
 from llm_pipeline.api_schemas import (
     AskRequest,
     AskResponse,
-    ConversationTurn,
     LoopIterationEvent,
     NodeCompleteEvent,
     NodeOutputDTO,
+    NodeStartEvent,
+    NodeTokenEvent,
     StreamDoneEvent,
 )
 from llm_pipeline.auth import require_api_key
+from llm_pipeline.dag_builder.node_types import NODE_START_EVENT
+from llm_pipeline.disconnects import cancel_on_disconnect, until_disconnected
 from llm_pipeline.error_handling import ERROR_RESPONSES, build_error_response
 from llm_pipeline.errors import PipelineExecutionError, PipelineNotFoundError
-from llm_pipeline.history import build_contextual_input
+from llm_pipeline.history import Summarizer, prepare_input
 from llm_pipeline.pipeline_config import PipelineDefinition
+from llm_pipeline.pipeline_config.effective import effective_model
+from llm_pipeline.pipeline_config.schema import DEFAULT_TEMPERATURE
+from llm_pipeline.pipeline_config.templates import render
 from llm_pipeline.pipeline_loader import PipelineCache, get_pipeline_cache
+from llm_pipeline.providers import ModelSpec, generate_with_retry, get_provider
 from llm_pipeline.rate_limit import enforce_rate_limit
+from llm_pipeline.rerun import replay_outputs
 from llm_pipeline.settings import settings
 from llm_pipeline.state import NodeResult, PipelineState
 
@@ -55,9 +65,65 @@ def _validate_prompt_and_history(req: AskRequest) -> None:
                 status_code=400,
                 detail=f"history[{i}].final_answer exceeds max_history_turn_length",
             )
+        for node_id, text in turn.outputs.items():
+            if len(text) > settings.max_history_turn_length:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"history[{i}].outputs.{node_id} exceeds max_history_turn_length",
+                )
 
 
-def _prepare_ask(
+def _summarizer(definition: PipelineDefinition, cache: PipelineCache) -> Summarizer | None:
+    """The model call that condenses older turns, when the pipeline has
+    `history.summarize` — same timeout, retries and circuit breaker as the
+    pipeline's nodes."""
+    config = definition.history.summarize
+    if config is None:
+        return None
+    model = effective_model(config.model, None)
+    assert model is not None
+    spec = ModelSpec(
+        model.provider,
+        model.model,
+        model.temperature if model.temperature is not None else DEFAULT_TEMPERATURE,
+        model.options,
+    )
+    execution = definition.execution
+
+    async def summarize(history: str) -> str:
+        generation = await generate_with_retry(
+            get_provider(spec),
+            render(config.prompt, {"history": history}),
+            spec,
+            execution.model_timeout_seconds,
+            max_attempts=execution.max_retries + 1,
+            backoff_base_seconds=execution.retry_backoff_seconds,
+            circuit_breaker=cache.circuit_breaker,
+        )
+        return generation.text
+
+    return summarize
+
+
+def _run_config(definition: PipelineDefinition) -> RunnableConfig:
+    """LangGraph run config: the pipeline's parallelism limit, if any."""
+    limit = definition.execution.max_concurrency
+    return RunnableConfig(max_concurrency=limit) if limit is not None else RunnableConfig()
+
+
+def _remembered(
+    definition: PipelineDefinition, node_outputs: dict[str, NodeResult]
+) -> dict[str, str]:
+    """Outputs of the nodes in `history.remember` that ran, for the client
+    to keep with this turn."""
+    return {
+        node_id: node_outputs[node_id]["output"]
+        for node_id in definition.history.remember
+        if node_id in node_outputs
+    }
+
+
+async def prepare_ask(
     req: AskRequest, cache: PipelineCache
 ) -> tuple[PipelineDefinition, CompiledStateGraph, PipelineState]:
     """Shared setup for both /ask and /ask/stream: validates the request,
@@ -66,28 +132,56 @@ def _prepare_ask(
     code — this always runs BEFORE either endpoint has sent any response
     (streaming or not), so raising here is always safe. Once /ask/stream
     starts actually streaming, that safety no longer holds — see
-    _stream_pipeline_run's docstring."""
+    pipeline_events' docstring."""
     _validate_prompt_and_history(req)
 
     try:
         definition, graph = cache.get(req.pipeline_name)
     except PipelineNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
 
-    trimmed_history: list[ConversationTurn] = (
-        req.history[-definition.execution.max_history_turns :]
-        if definition.execution.max_history_turns > 0
-        else []
+    replay = _replay(req, definition)
+    prepared = await prepare_input(
+        req.prompt, req.history, definition, _summarizer(definition, cache)
     )
-    contextual_input = build_contextual_input(req.prompt, trimmed_history)
 
     initial_state: PipelineState = {
-        "input": req.prompt,
-        "contextual_input": contextual_input,
+        "input": prepared.question,
+        "contextual_input": prepared.contextual,
+        "history": prepared.history,
         "node_outputs": {},
         "loop_counts": {},
     }
+    if replay:
+        initial_state["replay"] = replay
     return definition, graph, initial_state
+
+
+def _replay(req: AskRequest, definition: PipelineDefinition) -> dict[str, str]:
+    """A re-run's reused outputs (see rerun.py) — empty for a normal run."""
+    if req.rerun is None:
+        return {}
+    if not any(n.id == req.rerun.from_node for n in definition.nodes):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"can't re-run from '{req.rerun.from_node}': "
+                f"no such node in '{definition.name}'"
+            ),
+        )
+    for node_id, text in req.rerun.outputs.items():
+        if len(text) > settings.max_history_turn_length:
+            raise HTTPException(
+                status_code=400,
+                detail=f"rerun.outputs.{node_id} exceeds max_history_turn_length",
+            )
+    return replay_outputs(definition, req.rerun.from_node, req.rerun.outputs)
+
+
+def node_dtos(node_outputs: dict[str, NodeResult]) -> dict[str, NodeOutputDTO]:
+    return {
+        node_id: NodeOutputDTO.model_validate(result) for node_id, result in node_outputs.items()
+    }
 
 
 def _resolve_output_node(
@@ -109,22 +203,38 @@ def _resolve_output_node(
     responses={k: ERROR_RESPONSES[k] for k in (400, 401, 404, 422, 429, 502, 503)},
 )
 async def ask(
-    req: AskRequest, cache: PipelineCache = Depends(get_pipeline_cache)
+    req: AskRequest,
+    request: Request,
+    cache: PipelineCache = Depends(get_pipeline_cache),
 ) -> AskResponse:
-    definition, graph, initial_state = _prepare_ask(req, cache)
+    return await run_ask(req, cache, request)
+
+
+async def run_ask(req: AskRequest, cache: PipelineCache, request: Request) -> AskResponse:
+    """One whole run, answered when it finishes — /ask, and the OpenAI-
+    compatible endpoint when it isn't streaming. Stopped if the client
+    disconnects (see disconnects.py). Raises HTTPException."""
+    definition, graph, initial_state = await prepare_ask(req, cache)
 
     try:
         # graph.ainvoke's declared return type is generic (LangGraph doesn't
         # know about our specific PipelineState TypedDict) — cast makes
         # explicit what we already know: our own node functions and state
         # reducers guarantee this exact shape at runtime.
-        final_state: PipelineState = cast(PipelineState, await graph.ainvoke(initial_state))
+        final_state: PipelineState = cast(
+            PipelineState,
+            await cancel_on_disconnect(
+                request, graph.ainvoke(initial_state, config=_run_config(definition))
+            ),
+        )
+    except HTTPException:
+        raise  # the client disconnected
     except PipelineExecutionError as e:
         logger.exception(f"Pipeline '{req.pipeline_name}' run failed")
-        raise HTTPException(status_code=503, detail=str(e))
+        raise HTTPException(status_code=503, detail=str(e)) from e
     except Exception as e:
         logger.exception(f"Pipeline '{req.pipeline_name}' run failed unexpectedly")
-        raise HTTPException(status_code=502, detail=f"Pipeline error: {e}")
+        raise HTTPException(status_code=502, detail=f"Pipeline error: {e}") from e
 
     node_outputs = final_state["node_outputs"]
     resolved_output_node = _resolve_output_node(definition, node_outputs)
@@ -142,49 +252,90 @@ async def ask(
         pipeline_name=definition.name,
         output_node=resolved_output_node,
         final_answer=node_outputs[resolved_output_node]["output"],
-        node_outputs={
-            node_id: NodeOutputDTO(**result) for node_id, result in node_outputs.items()
-        },
+        node_outputs=node_dtos(node_outputs),
         loop_iterations=final_state.get("loop_counts", {}),
+        remembered=_remembered(definition, node_outputs),
     )
 
 
-def _sse(event_type: str, data: BaseModel) -> str:
+def sse_event(event_type: str, data: BaseModel) -> str:
     """Formats one Server-Sent Event. The blank line at the end is
     required by the SSE spec to terminate the event."""
     return f"event: {event_type}\ndata: {data.model_dump_json()}\n\n"
 
 
-def _extract_chunk(step: object) -> dict[str, object] | None:
-    """Normalizes one value yielded by graph.astream(..., stream_mode="updates")
-    into a plain {node_name: update} dict, or None if the shape isn't
-    recognized. Pulled out as a standalone function specifically so this can
-    be unit-tested against both known shapes directly — see
-    tests/test_streaming.py — without needing to mock LangGraph's astream()
-    itself or depend on which shape the installed LangGraph version
-    actually produces."""
+def extract_stream_part(step: object) -> tuple[str, dict[str, object]] | None:
+    """Normalizes one value yielded by graph.astream() into a
+    (stream_mode, payload) pair, or None if the shape isn't recognized.
+
+    With several stream modes requested ("updates", "custom" and
+    "messages"), LangGraph yields (mode_name, payload) tuples. A "messages"
+    payload is itself a (message_chunk, metadata) tuple, returned here as
+    {"message": ..., "metadata": ...}. A bare dict is still accepted and
+    treated as an "updates" payload — that's the shape a single-mode
+    astream() is documented to produce, and it has been observed to vary
+    between versions. Pulled out as a standalone function so every shape is
+    unit-tested directly — see tests/test_streaming.py — without mocking
+    LangGraph's astream() itself."""
     if isinstance(step, dict):
-        return step
-    if isinstance(step, tuple) and len(step) == 2 and isinstance(step[1], dict):
-        return step[1]
+        return "updates", cast(dict[str, object], step)
+    if not (isinstance(step, tuple) and len(step) == 2 and isinstance(step[0], str)):
+        return None
+    mode, payload = step[0], step[1]
+    if isinstance(payload, dict):
+        return mode, cast(dict[str, object], payload)
+    if (
+        mode == "messages"
+        and isinstance(payload, tuple)
+        and len(payload) == 2
+        and isinstance(payload[1], dict)
+    ):
+        return mode, {"message": payload[0], "metadata": payload[1]}
     return None
 
 
-async def _stream_pipeline_run(
+def message_text(message: object) -> str:
+    """The generated text in one streamed message chunk. Content is a plain
+    string for most chat models, or a list of content blocks (e.g.
+    Anthropic) — only text blocks are kept."""
+    content = getattr(message, "content", None)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in cast(list[object], content):
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict):
+                text = cast(dict[str, object], block).get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "".join(parts)
+    return ""
+
+
+async def pipeline_events(
     request: Request,
     req: AskRequest,
     definition: PipelineDefinition,
     graph: CompiledStateGraph,
     initial_state: PipelineState,
-) -> AsyncIterator[str]:
-    """Node-level streaming via LangGraph's own astream(), NOT token-level
-    streaming from each LLM call — this fires one `node_complete` event per
-    graph node as it finishes (which includes parallel branches: a single
-    astream "chunk" can contain more than one node if several completed in
-    the same superstep), one `loop_iteration` event per loop increment, and
-    a final `done` event with the complete result. Works identically across
-    every provider without any of them needing to implement token
-    streaming individually.
+) -> AsyncIterator[tuple[str, BaseModel]]:
+    """Streams a run via LangGraph's own astream(), in three stream modes:
+
+    - "custom": a `node_start` event the moment a node begins calling its
+      model (emitted by the node itself — see node_types.NODE_START_EVENT),
+      and again with a higher `attempt` before each retry;
+    - "messages": `node_token` events carrying the text each node's model
+      is generating, as it generates it. LangChain chat models switch to
+      streaming on their own when LangGraph's message handler is
+      listening, so no provider adapter needs streaming code of its own;
+    - "updates": one `node_complete` event per graph node as it finishes
+      (a single chunk can hold several nodes when parallel siblings finish
+      in the same superstep) and one `loop_iteration` event per loop
+      increment.
+
+    Ends with a `done` event carrying the complete result.
 
     CRITICAL DIFFERENCE FROM /ask'S ERROR HANDLING: by the time this
     generator starts running, StreamingResponse has already sent a 200
@@ -196,41 +347,87 @@ async def _stream_pipeline_run(
     the stream) rather than propagating the exception further.
     """
     node_outputs: dict[str, NodeResult] = {}
+    completed: dict[str, NodeOutputDTO] = {}  # what node_complete sent, reused by `done`
     loop_counts: dict[str, int] = {}
+    # Only pipeline-defined nodes stream tokens to clients; internal graph
+    # nodes (fan-out root, loop bookkeeping) never call a model anyway.
+    pipeline_node_ids = {n.id for n in definition.nodes}
 
     try:
-        async for step in graph.astream(initial_state, stream_mode="updates"):
-            # LangGraph's astream() shape for a single string stream_mode is
-            # documented as yielding the chunk dict directly, but this has
-            # been observed to vary — some versions/configurations instead
-            # yield a (mode_name, chunk) tuple even for one mode. See
-            # _extract_chunk's docstring.
-            chunk = _extract_chunk(step)
-            if chunk is None:
-                logger.warning(
-                    f"[stream:{req.pipeline_name}] unrecognized astream() chunk shape: "
-                    f"{type(step).__name__} = {step!r}"
-                )
-                continue
+        # aclosing: a run that stops early (the client went away) closes
+        # LangGraph's stream at once — cancelling its running nodes — rather
+        # than whenever the abandoned generator gets garbage-collected.
+        steps = cast(
+            AsyncGenerator[object, None],
+            graph.astream(
+                initial_state,
+                config=_run_config(definition),
+                stream_mode=["updates", "custom", "messages"],
+            ),
+        )
+        async with aclosing(steps):
+            async for step in steps:
+                part = extract_stream_part(step)
+                if part is None:
+                    logger.warning(
+                        f"[stream:{req.pipeline_name}] unrecognized astream() chunk shape: "
+                        f"{type(step).__name__} = {step!r}"
+                    )
+                    continue
 
-            for _node_name, update in chunk.items():
-                if not isinstance(update, dict):
+                mode, chunk = part
+                if mode == "messages":
+                    metadata = chunk.get("metadata")
+                    node_id = (
+                        cast(dict[str, object], metadata).get("langgraph_node")
+                        if isinstance(metadata, dict)
+                        else None
+                    )
+                    text = message_text(chunk.get("message"))
+                    if isinstance(node_id, str) and node_id in pipeline_node_ids and text:
+                        yield "node_token", NodeTokenEvent(node_id=node_id, text=text)
                     continue
-                node_update = update.get("node_outputs")
-                if isinstance(node_update, dict):
-                    for node_id, result in node_update.items():
-                        node_outputs[node_id] = result
-                        yield _sse("node_complete", NodeCompleteEvent(node=NodeOutputDTO(**result)))
-                    continue
-                loop_update = update.get("loop_counts")
-                if isinstance(loop_update, dict):
-                    for loop_id, count in loop_update.items():
-                        loop_counts[loop_id] = count
-                        yield _sse(
-                            "loop_iteration", LoopIterationEvent(loop_id=loop_id, iteration=count)
+                if mode == "custom":
+                    if chunk.get("event") == NODE_START_EVENT:
+                        attempt = chunk.get("attempt", 1)
+                        prompt = chunk.get("prompt")
+                        system = chunk.get("system")
+                        replayed = chunk.get("replayed")
+                        yield (
+                            "node_start",
+                            NodeStartEvent(
+                                node_id=str(chunk["node_id"]),
+                                model_name=str(chunk["model_name"]),
+                                attempt=attempt if isinstance(attempt, int) else 1,
+                                prompt=prompt if isinstance(prompt, str) else None,
+                                system=system if isinstance(system, str) else None,
+                                replayed=replayed is True,
+                            ),
                         )
-                # Anything else (e.g. the multi-root fan-out node's empty
-                # `{}` update) carries no client-visible information — skip.
+                    continue
+                if mode != "updates":
+                    continue
+
+                for _node_name, update in chunk.items():
+                    if not isinstance(update, dict):
+                        continue
+                    node_update = update.get("node_outputs")
+                    if isinstance(node_update, dict):
+                        for node_id, result in node_update.items():
+                            node_outputs[node_id] = result
+                            completed[node_id] = NodeOutputDTO.model_validate(result)
+                            yield "node_complete", NodeCompleteEvent(node=completed[node_id])
+                        continue
+                    loop_update = update.get("loop_counts")
+                    if isinstance(loop_update, dict):
+                        for loop_id, count in loop_update.items():
+                            loop_counts[loop_id] = count
+                            yield (
+                                "loop_iteration",
+                                LoopIterationEvent(loop_id=loop_id, iteration=count),
+                            )
+                    # Anything else (e.g. the multi-root fan-out node's empty
+                    # `{}` update) carries no client-visible information — skip.
     except PipelineExecutionError as e:
         logger.exception(f"Pipeline '{req.pipeline_name}' stream failed")
         # Lets a live-status client (the visual DAG graph) mark the
@@ -242,16 +439,16 @@ async def _stream_pipeline_run(
             details["node_id"] = e.node_id
         elif e.loop_id is not None:
             details["loop_id"] = e.loop_id
-        yield _sse("error", build_error_response(request, 503, str(e), details=details))
+        yield "error", build_error_response(request, 503, str(e), details=details)
         return
     except Exception as e:
         logger.exception(f"Pipeline '{req.pipeline_name}' stream failed unexpectedly")
-        yield _sse("error", build_error_response(request, 502, f"Pipeline error: {e}"))
+        yield "error", build_error_response(request, 502, f"Pipeline error: {e}")
         return
 
     resolved_output_node = _resolve_output_node(definition, node_outputs)
     if resolved_output_node is None:
-        yield _sse(
+        yield (
             "error",
             build_error_response(
                 request,
@@ -262,18 +459,29 @@ async def _stream_pipeline_run(
         )
         return
 
-    yield _sse(
+    yield (
         "done",
         StreamDoneEvent(
             pipeline_name=definition.name,
             output_node=resolved_output_node,
             final_answer=node_outputs[resolved_output_node]["output"],
-            node_outputs={
-                node_id: NodeOutputDTO(**result) for node_id, result in node_outputs.items()
-            },
+            node_outputs=completed,
             loop_iterations=loop_counts,
+            remembered=_remembered(definition, node_outputs),
         ),
     )
+
+
+async def _stream_pipeline_run(
+    request: Request,
+    req: AskRequest,
+    definition: PipelineDefinition,
+    graph: CompiledStateGraph,
+    initial_state: PipelineState,
+) -> AsyncGenerator[str, None]:
+    """pipeline_events as Server-Sent Events."""
+    async for event_type, data in pipeline_events(request, req, definition, graph, initial_state):
+        yield sse_event(event_type, data)
 
 
 @router.post(
@@ -283,24 +491,29 @@ async def _stream_pipeline_run(
     # once streaming actually starts the HTTP status is always 200
     # regardless of what happens next; execution-time failures surface as
     # an `error` SSE event within that 200 response instead, not as a
-    # different HTTP status. See _stream_pipeline_run's docstring.
+    # different HTTP status. See pipeline_events' docstring.
     responses={
         **{k: ERROR_RESPONSES[k] for k in (400, 401, 404, 422, 429)},
         200: {
             "content": {"text/event-stream": {}},
             "description": (
-                "SSE stream: node_complete / loop_iteration events as the pipeline runs, "
+                "SSE stream: node_start / node_token / node_complete / loop_iteration "
+                "events as the pipeline runs, "
                 "then either a done event (success) or an error event (failure)"
             ),
         },
     },
 )
 async def ask_stream(
-    req: AskRequest, request: Request, cache: PipelineCache = Depends(get_pipeline_cache)
+    req: AskRequest,
+    request: Request,
+    cache: PipelineCache = Depends(get_pipeline_cache),
 ) -> StreamingResponse:
-    definition, graph, initial_state = _prepare_ask(req, cache)
+    definition, graph, initial_state = await prepare_ask(req, cache)
     return StreamingResponse(
-        _stream_pipeline_run(request, req, definition, graph, initial_state),
+        until_disconnected(
+            request, _stream_pipeline_run(request, req, definition, graph, initial_state)
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

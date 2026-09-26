@@ -9,18 +9,20 @@ pipeline_loader.py.
 """
 
 import logging
-from contextlib import asynccontextmanager
 from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from llm_pipeline.pipeline_config import load_pipeline_definition
-from llm_pipeline.settings import settings
-from llm_pipeline.logging_context import configure_logging, request_id_middleware
 from llm_pipeline.error_handling import register_exception_handlers
+from llm_pipeline.logging_context import configure_logging, request_id_middleware
+from llm_pipeline.model_catalog import ModelCatalog
+from llm_pipeline.pipeline_config import load_pipeline_definition
 from llm_pipeline.pipeline_loader import PipelineCache
-from llm_pipeline.routers import health, ask
+from llm_pipeline.pipeline_store import PipelineStore
+from llm_pipeline.routers import ask, editing, health, openai_compat
+from llm_pipeline.settings import settings
 
 configure_logging()
 logger: logging.Logger = logging.getLogger("llm_pipeline")
@@ -56,6 +58,13 @@ def _validate_pipelines_at_startup() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     _validate_pipelines_at_startup()
+    # One catalog, shared: the store checks models against it, and nodes
+    # ask it how much context their loaded Ollama model has.
+    app.state.model_catalog = ModelCatalog(
+        ollama_base_url=settings.ollama_base_url,
+        cloud_models=settings.editor_cloud_models_list,
+        ttl_seconds=settings.model_catalog_ttl_seconds,
+    )
     # One PipelineCache per app instance, stored on app.state — this is
     # what makes it genuinely dependency-injected rather than a bare
     # module-level global: a different app instance (e.g. in a test) gets
@@ -66,7 +75,25 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         pipelines_dir=settings.pipelines_path,
         failure_threshold=settings.circuit_breaker_failure_threshold,
         cooldown_seconds=settings.circuit_breaker_cooldown_seconds,
+        context_probe=app.state.model_catalog.running_context,
     )
+    # Same injection pattern for the editor's collaborators: the store
+    # writes through the SAME cache the run endpoints read from, so a save
+    # invalidates exactly the compiled graph that /ask would use.
+    app.state.pipeline_store = PipelineStore(
+        pipelines_dir=settings.pipelines_path,
+        presets_dir=settings.presets_path,
+        cache=app.state.pipeline_cache,
+        catalog=app.state.model_catalog,
+        default_pipeline_name=settings.default_pipeline_name,
+    )
+    if settings.editing_block_reason:
+        logger.error(settings.editing_block_reason)
+    elif settings.pipeline_editing_enabled:
+        logger.info(
+            f"pipeline editing ENABLED — clients may save to {settings.pipelines_path} "
+            f"and {settings.presets_path}"
+        )
     yield
 
 
@@ -89,6 +116,8 @@ def create_app() -> FastAPI:
 
     app.include_router(health.router)
     app.include_router(ask.router)
+    app.include_router(editing.router)
+    app.include_router(openai_compat.router)
 
     return app
 

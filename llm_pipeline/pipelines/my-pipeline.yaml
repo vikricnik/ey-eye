@@ -1,0 +1,43 @@
+name: my-pipeline
+version: 1
+execution:
+  model_timeout_seconds: 60.0
+  max_history_turns: 6
+  max_retries: 1
+  retry_backoff_seconds: 1.0
+nodes:
+  - id: answer
+    depends_on: []
+    model:
+      provider: ollama
+      model: llama3
+      temperature: 2.0
+    prompt_template: '{{ input }}'
+    include_history: true
+    layout:
+      x: -9.0
+      y: -160.0
+  - id: node
+    depends_on:
+      - answer
+    model:
+      provider: ollama
+      model: llama3
+      temperature: 2.0
+    prompt_template: |-
+      {{ input }}
+
+      {{ answer.output }}
+    layout:
+      x: -9.0
+      y: 10.0
+    system_prompt: Only pick the best joke and only one
+output_node: node
+loops:
+  - id: node_loop
+    from: node
+    back_to: answer
+    exit_to: END
+    exit_when: output.startswith("APPROVE")
+    max_iterations: 3
+    on_max_iterations: proceed

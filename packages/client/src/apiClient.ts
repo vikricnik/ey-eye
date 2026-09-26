@@ -1,14 +1,38 @@
 import type {
   ApiErrorBody,
+  DeletedResponse,
+  AskOptions,
   AskRequest,
+  RequestOptions,
   AskResponse,
   AskStreamEvent,
   ConversationTurn,
   HealthResponse,
+  ModelLimits,
+  ModelsResponse,
+  NodePreset,
+  PipelineDefinition,
+  PipelineDefinitionResponse,
   PipelineDetail,
   PipelinesListResponse,
+  PresetResponse,
+  PreviewPromptRequest,
+  PreviewPromptResponse,
+  RunTestsRequest,
+  PresetsListResponse,
+  SavePipelineResponse,
+  TestRunEvent,
+  ValidatePipelineResponse,
   ValidationIssue,
 } from "./types.js";
+
+/** The caller stopped the request (its AbortSignal fired) — not a failure. */
+export class RequestCancelledError extends Error {
+  constructor() {
+    super("stopped");
+    this.name = "RequestCancelledError";
+  }
+}
 
 export class PipelineApiError extends Error {
   constructor(
@@ -21,7 +45,10 @@ export class PipelineApiError extends Error {
     // and specs/001-visual-dag-graph/contracts/pipeline-detail-api.md),
     // letting a live-status client mark the SPECIFIC node/loop a failure
     // is attributable to instead of only knowing the run as a whole failed.
-    public readonly details?: Record<string, unknown>
+    public readonly details?: Record<string, unknown>,
+    // The server's own `message`, without the per-field validation details
+    // appended to `.message` — for UIs that show those separately.
+    public readonly serverMessage?: string
   ) {
     super(message);
     this.name = "PipelineApiError";
@@ -42,7 +69,8 @@ async function buildApiError(response: Response): Promise<PipelineApiError> {
       response.status,
       body.exceptionUID,
       body.validations,
-      body.details
+      body.details,
+      body.message
     );
   } catch {
     // response body wasn't JSON (or didn't match the expected shape) —
@@ -72,6 +100,9 @@ function parseSseEvent(raw: string): { event: string; data: string } | null {
   return { event, data: dataLines.join("\n") };
 }
 
+const ASK_EVENTS: ReadonlySet<string> = new Set(["node_start", "node_token", "node_complete", "loop_iteration", "done"]);
+const TEST_EVENTS: ReadonlySet<string> = new Set(["case_start", "case_result", "tests_done"]);
+
 /**
  * Typed client for the pipeline server's HTTP API. Shared between the CLI
  * and web clients so the request/response contract only has one source of
@@ -98,9 +129,24 @@ export class PipelineClient {
   }
 
   private async get<T>(path: string): Promise<T> {
+    return this.request<T>("GET", path);
+  }
+
+  private async request<T>(
+    method: "GET" | "POST" | "PUT" | "DELETE",
+    path: string,
+    body?: unknown
+  ): Promise<T> {
     let response: Response;
     try {
-      response = await fetch(`${this.baseUrl}${path}`, { headers: this.authHeaders() });
+      response = await fetch(`${this.baseUrl}${path}`, {
+        method,
+        headers:
+          body === undefined
+            ? this.authHeaders()
+            : { "Content-Type": "application/json", ...this.authHeaders() },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
     } catch {
       throw new PipelineApiError(
         `Could not reach pipeline server at ${this.baseUrl}. Is it running?`
@@ -126,12 +172,95 @@ export class PipelineClient {
     return this.get<PipelineDetail>(`/pipelines/${encodeURIComponent(name)}`);
   }
 
+  // ---- editing ---------------------------------------------------------
+
+  /** Models this server lets an editor select (installed Ollama models +
+   * the cloud allowlist). `refresh` bypasses the server's short cache. */
+  async listModels(refresh = false): Promise<ModelsResponse> {
+    return this.get<ModelsResponse>(refresh ? "/models?refresh=true" : "/models");
+  }
+
+  /** Max context, size and quantization of an installed Ollama model.
+   * Throws (404) when it isn't installed or Ollama can't be reached. */
+  async getModelLimits(ollamaModel: string): Promise<ModelLimits> {
+    const path = ollamaModel.split("/").map(encodeURIComponent).join("/");
+    return this.get<ModelLimits>(`/models/ollama/${path}`);
+  }
+
+  /** The complete definition (prompts, options, layout) plus the revision
+   * to pass back to savePipeline(). */
+  async getPipelineDefinition(name: string): Promise<PipelineDefinitionResponse> {
+    return this.get<PipelineDefinitionResponse>(
+      `/pipelines/${encodeURIComponent(name)}/definition`
+    );
+  }
+
+  /** Validates without saving. Pass a definition (live validation, export
+   * — the result's `yaml` is the canonical file text) or YAML text
+   * (import — the result's `definition` is the parsed pipeline). Throws a
+   * PipelineApiError (status 422, `details.node_id` when a node is at
+   * fault) if it's invalid. */
+  async validatePipeline(
+    input: { definition: PipelineDefinition } | { yaml: string }
+  ): Promise<ValidatePipelineResponse> {
+    return this.request<ValidatePipelineResponse>("POST", "/pipelines/validate", input);
+  }
+
+  /** What a node would receive — see PreviewPromptRequest. */
+  async previewPrompt(req: PreviewPromptRequest): Promise<PreviewPromptResponse> {
+    return this.request<PreviewPromptResponse>("POST", "/pipelines/preview", req);
+  }
+
+  /** Creates (`baseRevision` null) or updates a pipeline. Throws with
+   * status 409 if it already exists (create) or changed since
+   * `baseRevision` was loaded, 403 if editing is disabled server-side. */
+  async savePipeline(
+    definition: PipelineDefinition,
+    baseRevision: string | null
+  ): Promise<SavePipelineResponse> {
+    return this.request<SavePipelineResponse>(
+      "PUT",
+      `/pipelines/${encodeURIComponent(definition.name)}`,
+      { definition, base_revision: baseRevision }
+    );
+  }
+
+  async listPresets(): Promise<PresetsListResponse> {
+    return this.get<PresetsListResponse>("/presets");
+  }
+
+  async getPreset(name: string): Promise<PresetResponse> {
+    return this.get<PresetResponse>(`/presets/${encodeURIComponent(name)}`);
+  }
+
+  /** Soft-deletes a pipeline (moved to pipelines/.deleted/). With
+   * `revision`, refused (409) if it changed since it was loaded; the
+   * server's default pipeline can't be deleted (409). */
+  async deletePipeline(name: string, revision?: string): Promise<DeletedResponse> {
+    const query = revision ? `?revision=${encodeURIComponent(revision)}` : "";
+    return this.request<DeletedResponse>("DELETE", `/pipelines/${encodeURIComponent(name)}${query}`);
+  }
+
+  /** Soft-deletes a preset (moved to presets/.deleted/). */
+  async deletePreset(name: string): Promise<DeletedResponse> {
+    return this.request<DeletedResponse>("DELETE", `/presets/${encodeURIComponent(name)}`);
+  }
+
+  /** Creates or replaces a preset. */
+  async savePreset(preset: NodePreset): Promise<PresetResponse> {
+    return this.request<PresetResponse>("PUT", `/presets/${encodeURIComponent(preset.name)}`, {
+      preset,
+    });
+  }
+
   async ask(
     prompt: string,
     pipelineName: string,
-    history: ConversationTurn[] = []
+    history: ConversationTurn[] = [],
+    options: AskOptions & RequestOptions = {}
   ): Promise<AskResponse> {
-    const body: AskRequest = { prompt, pipeline_name: pipelineName, history };
+    const { signal, ...request } = options;
+    const body: AskRequest = { prompt, pipeline_name: pipelineName, history, ...request };
 
     let response: Response;
     try {
@@ -139,8 +268,10 @@ export class PipelineClient {
         method: "POST",
         headers: { "Content-Type": "application/json", ...this.authHeaders() },
         body: JSON.stringify(body),
+        ...(signal ? { signal } : {}),
       });
     } catch {
+      if (signal?.aborted) throw new RequestCancelledError();
       throw new PipelineApiError(
         `Could not reach pipeline server at ${this.baseUrl}. Is it running?`
       );
@@ -152,12 +283,18 @@ export class PipelineClient {
       throw await buildApiError(response);
     }
 
-    return (await response.json()) as AskResponse;
+    try {
+      return (await response.json()) as AskResponse;
+    } catch (err) {
+      if (signal?.aborted) throw new RequestCancelledError();
+      throw err;
+    }
   }
 
   /**
-   * Streaming variant of ask() — yields one event per graph node as it
-   * completes (node-level streaming, not token-level; see the server's
+   * Streaming variant of ask() — yields a node_start event as each graph
+   * node begins and a node_complete as it finishes (node-level streaming,
+   * not token-level; see the server's
    * routers/ask.py docstring for why). Browser's native EventSource only
    * supports GET requests, so this parses Server-Sent Events manually from
    * fetch()'s streaming response body instead — works identically in
@@ -172,18 +309,51 @@ export class PipelineClient {
   async *askStream(
     prompt: string,
     pipelineName: string,
-    history: ConversationTurn[] = []
+    history: ConversationTurn[] = [],
+    options: AskOptions & RequestOptions = {}
   ): AsyncGenerator<AskStreamEvent, void, undefined> {
-    const body: AskRequest = { prompt, pipeline_name: pipelineName, history };
+    const { signal, ...request } = options;
+    const body: AskRequest = { prompt, pipeline_name: pipelineName, history, ...request };
+    for await (const { event, data } of this.postStream("/ask/stream", body, ASK_EVENTS, signal)) {
+      yield { type: event, data } as AskStreamEvent;
+    }
+  }
 
+  /** Runs a definition's test cases (and each variant's) — case_start /
+   * case_result per case and variant, then tests_done. Needs editing
+   * enabled on the server. */
+  async *runTests(
+    req: RunTestsRequest,
+    options: RequestOptions = {}
+  ): AsyncGenerator<TestRunEvent, void, undefined> {
+    for await (const { event, data } of this.postStream("/pipelines/test", req, TEST_EVENTS, options.signal)) {
+      yield { type: event, data } as TestRunEvent;
+    }
+  }
+
+  /**
+   * POSTs `body` and yields the reply's Server-Sent Events, parsed by hand
+   * (the browser's EventSource only does GET) — works the same in Node.js
+   * and browsers. Pre-stream failures and an `error` event are thrown as a
+   * PipelineApiError; events not in `known` are skipped, so a server that
+   * adds an event type doesn't break older clients.
+   */
+  private async *postStream(
+    path: string,
+    body: unknown,
+    known: ReadonlySet<string>,
+    signal?: AbortSignal
+  ): AsyncGenerator<{ event: string; data: unknown }, void, undefined> {
     let response: Response;
     try {
-      response = await fetch(`${this.baseUrl}/ask/stream`, {
+      response = await fetch(`${this.baseUrl}${path}`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...this.authHeaders() },
         body: JSON.stringify(body),
+        ...(signal ? { signal } : {}),
       });
     } catch {
+      if (signal?.aborted) throw new RequestCancelledError();
       throw new PipelineApiError(
         `Could not reach pipeline server at ${this.baseUrl}. Is it running?`
       );
@@ -191,8 +361,7 @@ export class PipelineClient {
 
     if (!response.ok) {
       // Pre-stream errors (400/401/404/422/429) arrive as a normal JSON
-      // error body, not an SSE stream — same shape buildApiError already
-      // handles for ask().
+      // error body, not an SSE stream.
       throw await buildApiError(response);
     }
 
@@ -203,11 +372,15 @@ export class PipelineClient {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
+    let finished = false;
 
     try {
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done) {
+          finished = true;
+          break;
+        }
         buffer += decoder.decode(value, { stream: true });
 
         // SSE events are separated by a blank line.
@@ -228,28 +401,24 @@ export class PipelineClient {
               errBody.details
             );
           }
-          if (
-            parsed.event === "node_complete" ||
-            parsed.event === "loop_iteration" ||
-            parsed.event === "done"
-          ) {
-            yield { type: parsed.event, data: JSON.parse(parsed.data) } as AskStreamEvent;
+          if (known.has(parsed.event)) {
+            yield { event: parsed.event, data: JSON.parse(parsed.data) as unknown };
           }
-          // Any other event type is ignored rather than treated as an
-          // error — forward-compatible if the server adds a new event
-          // type this client doesn't know about yet.
         }
       }
     } catch (err) {
       // Re-throw a PipelineApiError (from the `error` event branch above)
       // unchanged; wrap anything else (a genuine network/parse failure
-      // mid-stream) so every failure mode from this method is consistently
-      // a PipelineApiError, matching ask()'s contract.
+      // mid-stream) so every failure is consistently a PipelineApiError.
       if (err instanceof PipelineApiError) throw err;
+      if (signal?.aborted) throw new RequestCancelledError();
       throw new PipelineApiError(
         `Stream reading failed: ${err instanceof Error ? err.message : String(err)}`
       );
     } finally {
+      // A caller that stops reading early (breaks out of its loop) drops the
+      // connection, so the server stops the run instead of finishing it.
+      if (!finished) void reader.cancel().catch(() => undefined);
       reader.releaseLock();
     }
   }

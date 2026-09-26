@@ -24,23 +24,36 @@ services:
       OLLAMA_BASE_URL: "http://ollama:11434"
       PIPELINES_DIR: "pipelines"
       DEFAULT_PIPELINE_NAME: "simple-local"
-      CORS_ALLOWED_ORIGINS: "*"
+      # The web client (8080) and the Vite dev server (5173). Must not be "*"
+      # while editing is on without API_KEYS — the server refuses writes then,
+      # since any website could otherwise rewrite pipelines through the browser.
+      CORS_ALLOWED_ORIGINS: "http://localhost:8080,http://localhost:5173"
       # Set a real value before exposing this beyond localhost — see
       # llm_pipeline/.env.example for the full auth explanation.
       API_KEYS: ""
       RATE_LIMIT_REQUESTS_PER_MINUTE: "60"
       VALIDATE_PIPELINES_ON_STARTUP: "true"
+      # Lets the web editor and CLI save pipelines/presets. Saves land in the
+      # mounted ./llm_pipeline/pipelines and ./llm_pipeline/presets folders
+      # below, so they survive container rebuilds. Set API_KEYS too before
+      # exposing this beyond your machine.
+      PIPELINE_EDITING_ENABLED: "true"
+      PRESETS_DIR: "presets"
       # Uncomment and set if any pipeline YAML references cloud providers:
       # OPENAI_API_KEY: ""
       # ANTHROPIC_API_KEY: ""
       # GOOGLE_API_KEY: ""
+    volumes:
+      - ./llm_pipeline/pipelines:/app/pipelines
+      - ./llm_pipeline/presets:/app/presets
     depends_on:
       - ollama
 
   web:
     build:
-      context: ./web
-      dockerfile: Dockerfile
+      # Repo root, so the build can see the shared packages/client workspace.
+      context: .
+      dockerfile: web/Dockerfile
     ports:
       - "8080:80"
     environment:

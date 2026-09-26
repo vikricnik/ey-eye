@@ -9,21 +9,36 @@ variant) against a different kind of backend call.
 
 import asyncio
 import time
+from collections.abc import Callable
 
-from llm_pipeline.providers.base import LLMProvider, ModelSpec, ProviderError
+from llm_pipeline.providers.base import (
+    Generation,
+    LLMProvider,
+    ModelSpec,
+    ProviderError,
+    as_generation,
+)
 from llm_pipeline.settings import settings
 
 
 async def generate_with_timeout(
-    provider: LLMProvider, prompt: str, spec: ModelSpec, timeout_seconds: float
-) -> str:
+    provider: LLMProvider,
+    prompt: str,
+    spec: ModelSpec,
+    timeout_seconds: float,
+    system: str | None = None,
+) -> Generation:
     """Runs provider.generate() with a hard timeout, raising ProviderError on either
     a timeout or any other failure. Centralizing this here means callers never
     have to know the difference between "OpenAI raised an API error" and
     "Ollama hung" — they just catch ProviderError."""
     try:
-        return await asyncio.wait_for(provider.generate(prompt), timeout=timeout_seconds)
-    except asyncio.TimeoutError as e:
+        return as_generation(
+            await asyncio.wait_for(
+                provider.generate(prompt, system=system), timeout=timeout_seconds
+            )
+        )
+    except TimeoutError as e:
         raise ProviderError(spec.identity, e) from e
     except Exception as e:
         raise ProviderError(spec.identity, e) from e
@@ -32,6 +47,7 @@ async def generate_with_timeout(
 # ---------------------------------------------------------------------------
 # Circuit breaker
 # ---------------------------------------------------------------------------
+
 
 class _CircuitBreakerState:
     def __init__(self) -> None:
@@ -60,9 +76,9 @@ class CircuitBreaker:
         state = self._states.get(key)
         if state is None or state.opened_at is None:
             return False
-        if time.monotonic() - state.opened_at >= self.cooldown_seconds:
-            return False  # cooldown elapsed — half-open, allow a trial call
-        return True
+        # Once the cooldown has elapsed the circuit is half-open: allow a
+        # trial call.
+        return time.monotonic() - state.opened_at < self.cooldown_seconds
 
     def record_success(self, key: str) -> None:
         self._states[key] = _CircuitBreakerState()
@@ -102,6 +118,7 @@ def reset_circuit_breaker() -> None:
 # Retry with backoff (composes with a circuit breaker)
 # ---------------------------------------------------------------------------
 
+
 async def generate_with_retry(
     provider: LLMProvider,
     prompt: str,
@@ -110,7 +127,9 @@ async def generate_with_retry(
     max_attempts: int = 2,
     backoff_base_seconds: float = 1.0,
     circuit_breaker: CircuitBreaker | None = None,
-) -> str:
+    system: str | None = None,
+    on_retry: Callable[[int], None] | None = None,
+) -> Generation:
     """Wraps generate_with_timeout with a circuit breaker check and
     retry-with-exponential-backoff. This is the function callers should use
     day-to-day — generate_with_timeout stays available as the lower-level
@@ -128,7 +147,9 @@ async def generate_with_retry(
     consuming a retry attempt or paying the timeout cost again.
 
     Retries apply only to ProviderError (transient failures) and never
-    exceed max_attempts total, including the first try.
+    exceed max_attempts total, including the first try. `on_retry(n)` is
+    called just before attempt n (n >= 2) — streaming callers use it to tell
+    clients to discard partial output from the failed attempt.
     """
     breaker = circuit_breaker if circuit_breaker is not None else _default_circuit_breaker
 
@@ -143,8 +164,12 @@ async def generate_with_retry(
 
     last_error: ProviderError | None = None
     for attempt in range(max_attempts):
+        if attempt > 0 and on_retry is not None:
+            on_retry(attempt + 1)
         try:
-            result = await generate_with_timeout(provider, prompt, spec, timeout_seconds)
+            result = await generate_with_timeout(
+                provider, prompt, spec, timeout_seconds, system=system
+            )
             breaker.record_success(spec.identity)
             return result
         except ProviderError as e:

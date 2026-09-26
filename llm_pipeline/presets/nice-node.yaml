@@ -1,0 +1,6 @@
+name: nice-node
+model:
+  provider: ollama
+  model: llama3
+  temperature: 1.0
+system_prompt: tell me something nice

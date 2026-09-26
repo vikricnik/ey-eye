@@ -29,3 +29,34 @@ class PipelineNotFoundError(Exception):
 
 class PipelineDefinitionError(Exception):
     """Raised when a pipeline YAML file fails schema/DAG validation."""
+
+
+class DefinitionInvalidError(Exception):
+    """A client-submitted pipeline or preset failed validation. `node_id`
+    names the node an editor should highlight, when the failure is
+    attributable to one; `issues` lists every (location, message) pydantic
+    reported, for clients that want the full picture."""
+
+    def __init__(
+        self,
+        message: str,
+        node_id: str | None = None,
+        issues: list[tuple[str, str, str]] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.node_id = node_id
+        self.issues = issues or []
+
+
+class RevisionConflictError(Exception):
+    """A save was based on a different version of the file than the one now
+    on disk — someone else saved in between, or the file was created or
+    deleted since the client loaded it."""
+
+
+class ProtectedPipelineError(Exception):
+    """A pipeline that can't be deleted — the server's default pipeline."""
+
+
+class InvalidNameError(Exception):
+    """A pipeline or preset name can't be used as a filename safely."""

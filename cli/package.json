@@ -7,7 +7,8 @@
     "start": "tsx src/index.ts",
     "build": "tsc",
     "dev": "tsx watch src/index.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
+    "test": "node --import tsx --test test/*.test.ts"
   },
   "dependencies": {
     "@llm-pipeline/client": "^1.0.0",

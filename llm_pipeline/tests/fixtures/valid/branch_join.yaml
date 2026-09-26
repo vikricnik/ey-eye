@@ -1,0 +1,37 @@
+name: branch-join
+version: 1
+
+# summary follows whichever of the two exclusive routes ran — only one of
+# its dependencies ever runs, so it must not wait for both.
+nodes:
+  - id: classify
+    depends_on: []
+    model: { provider: ollama, model: test-model }
+    prompt_template: "{{ input }}"
+
+  - id: path_a
+    depends_on: []
+    model: { provider: ollama, model: test-model }
+    prompt_template: "A: {{ input }}"
+
+  - id: path_b
+    depends_on: []
+    model: { provider: ollama, model: test-model }
+    prompt_template: "B: {{ input }}"
+
+  - id: summary
+    depends_on: [path_a, path_b]
+    model: { provider: ollama, model: test-model }
+    prompt_template: |
+      {% if path_a is defined %}{{ path_a.output }}{% endif %}{% if path_b is defined %}{{ path_b.output }}{% endif %}
+
+branches:
+  - id: branch1
+    from: classify
+    routes:
+      - when: '"A" in output'
+        to: path_a
+      - default: true
+        to: path_b
+
+output_node: summary

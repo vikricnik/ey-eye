@@ -1,8 +1,9 @@
 from pathlib import Path
+
 import yaml
 
-from llm_pipeline.pipeline_config.schema import PipelineDefinition
 from llm_pipeline.api_schemas import PipelineSummary
+from llm_pipeline.pipeline_config.schema import PipelineDefinition
 
 
 def load_pipeline_definition(path: Path) -> PipelineDefinition:

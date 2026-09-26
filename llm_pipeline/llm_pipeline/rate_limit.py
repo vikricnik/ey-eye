@@ -10,8 +10,8 @@ the standard pattern) if you actually run multiple instances and need a
 hard global cap.
 """
 
-import time
 import logging
+import time
 from collections import defaultdict, deque
 
 from fastapi import Header, HTTPException, Request
@@ -58,9 +58,7 @@ class RateLimiter:
 _limiter = RateLimiter(settings.rate_limit_requests_per_minute)
 
 
-def _client_identifier(
-    request: Request, authorization: str | None, x_api_key: str | None
-) -> str:
+def _client_identifier(request: Request, authorization: str | None, x_api_key: str | None) -> str:
     """Rate limit by API key if auth is configured (so the limit tracks the
     caller, not whatever IP they happen to connect from); fall back to
     client IP if auth is disabled."""

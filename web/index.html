@@ -3,67 +3,29 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>LLM Pipeline</title>
+  <title>LLM Pipeline Builder</title>
+  <script>
+    // Saved theme and text size, applied before the first paint so the page
+    // doesn't flash the wrong theme. Same storage key and rules as
+    // src/ui/DisplaySettings.tsx, which takes over once the app loads.
+    (function () {
+      var saved = {};
+      try { saved = JSON.parse(localStorage.getItem("llm-pipeline.display") || "{}") || {}; } catch (e) {}
+      var theme = saved.theme === "light" || saved.theme === "dark" ? saved.theme
+        : window.matchMedia && matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+      document.documentElement.setAttribute("data-theme", theme);
+      if ([0.875, 1.125, 1.25, 1.375, 1.5].indexOf(saved.textScale) >= 0) {
+        document.documentElement.style.fontSize = saved.textScale * 100 + "%";
+      }
+    })();
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/src/style.css" />
 </head>
 <body>
-
-  <header>
-    <div class="title-block">
-      <h1>LLM Pipeline</h1>
-      <span class="subtitle" id="server-url"></span>
-    </div>
-    <div class="header-right">
-      <select id="pipeline-select" class="pipeline-select" aria-label="Active pipeline">
-        <option value="">loading pipelines…</option>
-      </select>
-      <div class="status">
-        <span class="status-dot" id="status-dot"></span>
-        <span id="status-text">connecting…</span>
-      </div>
-    </div>
-  </header>
-
-  <!-- The pipeline's DAG structure diagram (see graphView.ts) — rebuilt
-       whenever the active pipeline changes, and updated in place with
-       live per-node status while a streaming run is in progress. -->
-  <div class="graph-container" id="graph-container"></div>
-
-  <main id="transcript">
-    <div class="empty-state" id="empty-state">
-      Type a prompt below and press <span class="accent">Enter</span> to send it through the
-      active pipeline's DAG of nodes.
-    </div>
-  </main>
-
-  <footer>
-    <div class="input-row">
-      <textarea id="prompt-input" placeholder="Ask something…" rows="1"></textarea>
-      <button id="send-btn">
-        <span class="btn-label">Send</span>
-        <span class="btn-spinner" aria-hidden="true"></span>
-      </button>
-    </div>
-    <div class="footer-controls">
-      <span class="hint"><kbd>Enter</kbd> to send · <kbd>Shift+Enter</kbd> for newline</span>
-      <div class="footer-right">
-        <label class="toggle">
-          <input type="checkbox" id="verbose-toggle" />
-          show all node outputs
-        </label>
-        <label class="toggle">
-          <input type="checkbox" id="stream-toggle" />
-          stream progress
-        </label>
-        <button id="reset-btn" class="reset-link">reset conversation</button>
-      </div>
-    </div>
-  </footer>
-
+  <div id="root"></div>
   <script src="/runtime-config.js"></script>
-  <script type="module" src="/src/main.ts"></script>
+  <script type="module" src="/src/main.tsx"></script>
 </body>
 </html>

@@ -6,15 +6,60 @@ import type {
   GraphNode,
   GraphViewState,
   NodeExecutionStatus,
+  PipelineDefinition,
   PipelineDetail,
 } from "./types.js";
 import type { PipelineApiError } from "./apiClient.js";
+import { effectiveModel } from "./draftOps.js";
+import { routeTargets } from "./types.js";
 
 /** The literal sentinel a loop's `exit_to` uses to mean "terminate the
  * graph directly" rather than naming another node — mirrors the server's
  * dag_builder/loops.py END_SENTINEL. Not a real node id: renderers must
  * treat an edge targeting this as a terminal marker, not a node lookup. */
 export const LOOP_EXIT_END = "END";
+
+/** "provider:model" a node runs with; "(default)" when it inherits the
+ * pipeline's default model. */
+export function displayModel(definition: PipelineDefinition, node: PipelineDefinition["nodes"][number]): string {
+  const model = effectiveModel(definition, node);
+  if (!model) return "(no model)";
+  return `${model.provider}:${model.model}${node.model ? "" : " (default)"}`;
+}
+
+/**
+ * The PipelineDetail view of a full definition — lets an editor's draft
+ * (which may not be saved yet, and has no /pipelines/{name} response) go
+ * through the same buildGraphModel() as a stored pipeline, so layout
+ * levels and live run status work identically for both.
+ */
+export function detailFromDefinition(definition: PipelineDefinition): PipelineDetail {
+  const outputs = definition.output_node;
+  return {
+    name: definition.name,
+    description: definition.description ?? "",
+    output_node_candidates: Array.isArray(outputs) ? outputs : [outputs],
+    nodes: definition.nodes.map((n) => ({
+      id: n.id,
+      type: n.type ?? "llm_call",
+      depends_on: n.depends_on ?? [],
+      model: displayModel(definition, n),
+    })),
+    branches: (definition.branches ?? []).map((b) => ({
+      id: b.id,
+      from: b.from,
+      routes: b.routes.map((r) => ({ to: r.to, when: r.when ?? null, default: r.default ?? false })),
+    })),
+    loops: (definition.loops ?? []).map((l) => ({
+      id: l.id,
+      from: l.from,
+      back_to: l.back_to,
+      exit_to: l.exit_to,
+      max_iterations: l.max_iterations ?? 3,
+      on_max_iterations: l.on_max_iterations ?? "proceed",
+    })),
+  };
+}
 
 /**
  * Builds the classified, layered GraphModel a pipeline's structure
@@ -40,7 +85,7 @@ export function buildGraphModel(detail: PipelineDetail): GraphModel {
   // pipeline_config/schema.py's `effective_root_ids` (a branch target must
   // never look like it always runs).
   const branchTargets = new Set<string>(
-    detail.branches.flatMap((b) => b.routes.map((r) => r.to))
+    detail.branches.flatMap((b) => b.routes.flatMap(routeTargets))
   );
 
   const nodesById = new Map(detail.nodes.map((n) => [n.id, n]));
@@ -58,7 +103,7 @@ export function buildGraphModel(detail: PipelineDetail): GraphModel {
     const node = nodesById.get(nodeId);
     const preds = (node?.depends_on ?? []).filter((dep) => !conditionalSources.has(dep));
     for (const branch of detail.branches) {
-      if (branch.routes.some((r) => r.to === nodeId)) {
+      if (branch.routes.some((r) => routeTargets(r).includes(nodeId))) {
         preds.push(branch.from);
       }
     }
@@ -118,6 +163,7 @@ export function buildGraphModel(detail: PipelineDetail): GraphModel {
         kind: "plain",
         label: null,
         branchId: null,
+        routeIndex: null,
         isDefaultRoute: false,
         loopId: null,
         loopMaxIterations: null,
@@ -126,17 +172,20 @@ export function buildGraphModel(detail: PipelineDetail): GraphModel {
   }
 
   for (const branch of detail.branches) {
-    for (const route of branch.routes) {
-      edges.push({
-        from: branch.from,
-        to: route.to,
-        kind: "branch",
-        label: route.default ? "default" : route.when,
-        branchId: branch.id,
-        isDefaultRoute: route.default,
-        loopId: null,
-        loopMaxIterations: null,
-      });
+    for (const [routeIndex, route] of branch.routes.entries()) {
+      for (const target of routeTargets(route)) {
+        edges.push({
+          from: branch.from,
+          to: target,
+          kind: "branch",
+          label: route.default ? "default" : route.when,
+          branchId: branch.id,
+          routeIndex,
+          isDefaultRoute: route.default,
+          loopId: null,
+          loopMaxIterations: null,
+        });
+      }
     }
   }
 
@@ -147,6 +196,7 @@ export function buildGraphModel(detail: PipelineDetail): GraphModel {
       kind: "loop-continue",
       label: `${loop.id} (max ${loop.max_iterations})`,
       branchId: null,
+      routeIndex: null,
       isDefaultRoute: false,
       loopId: loop.id,
       loopMaxIterations: loop.max_iterations,
@@ -162,6 +212,7 @@ export function buildGraphModel(detail: PipelineDetail): GraphModel {
       kind: "loop-exit",
       label: `${loop.id} exit (max ${loop.max_iterations})`,
       branchId: null,
+      routeIndex: null,
       isDefaultRoute: false,
       loopId: loop.id,
       loopMaxIterations: loop.max_iterations,
@@ -208,7 +259,7 @@ function isDeadBranchTarget(
   return graph.edges.some((e) => {
     if (e.kind !== "branch" || e.to !== nodeId || e.branchId === null) return false;
     const outcome = branchOutcomes[e.branchId];
-    return outcome !== undefined && outcome.takenTo !== nodeId;
+    return outcome !== undefined && !outcome.takenTargets.includes(nodeId);
   });
 }
 
@@ -262,21 +313,45 @@ export function createGraphViewState(
     branchOutcomes: {},
     loopProgress: {},
     connectionError: null,
+    serverReportsStarts: false,
   };
 }
 
 /**
  * Folds one AskStreamEvent into `state`, returning a new state (does not
- * mutate). `node_complete` marks that node complete, records the taken
+ * mutate). `node_start` marks that node running — and switches the state
+ * to trusting server-reported starts from then on (`serverReportsStarts`).
+ * `node_complete` marks that node complete, records the taken
  * route if it's a branch target (resetting sibling routes back to
  * `not-started` rather than leaving them stuck at `running` forever), and
- * promotes newly-eligible nodes to `running`. `loop_iteration` updates
- * that loop's progress. `done` is a no-op here — every node it could tell
+ * — only while the server hasn't reported starts itself — promotes
+ * newly-eligible nodes to `running` by inference. `loop_iteration` updates
+ * that loop's progress. `node_token` and `done` are no-ops here — text is
+ * folded separately by appendNodeText(), and every node `done` could tell
  * us about already reached `complete` via its own `node_complete` event;
- * it exists so callers can route every event through this one function
- * uniformly (see contracts/graph-model.md).
+ * they pass through so callers can route every event through this one
+ * function uniformly.
  */
 export function applyStreamEvent(state: GraphViewState, event: AskStreamEvent): GraphViewState {
+  if (event.type === "node_start") {
+    const nodeId = event.data.node_id;
+    if (!(nodeId in state.nodeStatus)) return { ...state, serverReportsStarts: true };
+    // Anything still marked running only by inference, and not actually
+    // started, goes back to not-started: from now on only real starts count.
+    let nodeStatus = state.nodeStatus;
+    if (!state.serverReportsStarts) {
+      nodeStatus = { ...nodeStatus };
+      for (const [id, status] of Object.entries(nodeStatus)) {
+        if (status === "running") nodeStatus[id] = "not-started";
+      }
+    }
+    return {
+      ...state,
+      serverReportsStarts: true,
+      nodeStatus: { ...nodeStatus, [nodeId]: "running" },
+    };
+  }
+
   if (event.type === "node_complete") {
     const nodeId = event.data.node.node_id;
     let nodeStatus: Record<string, NodeExecutionStatus> = {
@@ -290,10 +365,14 @@ export function applyStreamEvent(state: GraphViewState, event: AskStreamEvent): 
     );
     for (const edge of takenBranchEdges) {
       const branchId = edge.branchId!;
-      branchOutcomes = { ...branchOutcomes, [branchId]: { branchId, takenTo: nodeId } };
+      // The route this node belongs to was taken — all of its targets run.
+      const takenTargets = state.graph.edges
+        .filter((e) => e.kind === "branch" && e.branchId === branchId && e.routeIndex === edge.routeIndex)
+        .map((e) => e.to);
+      branchOutcomes = { ...branchOutcomes, [branchId]: { branchId, takenTargets } };
 
       const siblings = state.graph.edges.filter(
-        (e) => e.kind === "branch" && e.branchId === branchId && e.to !== nodeId
+        (e) => e.kind === "branch" && e.branchId === branchId && !takenTargets.includes(e.to)
       );
       for (const sibling of siblings) {
         if (nodeStatus[sibling.to] !== "complete") {
@@ -302,7 +381,9 @@ export function applyStreamEvent(state: GraphViewState, event: AskStreamEvent): 
       }
     }
 
-    nodeStatus = activateEligibleNodes(state.graph, nodeStatus, branchOutcomes);
+    if (!state.serverReportsStarts) {
+      nodeStatus = activateEligibleNodes(state.graph, nodeStatus, branchOutcomes);
+    }
     return { ...state, nodeStatus, branchOutcomes };
   }
 
@@ -319,7 +400,45 @@ export function applyStreamEvent(state: GraphViewState, event: AskStreamEvent): 
     };
   }
 
-  return state; // "done" — nothing left to fold; see doc comment above
+  return state; // "node_token" / "done" — no status change; see doc comment above
+}
+
+/**
+ * Folds one event into per-node live text: `node_token` appends to that
+ * node's text, `node_start` (a first start, a loop re-run, or a retry)
+ * clears it, and `node_complete` replaces it with the authoritative final
+ * output. Returns the same object when nothing changed. Kept separate from
+ * GraphViewState because text changes far more often than status does —
+ * UIs can batch it without re-deriving the graph view.
+ */
+export function appendNodeText(
+  texts: Record<string, string>,
+  event: AskStreamEvent
+): Record<string, string> {
+  if (event.type === "node_token") {
+    const { node_id, text } = event.data;
+    return { ...texts, [node_id]: (texts[node_id] ?? "") + text };
+  }
+  if (event.type === "node_start") {
+    return { ...texts, [event.data.node_id]: "" };
+  }
+  if (event.type === "node_complete") {
+    const { node_id, output } = event.data.node;
+    return { ...texts, [node_id]: output };
+  }
+  return texts;
+}
+
+/**
+ * The run was stopped (the user cancelled it): nodes still running go back
+ * to idle — nothing failed — and everything that finished stays as it is.
+ */
+export function applyStreamStopped(state: GraphViewState): GraphViewState {
+  const nodeStatus: Record<string, NodeExecutionStatus> = {};
+  for (const [id, status] of Object.entries(state.nodeStatus)) {
+    nodeStatus[id] = status === "running" ? "not-started" : status;
+  }
+  return { ...state, nodeStatus };
 }
 
 /**

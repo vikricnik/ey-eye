@@ -82,7 +82,13 @@ function nodeLine(
 ): string {
   const glyphPlain = status ? STATUS_GLYPH[status] + " " : "";
   const badgePlain = node.isOutputCandidate ? " ★" : "";
-  const prefixPlain = glyphPlain + node.id + badgePlain;
+  // Even the id itself is cut when the box is capped narrower than it, so
+  // no row can ever be wider than the box around it.
+  const idPlain =
+    maxWidth !== undefined
+      ? truncatePlain(node.id, maxWidth - glyphPlain.length - badgePlain.length)
+      : node.id;
+  const prefixPlain = glyphPlain + idPlain + badgePlain;
 
   let modelPlain = `[${node.model}]`;
   if (maxWidth !== undefined) {
@@ -93,7 +99,7 @@ function nodeLine(
   const glyphColored = status ? statusColor(status)(STATUS_GLYPH[status]) + " " : "";
   const badgeColored = node.isOutputCandidate ? chalk.magenta(" ★") : "";
   const modelColored = modelPlain ? "  " + chalk.gray(modelPlain) : "";
-  return `${glyphColored}${chalk.bold(node.id)}${badgeColored}${modelColored}`;
+  return `${glyphColored}${chalk.bold(idPlain)}${badgeColored}${modelColored}`;
 }
 
 function groupByLevel(nodes: GraphNode[]): Map<number, GraphNode[]> {
@@ -148,8 +154,8 @@ function renderEdgeLines(edges: GraphEdge[], state: GraphViewState | undefined):
       // dim the ones that weren't — matches the web view's route-taken /
       // route-not-taken styling.
       const outcome = edge.branchId ? state?.branchOutcomes[edge.branchId] : undefined;
-      const isTaken = outcome !== undefined && outcome.takenTo === edge.to;
-      const isNotTaken = outcome !== undefined && outcome.takenTo !== edge.to;
+      const isTaken = outcome !== undefined && outcome.takenTargets.includes(edge.to);
+      const isNotTaken = outcome !== undefined && !isTaken;
       const suffixPlain = isTaken ? " ✓ taken" : isNotTaken ? " (not taken)" : "";
 
       const prefixPlain = i === 0 ? `  ${glyph} ${heading.padEnd(8)} ` : " ".repeat(12);
@@ -197,22 +203,25 @@ export function renderGraphText(graph: GraphModel, state?: GraphViewState): stri
     const nodes = byLevel.get(level);
     if (!nodes || nodes.length === 0) continue;
 
+    // Rows are "│ " + content + " │", so the box's inner width is the
+    // widest content plus one space of padding on each side.
     const rawContentLines = nodes.map((n) => nodeLine(n, state?.nodeStatus[n.id]));
     const rawInnerWidth = Math.max(
       visibleLength(`Level ${level}`) + 2,
-      ...rawContentLines.map(visibleLength)
+      ...rawContentLines.map((line) => visibleLength(line) + 2)
     );
     const innerWidth = Math.min(rawInnerWidth, terminalCap);
     // Only re-truncate if capping actually kicked in — the common case
     // (diagram already fits) does no extra work.
+    const contentWidth = innerWidth - 2;
     const contentLines =
       innerWidth < rawInnerWidth
-        ? nodes.map((n) => nodeLine(n, state?.nodeStatus[n.id], innerWidth - 1))
+        ? nodes.map((n) => nodeLine(n, state?.nodeStatus[n.id], contentWidth))
         : rawContentLines;
 
     lines.push(chalk.gray(boxRule(innerWidth, "┌", "┐", `Level ${level}`)));
     for (const content of contentLines) {
-      lines.push(chalk.gray("│ ") + padVisible(content, innerWidth - 1) + chalk.gray("│"));
+      lines.push(chalk.gray("│ ") + padVisible(content, contentWidth) + chalk.gray(" │"));
     }
     lines.push(chalk.gray(boxRule(innerWidth, "└", "┘")));
     lines.push("");

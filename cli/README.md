@@ -35,6 +35,14 @@ set `PIPELINE_API_KEY` so requests aren't rejected with `401`:
 PIPELINE_API_KEY=your-key npm start
 ```
 
+Commands and messages can also be piped in — each line runs in order (lines
+that arrive while an earlier one is still running wait their turn), and the
+CLI exits when the input ends:
+
+```bash
+printf '/use consensus-qa\nWhen did the Berlin Wall fall?\n' | npm start
+```
+
 ## Usage
 
 On startup, the CLI shows server info and picks up the server's configured
@@ -52,9 +60,69 @@ automatically.
 | `/pipeline` | show the **active** pipeline's DAG as a box-drawing diagram — every node with its model, plain `depends_on` edges, and branch/loop edges each rendered visually distinct and labeled (condition/"default" for branches, max iterations for loops) |
 | `/use <name>` | switch to a different pipeline (confirms it exists first; clears conversation history since a different DAG likely has different context semantics) |
 | `/verbose` | toggle showing every node's output vs. just the final answer |
-| `/stream` | toggle streaming node-by-node progress as the pipeline runs, instead of waiting for the whole thing to finish (off by default). When on, the pipeline's diagram (same one `/pipeline` shows) redraws in place with live per-node status, the branch route actually taken, and loop iteration counts, instead of a scrolling per-node log |
+| `/stream` | toggle streaming node-by-node progress as the pipeline runs, instead of waiting for the whole thing to finish (off by default). When on, the pipeline's diagram (same one `/pipeline` shows) redraws in place with live per-node status — ◐ marks a node the server reports as running right now — plus the branch route actually taken and loop iteration counts |
 | `/reset` | clear conversation history without switching pipelines |
-| `/exit` | quit (also works: Ctrl+C or Ctrl+D) |
+| `/rerun <node>` | run the last message again from `<node>`: it and every node after it call their models, the ones before reuse their outputs; the new answer replaces the last one in the conversation |
+| `/preview <node> [message]` | what `<node>` would receive — for `[message]`, or else the last message with the last run's outputs (your draft while editing; needs editing enabled on the server) |
+| `/exit` | quit (also: Ctrl+D, or Ctrl+C at the prompt). **During a run, Ctrl+C stops the run** (and `/test`, `/compare`) instead: the server stops the model calls, and after a stopped streamed run `/rerun <node>` continues from a node that finished |
+
+### Editing pipelines
+
+Needs `PIPELINE_EDITING_ENABLED=true` on the server to save (loading,
+validating and exporting work either way). Edits happen in a local draft —
+the prompt shows `(name ✎*)` while it has unsaved changes — and the server
+validates it on `/validate` and `/save`. Runs always use the saved version.
+
+| Command | Description |
+|---|---|
+| `/edit [name]` | load a pipeline (default: the active one) into a draft |
+| `/new <name> [--from <saved>]` | start a new one-node pipeline draft — a blank node, or a copy of a saved node |
+| `/nodes` | table of the draft's nodes: model, temperature, dependencies, ★ output |
+| `/node <id>` | one node's full configuration, including options, prompts, and the model's limits (max context, size) |
+| `/node add <id> [--after a,b] [--model provider:model] [--from <saved>]` | add a node (blank, or from the library) |
+| `/dup <node> [new-id]` | duplicate a node: same settings and inputs, runs beside the original |
+| `/node rm <id>` | remove a node and every edge/route/loop touching it |
+| `/set <node>.<field> <value>` | change a node setting — see below |
+| `/settings` | show the pipeline-wide settings: execution, history, defaults |
+| `/pset <setting> <value>` | change one — `description`, `execution.<…>` (incl. `max_history_turns`, `max_concurrency`), `history.<intro\|turn_template\|max_chars\|remember\|summarize.model\|summarize.prompt>`, `defaults.<model\|temperature\|system_prompt\|strip_reasoning\|options.*>`; `unset` clears |
+| `/prompt <node> [system]` | edit the prompt template (or system prompt) in `$EDITOR`; without one, type lines and finish with a single `.` |
+| `/connect <from> <to>` / `/disconnect <from> <to>` | add/remove a dependency edge |
+| `/output <node>[,<node>…]` | set the output node(s) |
+| `/models` | the models this server lets you select |
+| `/validate` | check the draft on the server (also lists models a save would reject, and settings beyond a model's limits) |
+| `/save [name]` | save; a new name saves a copy. Comments and layout in the file are kept |
+| `/delete <name>` | delete a pipeline — the file moves to `pipelines/.deleted/` (recoverable); the server's default pipeline can't be deleted |
+| `/discard` | drop the draft |
+| `/library` | list saved nodes — the node library, reusable in any pipeline |
+| `/library save <node> [name] [--description text…]` | save everything a node runs with (model, options, prompts, history and reasoning settings); asks before replacing |
+| `/library show <name>` | a saved node's full configuration |
+| `/library add <name> [--id x] [--after a,b]` | add a copy to the draft; its prompt's node references are fitted to its inputs |
+| `/library apply <name> <node>` | give an existing node a saved node's configuration (id and inputs stay) |
+| `/library rm <name>` | remove from the library (recoverable; pipelines keep their copies) |
+| `/tests` | the test cases of the draft (or the active pipeline) |
+| `/test [case]` | run all cases, or one — the draft as it is, no save needed — and print pass/fail per case with time and tokens, then totals |
+| `/test add` | add a case: its name, the message, then what the answer must satisfy, one per line: `contains: …`, `not: …`, `check: <condition on output>`, `judge: …` |
+| `/test rm <case>` / `/test judge <model\|unset>` | remove a case / set the model that grades `judge` expectations |
+| `/compare <node> <model> [<model>…]` | run every case as the pipeline is, and again with each model for `<node>`; shows each answer and per-model totals |
+| `/import <file.yaml>` / `/export <file.yaml>` | load a YAML file into a draft / write the draft (or active pipeline) as canonical YAML |
+
+`/set` fields: `model` (e.g. `ollama:gemma3:12b` — a bare name means
+Ollama; `default` inherits the pipeline's default model), `temperature`,
+`system`, `prompt`, `deps` (comma-separated), `id` (renames everywhere),
+`history` (`on`/`off` — whether the node sees the conversation),
+`reasoning` (`on`/`off`/`inherit` — strip `<think>` blocks), and `options.<name>` for any Ollama option —
+`num_ctx`, `num_predict`, `top_p`, `top_k`, `repeat_penalty`,
+`repeat_last_n`, `seed`, `stop` (comma-separated), `mirostat`,
+`mirostat_eta`, `mirostat_tau`, `tfs_z`, `num_gpu`, `num_thread`,
+`keep_alive`, `format`. `unset` clears a field.
+
+```
+(consensus-qa) › /edit
+(consensus-qa ✎) › /set reconcile.temperature 0.3
+(consensus-qa ✎*) › /set reconcile.options.num_ctx 8192
+(consensus-qa ✎*) › /prompt reconcile system
+(consensus-qa ✎*) › /save
+```
 
 ### Example session
 
@@ -189,13 +257,10 @@ All three sources agree: the Berlin Wall fell on November 9, 1989.
 (4.4s total)
 ```
 
-`/stream` and `/verbose` combine: with both on, each node's output prints
-immediately below its completion line rather than only in a final summary.
-This is **node-level** progress, not token-level — each line appears when
-that node finishes, not as the model streams individual words. See
-`llm_pipeline/README.md`'s `POST /ask/stream` section for why (token-level
-streaming would mean every provider adapter implementing it individually;
-node-level works uniformly across all of them).
+While a node runs, a `▸ node: …` line under the diagram shows the newest
+text its model is writing, token by token (parallel nodes each get a
+line). `/stream` and `/verbose` combine: with both on, each node's full
+output prints above the diagram the moment it completes.
 
 ## Response fields
 
@@ -205,7 +270,11 @@ Every answer now reports:
   with branches, this is whichever candidate actually resolved — see the
   server README's notes on `output_node` as a list of candidates)
 - `node_outputs` — every node that ran, keyed by node id, each with `model_name`
-  (`provider:model`, e.g. `ollama:qwen3-coder:30b`), `output`, and `duration_ms`
+  (`provider:model`, e.g. `ollama:qwen3-coder:30b`), `output`, `duration_ms`,
+  and `usage` — shown in `/verbose` output as "3,900 in · 120 out · 42 tok/s ·
+  context 4,096 (95% used)". A node whose prompt filled its context window
+  gets a ⚠ warning after the answer even without `/verbose`: Ollama silently
+  drops the start of a longer prompt.
 - `loop_iterations` — for pipelines using loops, how many times each loop
   looped back before exiting (`{}` for pipelines with no loops)
 
@@ -222,11 +291,12 @@ bare string. When a request fails, the CLI prints the `message` plus a
 `X-Request-ID`) — include that id if you're reporting an issue, since it's
 searchable directly in server logs.
 
-## Known limitation: history isn't summarized
+## Conversation history
 
-Conversation history is sent as raw prior turns, capped by the active
-pipeline's `execution.max_history_turns` (defined per-pipeline in its YAML).
-Use `/reset` to clear it, or switch pipelines with `/use` (which clears it
+Earlier turns (with any remembered node outputs) are sent with every message;
+how many are kept, the character budget and whether older turns are
+summarized are per-pipeline settings (`/settings`, `/pset history.…`). Use
+`/reset` to clear it, or switch pipelines with `/use` (which clears it
 automatically).
 
 ## Build a standalone binary (optional)
@@ -249,7 +319,8 @@ Still, if you have a specific reason (no Node on this machine, running from
 CI, etc.):
 
 ```bash
-docker build -t llm-pipeline-cli .
+# from the repo root — the image needs the shared packages/client workspace
+docker build -f cli/Dockerfile -t llm-pipeline-cli .
 docker run -it --rm \
   -e PIPELINE_BASE_URL=http://host.docker.internal:8000 \
   llm-pipeline-cli

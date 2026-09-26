@@ -4,51 +4,72 @@ from collections.abc import Iterator
 
 import pytest
 from fastapi.testclient import TestClient
+from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+from langchain_core.messages import AIMessage, AIMessageChunk
 
 import llm_pipeline.dag_builder.node_types as node_types_module
 import llm_pipeline.rate_limit as rate_limit_module
-from llm_pipeline.dag_builder.loops import _make_loop_failed_node
+from llm_pipeline.dag_builder.loops import make_loop_failed_node
 from llm_pipeline.errors import PipelineExecutionError
 from llm_pipeline.main import app
 from llm_pipeline.providers import LLMProvider, ModelSpec
-from llm_pipeline.routers.ask import _extract_chunk
+from llm_pipeline.routers.ask import extract_stream_part, message_text
 from llm_pipeline.settings import settings
+from llm_pipeline.state import PipelineState
 
 
-def test_extract_chunk_handles_plain_dict_shape() -> None:
-    """The documented astream(stream_mode='updates') shape: the chunk dict
-    directly, {node_name: update}."""
+def test_extract_stream_part_treats_plain_dict_as_updates() -> None:
+    """The documented single-mode astream() shape: the chunk dict directly,
+    {node_name: update}."""
     step = {"answer": {"node_outputs": {"answer": {"output": "hi"}}}}
-    assert _extract_chunk(step) == step
+    assert extract_stream_part(step) == ("updates", step)
 
 
-def test_extract_chunk_handles_tuple_shape() -> None:
-    """Some LangGraph versions/configurations yield a (mode_name, chunk)
-    tuple even for a single string stream_mode — this is the exact case
-    that silently broke streaming entirely before _extract_chunk existed,
-    since the old code only checked `isinstance(chunk, dict)` directly."""
+def test_extract_stream_part_handles_mode_tuple_shape() -> None:
+    """With several stream modes requested, LangGraph yields
+    (mode_name, payload) tuples — for both "updates" and "custom"."""
     inner = {"answer": {"node_outputs": {"answer": {"output": "hi"}}}}
-    step = ("updates", inner)
-    assert _extract_chunk(step) == inner
+    assert extract_stream_part(("updates", inner)) == ("updates", inner)
+    custom = {"event": "node_start", "node_id": "answer", "model_name": "ollama:x"}
+    assert extract_stream_part(("custom", custom)) == ("custom", custom)
 
 
-def test_extract_chunk_rejects_unrecognized_shapes() -> None:
-    assert _extract_chunk("not a chunk") is None
-    assert _extract_chunk(("updates", "not a dict")) is None
-    assert _extract_chunk(("too", "many", "items")) is None
-    assert _extract_chunk(None) is None
+def test_extract_stream_part_unpacks_messages_mode() -> None:
+    """ "messages" mode yields (message_chunk, metadata) tuples."""
+    chunk = AIMessageChunk(content="hel")
+    meta = {"langgraph_node": "answer"}
+    assert extract_stream_part(("messages", (chunk, meta))) == (
+        "messages",
+        {"message": chunk, "metadata": meta},
+    )
+    assert extract_stream_part(("messages", (chunk, "not a dict"))) is None
+
+
+def test_message_text_handles_strings_and_content_blocks() -> None:
+    assert message_text(AIMessageChunk(content="plain")) == "plain"
+    blocks = [{"type": "text", "text": "a"}, {"type": "tool_use", "id": "x"}, "b"]
+    assert message_text(AIMessageChunk(content=blocks)) == "ab"
+    assert message_text(object()) == ""
+
+
+def test_extract_stream_part_rejects_unrecognized_shapes() -> None:
+    assert extract_stream_part("not a chunk") is None
+    assert extract_stream_part(("updates", "not a dict")) is None
+    assert extract_stream_part(("too", "many", "items")) is None
+    assert extract_stream_part((1, {})) is None
+    assert extract_stream_part(None) is None
 
 
 class _EchoProvider:
     def __init__(self, tag: str) -> None:
         self.tag = tag
 
-    async def generate(self, prompt: str) -> str:
+    async def generate(self, prompt: str, system: str | None = None) -> str:
         return f"[{self.tag}]:{prompt}"
 
 
 class _FailingProvider:
-    async def generate(self, prompt: str) -> str:
+    async def generate(self, prompt: str, system: str | None = None) -> str:
         raise RuntimeError("simulated failure")
 
 
@@ -170,8 +191,12 @@ def test_stream_provider_failure_yields_error_event_with_200_status(
     assert response.status_code == 200  # NOT 503, even though the pipeline failed
     events = _parse_sse_events(response.text)
 
-    assert len(events) == 1
-    event_type, data = events[0]
+    # The node genuinely started, retried once (simple-local keeps the
+    # default max_retries=1), then failed.
+    assert [e[0] for e in events] == ["node_start", "node_start", "error"]
+    assert [e[1]["attempt"] for e in events[:2]] == [1, 2]
+    assert events[0][1]["node_id"] == "answer"
+    event_type, data = events[2]
     assert event_type == "error"
     # Same ErrorResponse shape every other error in this API uses.
     assert set(data.keys()) == {
@@ -200,10 +225,21 @@ def test_loop_exhaustion_failure_carries_loop_id() -> None:
     directly against the loop-failed node builder rather than through a
     full HTTP run, since none of the shipped/fixture pipelines configure
     on_max_iterations: fail."""
-    node_fn = _make_loop_failed_node("revise_until_approved")
+    node_fn = make_loop_failed_node("revise_until_approved")
+    # The node fails without reading the state; any valid one will do.
+    empty: PipelineState = {
+        "input": "",
+        "contextual_input": "",
+        "history": "",
+        "node_outputs": {},
+        "loop_counts": {},
+    }
+
+    async def run_node() -> None:
+        await node_fn(empty)
 
     with pytest.raises(PipelineExecutionError) as exc_info:
-        asyncio.run(node_fn({}))  # type: ignore[arg-type]
+        asyncio.run(run_node())
 
     assert exc_info.value.loop_id == "revise_until_approved"
     assert exc_info.value.node_id is None
@@ -222,3 +258,291 @@ def test_stream_pipeline_not_found_returns_normal_404_before_streaming(
     assert response.status_code == 404
     body = response.json()
     assert "does-not-exist" in body["message"]
+
+
+# ---------------------------------------------------------------------------
+# node_start — real "this node is running now" events
+# ---------------------------------------------------------------------------
+
+
+def test_stream_every_node_start_precedes_its_node_complete(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_get_provider(spec: ModelSpec) -> LLMProvider:
+        return _EchoProvider(spec.model)
+
+    monkeypatch.setattr(node_types_module, "get_provider", fake_get_provider)
+
+    response = client.post(
+        "/ask/stream",
+        json={"prompt": "q", "pipeline_name": "consensus-qa", "history": []},
+    )
+    events = _parse_sse_events(response.text)
+
+    started_at: dict[str, int] = {}
+    completed_at: dict[str, int] = {}
+    for index, (event_type, data) in enumerate(events):
+        if event_type == "node_start":
+            started_at[str(data["node_id"])] = index
+            assert str(data["model_name"]).startswith("ollama:")
+        elif event_type == "node_complete":
+            completed_at[data["node"]["node_id"]] = index  # type: ignore[index]
+
+    assert set(started_at) == {"answer_local", "answer_b", "answer_c", "reconcile"}
+    assert set(started_at) == set(completed_at)
+    for node_id, start_index in started_at.items():
+        assert start_index < completed_at[node_id], node_id
+    # reconcile depends on all three roots, so it can only start after they finish.
+    assert started_at["reconcile"] > max(
+        completed_at[n] for n in ("answer_local", "answer_b", "answer_c")
+    )
+
+
+class _BarrierProvider:
+    """Only returns once `parties` calls are in flight at the same time —
+    so the run can only finish if those calls genuinely run concurrently.
+    A serial run would block on the first call until the timeout."""
+
+    def __init__(self, parties: int) -> None:
+        self.parties = parties
+        self.arrived = 0
+        self.all_arrived: asyncio.Event | None = None
+
+    async def generate(self, prompt: str, system: str | None = None) -> str:
+        if self.all_arrived is None:
+            self.all_arrived = asyncio.Event()
+        self.arrived += 1
+        if self.arrived >= self.parties:
+            self.all_arrived.set()
+        await asyncio.wait_for(self.all_arrived.wait(), timeout=5)
+        return "ok"
+
+
+def test_stream_parallel_roots_all_start_before_any_completes(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Once the three roots have met at the barrier it stays open, so the
+    # later reconcile call passes straight through.
+    barrier = _BarrierProvider(parties=3)
+    monkeypatch.setattr(node_types_module, "get_provider", lambda spec: barrier)
+
+    response = client.post(
+        "/ask/stream",
+        json={"prompt": "q", "pipeline_name": "consensus-qa", "history": []},
+    )
+    events = _parse_sse_events(response.text)
+    event_types = [e[0] for e in events]
+
+    assert event_types[-1] == "done"
+    first_complete = event_types.index("node_complete")
+    roots_started_before = {
+        str(data["node_id"])
+        for event_type, data in events[:first_complete]
+        if event_type == "node_start"
+    }
+    assert roots_started_before == {"answer_local", "answer_b", "answer_c"}
+
+
+@pytest.mark.asyncio
+async def test_loop_node_emits_node_start_on_every_iteration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pathlib import Path
+
+    from llm_pipeline.dag_builder import build_graph
+    from llm_pipeline.pipeline_config import load_pipeline_definition
+
+    definition = load_pipeline_definition(
+        Path(__file__).parent / "fixtures" / "valid" / "simple_loop.yaml"
+    )
+    responses = iter(["REVISE: a", "REVISE: b", "APPROVE"])
+
+    class _Critique:
+        async def generate(self, prompt: str, system: str | None = None) -> str:
+            return next(responses)
+
+    critique = _Critique()
+
+    def fake_get_provider(spec: ModelSpec) -> LLMProvider:
+        return critique if spec.model == "critique-model" else _EchoProvider("gen")
+
+    monkeypatch.setattr(node_types_module, "get_provider", fake_get_provider)
+
+    graph = build_graph(definition)
+    starts: list[str] = []
+    async for step in graph.astream(
+        {"input": "x", "contextual_input": "x", "node_outputs": {}, "loop_counts": {}},
+        stream_mode=["updates", "custom"],
+    ):
+        part = extract_stream_part(step)
+        assert part is not None
+        mode, chunk = part
+        if mode == "custom":
+            starts.append(str(chunk["node_id"]))
+
+    # Three critique rounds (REVISE, REVISE, APPROVE) -> generate and
+    # critique each start three times, in alternating order.
+    assert starts == ["generate", "critique"] * 3
+
+
+class _SystemRecordingProvider:
+    def __init__(self) -> None:
+        self.systems: list[str | None] = []
+
+    async def generate(self, prompt: str, system: str | None = None) -> str:
+        self.systems.append(system)
+        return "ok"
+
+
+@pytest.mark.asyncio
+async def test_system_prompt_reaches_the_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    from llm_pipeline.dag_builder import build_graph
+    from llm_pipeline.pipeline_config import PipelineDefinition
+
+    definition = PipelineDefinition.model_validate(
+        {
+            "name": "sys",
+            "nodes": [
+                {
+                    "id": "a",
+                    "model": {"provider": "ollama", "model": "m"},
+                    "system_prompt": "You are terse.",
+                    "prompt_template": "{{ input }}",
+                },
+                {
+                    "id": "b",
+                    "depends_on": ["a"],
+                    "model": {"provider": "ollama", "model": "m"},
+                    "prompt_template": "{{ a.output }}",
+                },
+            ],
+            "output_node": "b",
+        }
+    )
+    recorder = _SystemRecordingProvider()
+    monkeypatch.setattr(node_types_module, "get_provider", lambda spec: recorder)
+
+    await build_graph(definition).ainvoke(
+        {"input": "x", "contextual_input": "x", "node_outputs": {}, "loop_counts": {}}
+    )
+    assert recorder.systems == ["You are terse.", None]
+
+
+# ---------------------------------------------------------------------------
+# node_token — live text as each node's model generates it
+# ---------------------------------------------------------------------------
+
+
+class _StreamingChatProvider:
+    """A provider backed by a real LangChain chat model (a fake one), the way
+    the real adapters are — so LangGraph's messages mode sees its tokens."""
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+    async def generate(self, prompt: str, system: str | None = None) -> str:
+        llm = GenericFakeChatModel(messages=iter([AIMessage(content=self.text)]))
+        result = await llm.ainvoke([("human", prompt)])
+        return str(result.content)
+
+
+def test_stream_emits_tokens_per_node_between_start_and_complete(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        node_types_module,
+        "get_provider",
+        lambda spec: _StreamingChatProvider(f"answer from {spec.model} here"),
+    )
+    response = client.post(
+        "/ask/stream",
+        json={"prompt": "q", "pipeline_name": "consensus-qa", "history": []},
+    )
+    events = _parse_sse_events(response.text)
+    assert events[-1][0] == "done"
+
+    text: dict[str, str] = {}
+    phase: dict[str, str] = {}
+    for event_type, data in events:
+        if event_type == "node_start":
+            phase[str(data["node_id"])] = "running"
+        elif event_type == "node_token":
+            node_id = str(data["node_id"])
+            assert phase.get(node_id) == "running", f"token for {node_id} outside its run"
+            text[node_id] = text.get(node_id, "") + str(data["text"])
+        elif event_type == "node_complete":
+            node = data["node"]
+            assert isinstance(node, dict)
+            node_id = str(node["node_id"])
+            phase[node_id] = "complete"
+            # The streamed pieces add up to exactly the final output.
+            assert text[node_id] == node["output"]
+
+    # Tokens only ever name real pipeline nodes, never internal graph nodes.
+    assert set(text) == {"answer_local", "answer_b", "answer_c", "reconcile"}
+
+
+@pytest.mark.asyncio
+async def test_retry_is_announced_as_a_new_start(monkeypatch: pytest.MonkeyPatch) -> None:
+    from llm_pipeline.dag_builder import build_graph
+    from llm_pipeline.pipeline_config import PipelineDefinition
+
+    class _FailsOnce:
+        calls = 0
+
+        async def generate(self, prompt: str, system: str | None = None) -> str:
+            _FailsOnce.calls += 1
+            if _FailsOnce.calls == 1:
+                raise RuntimeError("transient")
+            return "ok"
+
+    monkeypatch.setattr(node_types_module, "get_provider", lambda spec: _FailsOnce())
+    definition = PipelineDefinition.model_validate(
+        {
+            "name": "retry",
+            "execution": {"max_retries": 1, "retry_backoff_seconds": 0},
+            "nodes": [
+                {
+                    "id": "a",
+                    "model": {"provider": "ollama", "model": "m"},
+                    "prompt_template": "{{ input }}",
+                }
+            ],
+            "output_node": "a",
+        }
+    )
+    starts: list[object] = []
+    async for step in build_graph(definition).astream(
+        {"input": "x", "contextual_input": "x", "node_outputs": {}, "loop_counts": {}},
+        stream_mode=["custom"],
+    ):
+        part = extract_stream_part(step)
+        assert part is not None
+        starts.append(part[1]["attempt"])
+    assert starts == [1, 2]
+
+
+def test_node_start_carries_the_messages_the_node_received(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The rendered prompt (dependencies' outputs filled in) and the system
+    prompt travel with node_start, so clients can show what each node got."""
+    monkeypatch.setattr(node_types_module, "get_provider", lambda spec: _EchoProvider(spec.model))
+    response = client.post(
+        "/ask/stream",
+        json={"prompt": "what year is it", "pipeline_name": "consensus-qa", "history": []},
+    )
+    starts = {
+        str(data["node_id"]): data
+        for event_type, data in _parse_sse_events(response.text)
+        if event_type == "node_start"
+    }
+    assert starts["answer_b"]["prompt"] == (
+        "Answer this question accurately and concisely: what year is it"
+    )
+    assert starts["answer_b"]["system"] is None
+    # reconcile received the three answers, rendered into its template.
+    reconcile_prompt = str(starts["reconcile"]["prompt"])
+    assert "Question: what year is it" in reconcile_prompt
+    assert "1: [qwen3-coder:30b]:Answer this question" in reconcile_prompt
+    assert "{{" not in reconcile_prompt

@@ -2,7 +2,7 @@
   "name": "@llm-pipeline/client",
   "version": "1.0.0",
   "private": true,
-  "description": "Shared API types + typed fetch client for the CLI and web clients — single source of truth for the request/response contract",
+  "description": "Shared API types + typed fetch client for the CLI and web clients \u2014 single source of truth for the request/response contract",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
@@ -11,5 +11,14 @@
       "types": "./src/index.ts",
       "default": "./src/index.ts"
     }
+  },
+  "scripts": {
+    "test": "node --import tsx --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
   }
 }

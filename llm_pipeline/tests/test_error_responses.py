@@ -1,9 +1,10 @@
 from collections.abc import Iterator
+
 import pytest
 from fastapi.testclient import TestClient
 
-from llm_pipeline.main import app
 import llm_pipeline.rate_limit as rate_limit_module
+from llm_pipeline.main import app
 from llm_pipeline.settings import settings
 
 EXPECTED_KEYS = {
@@ -19,7 +20,7 @@ EXPECTED_KEYS = {
 
 
 @pytest.fixture(autouse=True)
-def _reset_shared_state(monkeypatch: pytest.MonkeyPatch) -> None:  # pyright: ignore[reportUnusedFunction]  # noqa: E501
+def _reset_shared_state(monkeypatch: pytest.MonkeyPatch) -> None:  # pyright: ignore[reportUnusedFunction]
     """Auth and rate-limit state are still process-wide singletons (not yet
     dependency-injected the way the pipeline cache now is — see
     pipeline_loader.PipelineCache) — reset them around every test so one

@@ -14,56 +14,261 @@ independently testable and reusable without needing to go through
 Pydantic's validation lifecycle — see validation.py's own docstring.
 """
 
-from typing import Literal, Union
-from pydantic import BaseModel, Field, ConfigDict, model_validator
+from typing import Literal
 
-from llm_pipeline.providers import ProviderType
-from llm_pipeline.safe_eval import validate_expression_syntax, UnsafeExpressionError
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from llm_pipeline.providers import OllamaOptions, ProviderType
+from llm_pipeline.safe_eval import UnsafeExpressionError, validate_expression_syntax
+
+# Every model below forbids unknown fields: a typo'd key (e.g. `temprature`)
+# is rejected with a message naming it rather than silently ignored — the
+# same rule whether the definition came from a YAML file on disk or from an
+# editor client over the API, since both go through these same models.
+_STRICT = ConfigDict(extra="forbid")
+
+# Used when neither the node nor the pipeline's defaults set a temperature.
+DEFAULT_TEMPERATURE = 0.2
+
+# How each earlier conversation turn is written into the history. Renders to
+# exactly the historical fixed format ("User: …\nAssistant: …") when no node
+# outputs are remembered.
+DEFAULT_TURN_TEMPLATE = (
+    "User: {{ prompt }}\n"
+    "{% for node, text in outputs.items() %}{{ node }}: {{ text }}\n{% endfor %}"
+    "Assistant: {{ answer }}"
+)
+DEFAULT_HISTORY_INTRO = "Conversation so far:"
+DEFAULT_SUMMARY_PROMPT = (
+    "Summarize this conversation briefly. Keep names, facts, decisions and open "
+    "questions; drop small talk.\n\n{{ history }}"
+)
+
+# Template variables every node prompt can use, besides other nodes' outputs.
+TEMPLATE_INPUT_VARIABLES = frozenset({"input", "question", "history"})
+
+# How a judge model is asked whether a test case's answer meets one
+# requirement. Variables: question, answer, criterion.
+DEFAULT_JUDGE_PROMPT = (
+    "You are checking an answer against one requirement.\n\n"
+    "Question: {{ question }}\n\n"
+    "Answer: {{ answer }}\n\n"
+    "Requirement: {{ criterion }}\n\n"
+    "Reply with PASS or FAIL on the first line, then one sentence saying why."
+)
+JUDGE_VARIABLES = frozenset({"question", "answer", "criterion"})
 
 
 class ExecutionConfig(BaseModel):
-    model_timeout_seconds: float = 60.0
-    max_history_turns: int = 6
+    model_config = _STRICT
+    model_timeout_seconds: float = Field(default=60.0, gt=0)
+    max_history_turns: int = Field(default=6, ge=0)
     # Total attempts per model call = max_retries + 1 (the initial try).
     # Only transient failures (ProviderError — timeouts, connection errors,
     # API errors) are retried; retries compose with the circuit breaker in
     # providers/resilience.py, which can short-circuit these entirely for a
     # model that's failing consistently rather than retrying it every time.
-    max_retries: int = 1
-    retry_backoff_seconds: float = 1.0
+    max_retries: int = Field(default=1, ge=0)
+    retry_backoff_seconds: float = Field(default=1.0, ge=0)
+    # At most this many nodes call their models at the same time (None: no
+    # limit — every node whose inputs are ready starts immediately).
+    max_concurrency: int | None = Field(default=None, ge=1)
 
 
 class NodeModelConfig(BaseModel):
+    model_config = _STRICT
     provider: ProviderType
-    model: str
-    temperature: float = 0.2
+    model: str = Field(min_length=1)
+    # None: inherit the pipeline default's temperature, else DEFAULT_TEMPERATURE.
+    temperature: float | None = Field(default=None, ge=0.0, le=2.0)
+    # Provider-specific generation options. Only Ollama has any today; see
+    # OllamaOptions (providers/base.py) for the full list.
+    options: OllamaOptions | None = None
+
+    @model_validator(mode="after")
+    def options_only_for_ollama(self) -> "NodeModelConfig":
+        # Rejected rather than ignored: options on a provider that can't
+        # apply them would otherwise look configured while doing nothing.
+        if self.options is not None and self.provider != ProviderType.OLLAMA:
+            raise ValueError(
+                f"'options' are only supported for provider 'ollama', "
+                f"not '{self.provider.value}'"
+            )
+        return self
+
+
+class NodeLayout(BaseModel):
+    """Where the visual editor draws this node. Pure presentation — the
+    graph builder never reads it."""
+
+    model_config = _STRICT
+    x: float
+    y: float
 
 
 class NodeConfig(BaseModel):
+    model_config = _STRICT
     id: str
     # Forward-compatible: today only llm_call is implemented, but the field
     # exists now so retrieval/tool/human_approval node types can be added
     # later without changing the schema shape of every existing pipeline.
     type: Literal["llm_call"] = "llm_call"
     depends_on: list[str] = Field(default_factory=list[str])
-    # Optional, not required: only llm_call needs a model block today, but
-    # future non-llm_call node types (retrieval, tool, ...) genuinely won't
-    # have one — see model_required_for_llm_call below, which is the actual
-    # enforcement point for llm_call specifically.
+    # None: use the pipeline's `defaults.model` (validation.py requires one
+    # of the two for an llm_call node).
     model: NodeModelConfig | None = None
+    # Sent as a real system message, separate from the rendered prompt.
+    # Plain text — not a template, so it can't reference other nodes.
+    # None: use the pipeline's `defaults.system_prompt`.
+    system_prompt: str | None = None
     prompt_template: str
+    # False: this node doesn't see the conversation — its {{ input }} is just
+    # the new message and {{ history }} is empty.
+    include_history: bool = True
+    # Remove <think>…</think> reasoning from this node's output before other
+    # nodes or the user see it. None: use the pipeline's default.
+    strip_reasoning: bool | None = None
+    # Makes this node a classifier: its output becomes exactly one of these
+    # labels (see dag_builder/labels.py), and the run fails if the model's
+    # answer names none of them — so branches can route on `output == "X"`.
+    labels: list[str] | None = None
+    layout: NodeLayout | None = None
+
+    @field_validator("labels")
+    @classmethod
+    def labels_are_distinct(cls, labels: list[str] | None) -> list[str] | None:
+        if labels is None:
+            return None
+        if len(labels) < 2:
+            raise ValueError("a classifier needs at least 2 labels")
+        seen: set[str] = set()
+        for label in labels:
+            if not label.strip():
+                raise ValueError("labels cannot be empty")
+            if label.casefold() in seen:
+                raise ValueError(f"label '{label}' appears more than once")
+            seen.add(label.casefold())
+        return labels
+
+
+class NodeDefaults(BaseModel):
+    """Settings every node inherits unless it sets its own. A node without a
+    `model` uses this whole model block; a node with its own model still
+    inherits the temperature (if it sets none) and, when both are Ollama,
+    any Ollama options it doesn't set itself."""
+
+    model_config = _STRICT
+    model: NodeModelConfig | None = None
+    system_prompt: str | None = None
+    strip_reasoning: bool = False
+
+
+class HistorySummaryConfig(BaseModel):
+    """Condense earlier turns that no longer fit (beyond `max_history_turns`
+    or the character budget) into a short recap, with this model."""
+
+    model_config = _STRICT
+    model: NodeModelConfig
+    # Template; {{ history }} is the earlier turns being condensed.
+    prompt: str = DEFAULT_SUMMARY_PROMPT
+
+
+class HistoryConfig(BaseModel):
+    """How earlier conversation turns reach the nodes. How many turns are
+    kept verbatim is `execution.max_history_turns`."""
+
+    model_config = _STRICT
+    # First line of the history block inside {{ input }}.
+    intro: str = DEFAULT_HISTORY_INTRO
+    # Template for one earlier turn; variables: prompt, answer, outputs
+    # (the remembered node outputs of that turn, by node id).
+    turn_template: str = DEFAULT_TURN_TEMPLATE
+    # Character budget for the verbatim turns; the oldest go first.
+    max_chars: int | None = Field(default=None, ge=200)
+    summarize: HistorySummaryConfig | None = None
+    # Node ids whose outputs are remembered with each turn (besides the
+    # final answer), available to turn_template as outputs.<node>.
+    remember: list[str] = Field(default_factory=list[str])
+
+
+class EvalExpectation(BaseModel):
+    """One thing a test case's answer must satisfy — exactly one of these."""
+
+    model_config = _STRICT
+    contains: str | None = None  # case-insensitive
+    not_contains: str | None = None  # case-insensitive
+    check: str | None = None  # a condition on `output`, like a branch's `when`
+    judge: str | None = None  # a requirement the judge model grades
 
     @model_validator(mode="after")
-    def model_required_for_llm_call(self) -> "NodeConfig":
-        if self.type == "llm_call" and self.model is None:
-            raise ValueError(f"node '{self.id}': type=llm_call requires a 'model' block")
+    def exactly_one(self) -> "EvalExpectation":
+        options = ("contains", "not_contains", "check", "judge")
+        kinds = [k for k in options if getattr(self, k) is not None]
+        if len(kinds) != 1:
+            raise ValueError(
+                "an expectation needs exactly one of contains, not_contains, check, judge"
+            )
+        if not str(getattr(self, kinds[0])).strip():
+            raise ValueError(f"a '{kinds[0]}' expectation needs a value")
+        if self.check is not None:
+            try:
+                validate_expression_syntax(self.check)
+            except (SyntaxError, UnsafeExpressionError) as e:
+                raise ValueError(f"invalid check {self.check!r}: {e}") from e
         return self
 
 
+class EvalCase(BaseModel):
+    """A message to run the pipeline with (no conversation before it), and
+    what its answer must satisfy — nothing, to just see the answer."""
+
+    model_config = _STRICT
+    name: str = Field(min_length=1)
+    input: str = Field(min_length=1)
+    expect: list[EvalExpectation] = Field(default_factory=list[EvalExpectation])
+
+
+class EvalJudge(BaseModel):
+    """The model that grades `judge` expectations, PASS or FAIL."""
+
+    model_config = _STRICT
+    model: NodeModelConfig
+    prompt: str = DEFAULT_JUDGE_PROMPT
+
+
+class TestsConfig(BaseModel):
+    """The pipeline's test cases. The engine ignores them; editor clients
+    run them (POST /pipelines/test) to check the pipeline and compare
+    models."""
+
+    __test__ = False  # not a pytest test class, despite the name
+    model_config = _STRICT
+    judge: EvalJudge | None = None
+    cases: list[EvalCase] = Field(default_factory=list[EvalCase])
+
+
 class BranchRoute(BaseModel):
+    model_config = _STRICT
     when: str | None = None
     default: bool = False
-    to: str
+    # One node, or several that all start (in parallel) when this route is
+    # taken. Kept as written so files round-trip unchanged; use `targets`.
+    to: str | list[str]
+
+    @property
+    def targets(self) -> list[str]:
+        return [self.to] if isinstance(self.to, str) else self.to
+
+    @field_validator("to")
+    @classmethod
+    def targets_are_distinct(cls, to: str | list[str]) -> str | list[str]:
+        if isinstance(to, list):
+            if not to:
+                raise ValueError("a route needs at least one target")
+            duplicate = next((t for i, t in enumerate(to) if t in to[:i]), None)
+            if duplicate is not None:
+                raise ValueError(f"route lists '{duplicate}' more than once")
+        return to
 
     @model_validator(mode="after")
     def when_xor_default(self) -> "BranchRoute":
@@ -75,12 +280,12 @@ class BranchRoute(BaseModel):
             try:
                 validate_expression_syntax(self.when)
             except (SyntaxError, UnsafeExpressionError) as e:
-                raise ValueError(f"invalid 'when' expression {self.when!r}: {e}")
+                raise ValueError(f"invalid 'when' expression {self.when!r}: {e}") from e
         return self
 
 
 class BranchConfig(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
     id: str
     from_: str = Field(alias="from")
     routes: list[BranchRoute] = Field(min_length=1)
@@ -96,7 +301,7 @@ class BranchConfig(BaseModel):
 
 
 class LoopConfig(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
     id: str
     from_: str = Field(alias="from")
     back_to: str
@@ -113,16 +318,19 @@ class LoopConfig(BaseModel):
         try:
             validate_expression_syntax(self.exit_when)
         except (SyntaxError, UnsafeExpressionError) as e:
-            raise ValueError(f"loop '{self.id}': invalid exit_when {self.exit_when!r}: {e}")
+            raise ValueError(f"loop '{self.id}': invalid exit_when {self.exit_when!r}: {e}") from e
         return self
 
 
 class PipelineDefinition(BaseModel):
+    model_config = _STRICT
     # Bump when the YAML shape changes in a way that isn't backward compatible.
     version: int = 1
     name: str
     description: str = ""
     execution: ExecutionConfig = ExecutionConfig()
+    defaults: NodeDefaults = NodeDefaults()
+    history: HistoryConfig = HistoryConfig()
     nodes: list[NodeConfig] = Field(min_length=1)
     branches: list[BranchConfig] = Field(default_factory=list[BranchConfig])
     loops: list[LoopConfig] = Field(default_factory=list[LoopConfig])
@@ -130,7 +338,8 @@ class PipelineDefinition(BaseModel):
     # a list is required once `branches` means only ONE of several possible
     # "final" nodes actually runs for a given request (the others in that
     # branch never execute, so a single fixed output_node can't work).
-    output_node: Union[str, list[str]]
+    output_node: str | list[str]
+    tests: TestsConfig = TestsConfig()
 
     @property
     def output_node_candidates(self) -> list[str]:
@@ -138,7 +347,7 @@ class PipelineDefinition(BaseModel):
 
     @property
     def branch_targets(self) -> set[str]:
-        return {route.to for b in self.branches for route in b.routes}
+        return {target for b in self.branches for route in b.routes for target in route.targets}
 
     @property
     def conditional_sources(self) -> set[str]:
@@ -146,7 +355,7 @@ class PipelineDefinition(BaseModel):
         loop's conditional dispatch — no plain depends_on-based edge may
         originate from these, since LangGraph doesn't support mixing a plain
         edge and a conditional edge from the same source node."""
-        return {b.from_ for b in self.branches} | {l.from_ for l in self.loops}
+        return {b.from_ for b in self.branches} | {loop.from_ for loop in self.loops}
 
     @property
     def root_node_ids(self) -> list[str]:

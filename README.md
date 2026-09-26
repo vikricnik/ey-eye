@@ -177,7 +177,10 @@ npm run dev
 ```
 
 Open the printed URL, pick a pipeline from the dropdown in the header, and
-start typing.
+start typing. To **build and edit pipelines visually** (and from the CLI's
+`/edit`, `/set`, `/save` commands), start the server with
+`PIPELINE_EDITING_ENABLED=true` — see
+[`llm_pipeline/README.md`](llm_pipeline/README.md#editing-pipelines-from-clients).
 
 Full details for each component: [`llm_pipeline/README.md`](llm_pipeline/README.md),
 [`cli/README.md`](cli/README.md), [`web/README.md`](web/README.md).
@@ -289,11 +292,6 @@ for the full reasoning on each:
 - **Dynamic map-reduce fan-out** (run a node once per item in a runtime list)
 - **Non-LLM node types** (retrieval, tool execution, human-approval gates —
   the `type` field exists now so adding these later isn't a breaking change)
-- **Token-level streaming** from each individual LLM call — node-level
-  streaming (`POST /ask/stream`, both clients have a streaming toggle) is
-  implemented; per-token streaming within a single node would mean every
-  provider adapter implementing its own streaming API individually, a
-  larger separate undertaking
 
 ## Deployment notes
 
@@ -306,9 +304,16 @@ for the full reasoning on each:
   `llm_pipeline/Dockerfile` and root `docker-compose.yml`); drop `--reload`;
   set `CORS_ALLOWED_ORIGINS` to your actual client origin(s). Ship
   `pipelines/*.yaml` as version-controlled, code-reviewed files baked into
-  the deployment — there's no upload/mutation endpoint by design.
+  the deployment. Editing from clients is **off by default**
+  (`PIPELINE_EDITING_ENABLED=false`): leave it off where pipelines are
+  deployed as reviewed files, or turn it on together with `API_KEYS` where
+  people should build pipelines with the web editor or CLI. Saved models are
+  limited to what the server's Ollama has installed plus
+  `EDITOR_CLOUD_MODELS`.
 - **CI**: `.github/workflows/ci.yml` validates every `pipelines/*.yaml` file,
-  runs `mypy --strict` + `pytest`, and type-checks both TypeScript clients on
+  runs ruff (lint and formatting), `mypy --strict` and pyright over the code
+  and its tests, `pytest`, the shared client's, CLI's and web client's
+  tests, and type-checks the TypeScript (tests included) on
   every push/PR.
 - **Ollama**: `OLLAMA_BASE_URL` for remote instances; match
   `OLLAMA_MAX_LOADED_MODELS` (set in Ollama's own environment) to how many

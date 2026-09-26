@@ -29,6 +29,8 @@ async def health() -> HealthResponse:
         pipelines_dir=str(settings.pipelines_path),
         default_pipeline_name=settings.default_pipeline_name,
         available_pipelines=list_available_pipelines(settings.pipelines_path),
+        editing_enabled=settings.editing_active,
+        editing_disabled_reason=settings.editing_block_reason,
     )
 
 
@@ -57,7 +59,7 @@ async def get_pipeline_definition(
     try:
         definition, _ = cache.get(name)
     except PipelineNotFoundError:
-        raise HTTPException(status_code=404, detail=f"No pipeline named '{name}'")
+        raise HTTPException(status_code=404, detail=f"No pipeline named '{name}'") from None
 
     return PipelineDetailResponse(
         name=definition.name,
@@ -98,14 +100,14 @@ async def get_pipeline_definition(
         loops=[
             PipelineLoopInfo.model_validate(
                 {
-                    "id": l.id,
-                    "from": l.from_,
-                    "back_to": l.back_to,
-                    "exit_to": l.exit_to,
-                    "max_iterations": l.max_iterations,
-                    "on_max_iterations": l.on_max_iterations,
+                    "id": loop.id,
+                    "from": loop.from_,
+                    "back_to": loop.back_to,
+                    "exit_to": loop.exit_to,
+                    "max_iterations": loop.max_iterations,
+                    "on_max_iterations": loop.on_max_iterations,
                 }
             )
-            for l in definition.loops
+            for loop in definition.loops
         ],
     )

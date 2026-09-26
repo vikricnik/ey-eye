@@ -13,28 +13,34 @@ type check).
 """
 
 from llm_pipeline.providers.base import (
-    ProviderType,
-    ModelSpec,
+    Generation,
     LLMProvider,
+    ModelSpec,
+    OllamaOptions,
     ProviderError,
+    ProviderType,
+    Usage,
 )
-from llm_pipeline.providers.registry import get_provider, clear_provider_cache
+from llm_pipeline.providers.registry import clear_provider_cache, get_provider
 from llm_pipeline.providers.resilience import (
     CircuitBreaker,
-    generate_with_timeout,
     generate_with_retry,
+    generate_with_timeout,
     reset_circuit_breaker,
 )
 
 __all__ = [
-    "ProviderType",
-    "ModelSpec",
-    "LLMProvider",
-    "ProviderError",
-    "get_provider",
-    "clear_provider_cache",
     "CircuitBreaker",
-    "generate_with_timeout",
+    "Generation",
+    "LLMProvider",
+    "ModelSpec",
+    "OllamaOptions",
+    "ProviderError",
+    "ProviderType",
+    "Usage",
+    "clear_provider_cache",
     "generate_with_retry",
+    "generate_with_timeout",
+    "get_provider",
     "reset_circuit_breaker",
 ]

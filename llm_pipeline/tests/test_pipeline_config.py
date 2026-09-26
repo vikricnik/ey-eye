@@ -1,11 +1,12 @@
 from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
 from llm_pipeline.pipeline_config import (
     PipelineDefinition,
-    load_pipeline_definition,
     list_available_pipelines,
+    load_pipeline_definition,
 )
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -41,7 +42,7 @@ def test_simple_branch_fixture_loads() -> None:
     assert len(definition.branches) == 1
     branch = definition.branches[0]
     assert branch.from_ == "classify"
-    assert {r.to for r in branch.routes} == {"path_a", "path_b"}
+    assert {t for r in branch.routes for t in r.targets} == {"path_a", "path_b"}
     # path_a and path_b both have depends_on=[] but must NOT be automatic
     # entry points — only `classify` should be an effective root.
     assert definition.effective_root_ids == ["classify"]
@@ -64,9 +65,7 @@ def test_simple_branch_fixture_loads() -> None:
         ("dual_conditional_source.yaml", "more than one branch/loop"),
     ],
 )
-def test_invalid_fixtures_raise_clear_errors(
-    filename: str, expected_message_fragment: str
-) -> None:
+def test_invalid_fixtures_raise_clear_errors(filename: str, expected_message_fragment: str) -> None:
     with pytest.raises(ValidationError) as exc_info:
         load_pipeline_definition(INVALID_DIR / filename)
     assert expected_message_fragment in str(exc_info.value)
@@ -93,7 +92,7 @@ def test_real_pipeline_examples_are_valid() -> None:
 
 
 def test_support_router_output_node_is_a_list() -> None:
-    pipelines_dir = Path(__file__).parent.parent / "pipelines"
+    pipelines_dir = FIXTURES_DIR / "pipelines"
     definition = load_pipeline_definition(pipelines_dir / "support-router.yaml")
     assert definition.output_node_candidates == [
         "refund_flow",
@@ -104,7 +103,7 @@ def test_support_router_output_node_is_a_list() -> None:
 
 
 def test_iterative_refinement_output_node_is_the_loop_back_target() -> None:
-    pipelines_dir = Path(__file__).parent.parent / "pipelines"
+    pipelines_dir = FIXTURES_DIR / "pipelines"
     definition = load_pipeline_definition(pipelines_dir / "iterative-refinement.yaml")
     assert definition.output_node_candidates == ["generate"]
     assert definition.loops[0].max_iterations == 3
@@ -112,9 +111,8 @@ def test_iterative_refinement_output_node_is_the_loop_back_target() -> None:
 
 
 def test_llm_call_node_without_model_is_rejected() -> None:
-    """model became genuinely Optional on NodeConfig (to support future
-    non-llm_call node types), so this validator is the actual enforcement
-    point for llm_call specifically — confirm it's reachable and correct."""
+    """A node may leave out `model` only when the pipeline has a default
+    model to inherit — otherwise it's rejected, naming the node."""
     raw = {
         "name": "missing-model",
         "version": 1,
@@ -123,5 +121,5 @@ def test_llm_call_node_without_model_is_rejected() -> None:
         ],
         "output_node": "A",
     }
-    with pytest.raises(ValidationError, match="requires a 'model' block"):
+    with pytest.raises(ValidationError, match="node 'A' has no model"):
         PipelineDefinition.model_validate(raw)

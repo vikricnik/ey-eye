@@ -1,4 +1,5 @@
 import time
+
 import pytest
 
 from llm_pipeline.providers import (
@@ -56,7 +57,7 @@ class _FlakyProvider:
         self.success_message = success_message
         self.call_count = 0
 
-    async def generate(self, prompt: str) -> str:
+    async def generate(self, prompt: str, system: str | None = None) -> str:
         self.call_count += 1
         if self.call_count <= self.fail_times:
             raise RuntimeError("transient failure")
@@ -64,7 +65,7 @@ class _FlakyProvider:
 
 
 class _AlwaysFailingProvider:
-    async def generate(self, prompt: str) -> str:
+    async def generate(self, prompt: str, system: str | None = None) -> str:
         raise RuntimeError("permanent failure")
 
 
@@ -76,7 +77,7 @@ async def test_retry_recovers_from_transient_failure() -> None:
     result = await generate_with_retry(
         provider, "prompt", spec, timeout_seconds=5.0, max_attempts=2, backoff_base_seconds=0.01
     )
-    assert result == "ok"
+    assert result.text == "ok"
     assert provider.call_count == 2  # first attempt failed, second succeeded
 
 

@@ -9,7 +9,9 @@ its schema) don't pull in every adapter's lazy SDK import machinery.
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Protocol, runtime_checkable
+from typing import Literal, Protocol, runtime_checkable
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ProviderType(str, Enum):
@@ -20,18 +22,117 @@ class ProviderType(str, Enum):
     COPILOT = "copilot"
 
 
+class OllamaOptions(BaseModel):
+    """Ollama-only generation options, passed straight through to the
+    Ollama adapter. Every field is optional — unset means "use the model's
+    own default" (Ollama reads the Modelfile's PARAMETER values).
+
+    Lives here rather than in pipeline_config/schema.py so ModelSpec (which
+    the provider layer owns) can carry it without providers/ importing
+    upward into pipeline_config/. schema.py reuses this exact model, so
+    there is one definition of what an Ollama option is.
+
+    `extra="forbid"`: a typo'd option name is rejected rather than silently
+    ignored. Frozen: ModelSpec is a frozen value object, so its options
+    must not be mutable either."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    # Sampling
+    top_p: float | None = Field(default=None, ge=0.0, le=1.0)
+    top_k: int | None = Field(default=None, ge=1)
+    tfs_z: float | None = Field(default=None, ge=0.0)
+    repeat_penalty: float | None = Field(default=None, ge=0.0)
+    repeat_last_n: int | None = Field(default=None, ge=-1)
+    seed: int | None = None
+    stop: tuple[str, ...] | None = None
+    # Mirostat: 0 = disabled, 1 = Mirostat, 2 = Mirostat 2.0
+    mirostat: Literal[0, 1, 2] | None = None
+    mirostat_eta: float | None = Field(default=None, ge=0.0)
+    mirostat_tau: float | None = Field(default=None, ge=0.0)
+    # Context / length
+    num_ctx: int | None = Field(default=None, ge=1)
+    num_predict: int | None = Field(default=None, ge=-2)
+    # Runtime / hardware
+    num_gpu: int | None = Field(default=None, ge=0)
+    num_thread: int | None = Field(default=None, ge=1)
+    keep_alive: int | str | None = None
+    # Output format: "json" constrains the model to emit valid JSON.
+    format: Literal["json"] | None = None
+
+
 @dataclass(frozen=True)
 class ModelSpec:
-    """Identifies one specific model from one specific provider."""
+    """Identifies one specific model from one specific provider, plus the
+    generation settings it is called with."""
 
     provider: ProviderType
     model: str
     temperature: float = 0.2
+    options: OllamaOptions | None = None
 
     @property
     def identity(self) -> str:
         """Human-readable id used throughout API responses, e.g. 'ollama:qwen3-coder:30b'."""
         return f"{self.provider.value}:{self.model}"
+
+    @property
+    def cache_key(self) -> str:
+        """Distinguishes two specs for the same model called with different
+        settings — the provider registry caches one instance per key, and
+        each instance is constructed with its settings baked in."""
+        options = self.options.model_dump_json(exclude_none=True) if self.options else ""
+        return f"{self.identity}:{self.temperature}:{options}"
+
+
+@dataclass(frozen=True)
+class Usage:
+    """What a backend reported about one call. None: not reported (not
+    every backend reports everything, and test fakes report nothing)."""
+
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    # Time spent generating the reply itself (Ollama's eval_duration) —
+    # excludes model loading and prompt processing, so tokens/second
+    # derived from it means generation speed.
+    generation_ms: float | None = None
+
+
+@dataclass(frozen=True)
+class Generation:
+    """A model's reply, with the usage its backend reported."""
+
+    text: str
+    usage: Usage | None = None
+
+
+def as_generation(result: "str | Generation") -> Generation:
+    """Adapters may return plain text; everything downstream sees a Generation."""
+    return result if isinstance(result, Generation) else Generation(result)
+
+
+def generation_from_message(message: object) -> Generation:
+    """A Generation from a LangChain chat model's reply: its text, the token
+    counts LangChain normalizes into `usage_metadata`, and — for Ollama —
+    the generation time in `response_metadata`."""
+    content = getattr(message, "content", "")
+    usage_metadata = getattr(message, "usage_metadata", None)
+    response_metadata = getattr(message, "response_metadata", None)
+    counts: dict[str, object] = dict(usage_metadata) if isinstance(usage_metadata, dict) else {}
+    metadata: dict[str, object] = (
+        dict(response_metadata) if isinstance(response_metadata, dict) else {}
+    )
+    prompt_tokens = counts.get("input_tokens")
+    completion_tokens = counts.get("output_tokens")
+    eval_ns = metadata.get("eval_duration")
+    usage = Usage(
+        prompt_tokens=prompt_tokens if isinstance(prompt_tokens, int) else None,
+        completion_tokens=completion_tokens if isinstance(completion_tokens, int) else None,
+        generation_ms=eval_ns / 1_000_000
+        if isinstance(eval_ns, int | float) and eval_ns > 0
+        else None,
+    )
+    return Generation(str(content), usage if usage != Usage() else None)
 
 
 @runtime_checkable
@@ -42,7 +143,12 @@ class LLMProvider(Protocol):
     these, and the individual adapter modules (ollama.py, openai.py, ...)
     for how each backend is wrapped to satisfy it."""
 
-    async def generate(self, prompt: str) -> str: ...
+    async def generate(self, prompt: str, system: str | None = None) -> str | Generation:
+        """`system`, when given, is sent as a real system message — not
+        concatenated into the prompt — so chat-tuned models apply it the
+        way they were trained to. Return a Generation to report token
+        usage; plain text is fine for backends that report none."""
+        ...
 
 
 class ProviderError(Exception):
@@ -54,3 +160,13 @@ class ProviderError(Exception):
         self.model_identity = model_identity
         self.original = original
         super().__init__(f"{model_identity} failed: {original}")
+
+
+def chat_messages(prompt: str, system: str | None) -> list[tuple[str, str]]:
+    """The (role, content) message list every LangChain chat model accepts
+    via ainvoke() — a system message first when one is configured."""
+    messages: list[tuple[str, str]] = []
+    if system:
+        messages.append(("system", system))
+    messages.append(("human", prompt))
+    return messages

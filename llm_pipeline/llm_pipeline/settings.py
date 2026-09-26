@@ -1,4 +1,5 @@
 from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -57,6 +58,22 @@ class Settings(BaseSettings):
     circuit_breaker_failure_threshold: int = 3
     circuit_breaker_cooldown_seconds: float = 30.0
 
+    # --- Pipeline editing (web/CLI builder) ---
+    # OFF by default: when false, every write endpoint (PUT /pipelines/{name},
+    # PUT /presets/{name}) returns 403 and clients show pipelines read-only.
+    # Turn on deliberately — with API_KEYS set — for any server reachable
+    # beyond localhost, since it lets clients rewrite pipelines_dir files.
+    pipeline_editing_enabled: bool = False
+    # Directory holding reusable node presets (one YAML file per preset).
+    presets_dir: str = "presets"
+    # Cloud models an editor client may select, as comma-separated
+    # "provider:model" identities (e.g. "openai:gpt-4o,anthropic:claude-sonnet-4-5").
+    # Ollama models need no entry: any model installed on OLLAMA_BASE_URL is
+    # selectable. Anything else is rejected on save — fail closed.
+    editor_cloud_models: str = ""
+    # How long the installed-model list fetched from Ollama is reused.
+    model_catalog_ttl_seconds: float = 30.0
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_allowed_origins.split(",")]
@@ -64,6 +81,35 @@ class Settings(BaseSettings):
     @property
     def pipelines_path(self) -> Path:
         return Path(self.pipelines_dir)
+
+    @property
+    def editing_block_reason(self) -> str | None:
+        """Why editing stays off even though PIPELINE_EDITING_ENABLED is set,
+        or None. With no API key and CORS open to every origin, any web page
+        the user visits could send write requests to this server from their
+        browser — so that combination never allows writes (fail closed)."""
+        if not self.pipeline_editing_enabled:
+            return None
+        if not self.api_keys_list and "*" in self.cors_origins_list:
+            return (
+                "editing is disabled because CORS_ALLOWED_ORIGINS is '*' and no API_KEYS "
+                "are set — any website could rewrite pipelines. Set API_KEYS, or list "
+                "your client origins in CORS_ALLOWED_ORIGINS "
+                "(e.g. http://localhost:5173)."
+            )
+        return None
+
+    @property
+    def editing_active(self) -> bool:
+        return self.pipeline_editing_enabled and self.editing_block_reason is None
+
+    @property
+    def presets_path(self) -> Path:
+        return Path(self.presets_dir)
+
+    @property
+    def editor_cloud_models_list(self) -> list[str]:
+        return [m.strip() for m in self.editor_cloud_models.split(",") if m.strip()]
 
     @property
     def api_keys_list(self) -> list[str]:

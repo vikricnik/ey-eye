@@ -8,7 +8,7 @@ runtime regardless of what's declared per-endpoint).
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from http import HTTPStatus
 
 from fastapi import FastAPI, HTTPException, Request
@@ -16,7 +16,14 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from llm_pipeline.api_schemas import ErrorResponse, ValidationIssue
+from llm_pipeline.errors import (
+    DefinitionInvalidError,
+    InvalidNameError,
+    ProtectedPipelineError,
+    RevisionConflictError,
+)
 from llm_pipeline.logging_context import get_request_id
+from llm_pipeline.model_catalog import ModelNotAllowedError
 
 logger: logging.Logger = logging.getLogger("llm_pipeline")
 
@@ -38,7 +45,7 @@ def build_error_response(
     """The one place every error field gets populated, so all three handlers
     registered below produce byte-for-byte the same shape."""
     return ErrorResponse(
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         status=status_code,
         error=_reason_phrase(status_code),
         message=message,
@@ -47,6 +54,39 @@ def build_error_response(
         details=details or {},
         validations=validations or [],
     )
+
+
+OPENAI_PREFIX = "/v1/"
+
+_OPENAI_ERROR_TYPES = {
+    401: "authentication_error",
+    403: "permission_error",
+    429: "rate_limit_error",
+}
+
+
+def openai_error(body: ErrorResponse) -> dict[str, object]:
+    """The error shape OpenAI clients understand — what the OpenAI-
+    compatible endpoints (routers/openai_compat.py) return instead of
+    ErrorResponse, carrying the same message and reference id."""
+    error_type = _OPENAI_ERROR_TYPES.get(
+        body.status, "server_error" if body.status >= 500 else "invalid_request_error"
+    )
+    return {
+        "error": {
+            "message": body.message,
+            "type": error_type,
+            "param": None,
+            "code": body.error.lower().replace(" ", "_"),
+            "exceptionUID": body.exceptionUID,
+        }
+    }
+
+
+def _content(request: Request, body: ErrorResponse) -> dict[str, object]:
+    if request.url.path.startswith(OPENAI_PREFIX):
+        return openai_error(body)
+    return body.model_dump(mode="json")  # mode="json": datetime -> ISO string
 
 
 def register_exception_handlers(app: FastAPI) -> None:
@@ -76,9 +116,7 @@ def register_exception_handlers(app: FastAPI) -> None:
 
         body = build_error_response(request, exc.status_code, str(exc.detail), details=details)
         return JSONResponse(
-            status_code=exc.status_code,
-            content=body.model_dump(mode="json"),  # mode="json": datetime -> ISO string
-            headers=exc.headers,
+            status_code=exc.status_code, content=_content(request, body), headers=exc.headers
         )
 
     @app.exception_handler(RequestValidationError)
@@ -103,7 +141,50 @@ def register_exception_handlers(app: FastAPI) -> None:
         body = build_error_response(
             request, 422, "Request validation failed", validations=validations
         )
+        return JSONResponse(status_code=422, content=_content(request, body))
+
+    @app.exception_handler(DefinitionInvalidError)
+    async def definition_invalid_handler(  # pyright: ignore[reportUnusedFunction]
+        request: Request, exc: DefinitionInvalidError
+    ) -> JSONResponse:
+        """A client-submitted pipeline/preset failed validation. `details`
+        names the node an editor should highlight when one is at fault;
+        `validations` carries every individual problem pydantic reported.
+
+        (pyright false positive — see http_exception_handler's docstring.)"""
+        details: dict[str, object] = {"node_id": exc.node_id} if exc.node_id else {}
+        validations = [
+            ValidationIssue(field=location, message=message, type=error_type)
+            for location, message, error_type in exc.issues
+        ]
+        body = build_error_response(request, 422, str(exc), details, validations)
         return JSONResponse(status_code=422, content=body.model_dump(mode="json"))
+
+    @app.exception_handler(ModelNotAllowedError)
+    async def model_not_allowed_handler(  # pyright: ignore[reportUnusedFunction]
+        request: Request, exc: ModelNotAllowedError
+    ) -> JSONResponse:
+        """(pyright false positive — see http_exception_handler's docstring.)"""
+        details: dict[str, object] = {"node_id": exc.node_id} if exc.node_id else {}
+        body = build_error_response(request, 422, str(exc), details)
+        return JSONResponse(status_code=422, content=body.model_dump(mode="json"))
+
+    @app.exception_handler(RevisionConflictError)
+    @app.exception_handler(ProtectedPipelineError)
+    async def conflict_handler(  # pyright: ignore[reportUnusedFunction]
+        request: Request, exc: Exception
+    ) -> JSONResponse:
+        """(pyright false positive — see http_exception_handler's docstring.)"""
+        body = build_error_response(request, 409, str(exc))
+        return JSONResponse(status_code=409, content=body.model_dump(mode="json"))
+
+    @app.exception_handler(InvalidNameError)
+    async def invalid_name_handler(  # pyright: ignore[reportUnusedFunction]
+        request: Request, exc: InvalidNameError
+    ) -> JSONResponse:
+        """(pyright false positive — see http_exception_handler's docstring.)"""
+        body = build_error_response(request, 400, str(exc))
+        return JSONResponse(status_code=400, content=body.model_dump(mode="json"))
 
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(  # pyright: ignore[reportUnusedFunction]
@@ -127,7 +208,9 @@ def register_exception_handlers(app: FastAPI) -> None:
 ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
     400: {"model": ErrorResponse, "description": "Invalid input"},
     401: {"model": ErrorResponse, "description": "Missing or invalid API key"},
+    403: {"model": ErrorResponse, "description": "Pipeline editing is disabled"},
     404: {"model": ErrorResponse, "description": "Pipeline not found"},
+    409: {"model": ErrorResponse, "description": "Changed since loaded, or already exists"},
     422: {"model": ErrorResponse, "description": "Request body failed validation"},
     429: {"model": ErrorResponse, "description": "Rate limit exceeded"},
     502: {"model": ErrorResponse, "description": "Unexpected pipeline error"},

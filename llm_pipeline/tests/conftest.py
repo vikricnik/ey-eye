@@ -1,6 +1,21 @@
+from pathlib import Path
+
 import pytest
 
 from llm_pipeline.providers import reset_circuit_breaker
+from llm_pipeline.settings import settings
+
+# Copies of the shipped example pipelines. Tests run against these rather
+# than pipelines/, so editing (or adding) a pipeline locally — which the
+# editor makes easy — can't change what the tests see. Only
+# test_real_pipeline_examples_are_valid reads pipelines/ itself.
+FIXTURE_PIPELINES = Path(__file__).parent / "fixtures" / "pipelines"
+
+
+@pytest.fixture(autouse=True)
+def _use_fixture_pipelines(monkeypatch: pytest.MonkeyPatch) -> None:  # pyright: ignore[reportUnusedFunction]
+    """Tests needing their own directory set it again after this runs."""
+    monkeypatch.setattr(settings, "pipelines_dir", str(FIXTURE_PIPELINES))
 
 
 @pytest.fixture(autouse=True)

@@ -13,9 +13,10 @@ on top when a plain DAG isn't enough.
   that node in `depends_on` is what **"collaboration"** means here — not a
   separate flag, just a template referencing a dependency's result.
 - A node with multiple `depends_on` entries doesn't run until **all** of them
-  finish — a join, also automatic.
-- **`branches`**: a node's output picks exactly ONE of several downstream
-  paths — the others never execute for that request.
+  finish — a join, also automatic (see "Joins after branches and loops" for
+  the one exception).
+- **`branches`**: a node's output picks ONE of several routes — the others
+  never execute for that request. A route can start one node or several.
 - **`loops`**: a bounded generate → critique → revise cycle, up to
   `max_iterations` times.
 
@@ -139,10 +140,121 @@ nodes:
 output_node: draft   # which node's output becomes final_answer
 ```
 
+### Per-node model settings
+
+Every field below is optional. Unknown keys are rejected (a typo like
+`temprature` fails validation instead of being silently ignored).
+
+```yaml
+  - id: reconcile
+    depends_on: [answer_a, answer_b]
+    model:
+      provider: ollama
+      model: llama3
+      temperature: 0.2          # 0–2
+      options:                  # Ollama only — rejected for other providers
+        num_ctx: 8192           # context window (tokens)
+        num_predict: 512        # max tokens to generate (-1 = unlimited)
+        top_p: 0.9
+        top_k: 40
+        repeat_penalty: 1.1
+        repeat_last_n: 64
+        seed: 42                # reproducible output
+        stop: ["###"]
+        mirostat: 0             # 0 off, 1, or 2
+        mirostat_eta: 0.1
+        mirostat_tau: 5.0
+        tfs_z: 1.0
+        num_gpu: 1
+        num_thread: 8
+        keep_alive: "5m"        # how long Ollama keeps the model loaded
+        format: json            # constrain output to valid JSON
+    system_prompt: "You are a careful reconciler."   # a real system message, any provider
+    prompt_template: "{{ answer_a.output }} vs {{ answer_b.output }}"
+    layout: { x: 420, y: 120 }  # where the visual editor draws it; ignored at runtime
+```
+
+Unset options fall back to the model's own defaults (its Modelfile
+`PARAMETER`s). Ollama nodes are called through `ChatOllama`
+(`/api/chat`), so `system_prompt` goes through the model's chat template.
+
 Templates are **Jinja2** — you get `{% if %}`/`{% for %}` etc., not just plain
 substitution. This matters for loops (see below): a loop's `back_to` target
 references a node that genuinely hasn't run yet on the first iteration, so its
 template needs `{% if x is defined %}` around that reference.
+
+Every template can use:
+
+| Variable | Contains |
+|---|---|
+| `{{ input }}` | the new message, with the earlier conversation folded in (see "Conversation history") |
+| `{{ question }}` | just the new message |
+| `{{ history }}` | just the earlier conversation (empty on the first message) |
+| `{{ <node>.output }}` | another node's output — that node must be in `depends_on` |
+
+`input`, `question` and `history` are therefore reserved and can't be node ids.
+
+Templates are rendered in Jinja's **sandbox**: they can't reach Python
+internals — `{{ input.__class__ }}` renders nothing, and going further
+(`{{ input.__class__.__mro__ }}`) fails the node with a security error.
+That matters because editor clients can save templates.
+
+### Pipeline-wide settings
+
+```yaml
+execution:
+  max_concurrency: 2        # at most 2 nodes call models at once (default: no limit)
+
+defaults:                   # every node inherits these unless it sets its own
+  model: { provider: ollama, model: llama3, temperature: 0.4, options: { keep_alive: 10m } }
+  system_prompt: "Answer in English."
+  strip_reasoning: true     # drop <think>…</think> from outputs (qwen3, deepseek-r1, …)
+
+nodes:
+  - id: classify
+    include_history: false  # sees only the new message
+    prompt_template: "Classify: {{ question }}"   # no model: uses defaults.model
+  - id: answer
+    depends_on: [classify]
+    model: { provider: ollama, model: gemma3:12b }  # own model; temperature 0.4 and
+                                                    # keep_alive inherited from defaults
+    strip_reasoning: false  # overrides the pipeline default
+    prompt_template: "{{ input }}"
+```
+
+Inheritance rules: a node without `model` uses `defaults.model` entirely; a
+node with its own model still takes the default's `temperature` if it sets
+none and — when both are Ollama — each Ollama option it doesn't set itself.
+`system_prompt` and `strip_reasoning` fall back to the defaults when the
+node leaves them out. Every `llm_call` node must end up with a model.
+
+### Test cases
+
+A pipeline can carry test cases — messages to run it with, and what each
+answer must satisfy. The engine ignores them; editor clients run them
+(`POST /pipelines/test`, the web **Tests** view, the CLI's `/test`) and
+compare models on them.
+
+```yaml
+tests:
+  judge:                     # grades `judge` expectations; needs the allowlist like any model
+    model: { provider: ollama, model: llama3.2:3b }
+    # prompt: …              # optional; variables: question, answer, criterion
+  cases:
+    - name: capital
+      input: What is the capital of France?
+      expect:
+        - contains: Paris                   # case-insensitive
+        - not_contains: I'm not sure
+        - check: 'output.startswith("The")' # same language as branch conditions
+        - judge: answers in one sentence    # PASS/FAIL by the judge model, with its reason
+    - name: open question                   # no expectations: just shows the answer
+      input: Tell me a joke
+```
+
+Each case runs with no conversation before it; its answer is the output
+node's. Case names must be unique, and a `judge` expectation needs
+`tests.judge`.
 
 ## Branches — conditional routing
 
@@ -169,12 +281,48 @@ output_node: [refund_flow, tech_support_flow, general_flow]
 - `when` conditions run through `safe_eval.py` — a tiny, sandboxed subset of
   Python (`output.startswith(...)`, `output.contains(...)`, `"X" in output`,
   `and`/`or`/`not`), **never** `eval()`. Syntax is validated at YAML load time,
-  not the first time a request happens to hit that branch.
+  not the first time a request happens to hit that branch. Besides `output`,
+  a condition can read `question` — the user's new message, as
+  `{{ question }}` in prompts: `'"URGENT" in question'` routes on what the
+  user wrote without a classifier call. `exit_when` and test `check`s can
+  read it too.
+- `to` can list several nodes — `to: [tech_answer, security_check]` — which
+  all start, in parallel, when that route is taken.
 - A branch's route targets (`refund_flow`, etc.) have `depends_on: []` but are
   **not** automatic entry points — they only run when actually routed to.
   `output_node` must be a **list** of candidates once a branch means only one
   of several possible "final" nodes runs per request; the server picks
   whichever one actually has a result.
+
+### Classifier nodes — `labels`
+
+```yaml
+  - id: classify
+    labels: [REFUND, TECHNICAL, GENERAL]
+    prompt_template: |
+      Classify this support request as REFUND, TECHNICAL or GENERAL: {{ input }}
+```
+
+A node with `labels` answers with exactly one of them: its output is
+matched to a label (ignoring `<think>` reasoning, case, quotes, markdown and
+trailing punctuation — the whole answer, then its first line, then a label
+appearing in it as a whole word) and replaced by that label as written.
+An answer naming none of them, or more than one, fails the run with an
+error naming the node. Routes can then test `output == "REFUND"`, and a
+route no label can ever take (a typo, or one an earlier route always
+catches first) is a load-time error. Routes that also read `question` are
+left out of that check — whether they match depends on the message.
+
+### Joins after branches and loops
+
+A join normally waits for all of its inputs. That's only safe when they're
+guaranteed to run together — so it waits for all when they come after the
+same route (`to: [a, b]`), are re-run by the same loop, or run
+unconditionally. When they don't — inputs behind *different* routes (only
+one of them ever runs), or one input re-run by a loop and another that runs
+once — waiting for all could wait forever, so the join runs after
+whichever arrive instead; guard such templates with `{% if x is defined %}`.
+See `pipeline_config/activation.py`.
 
 ## Loops — bounded revision cycles
 
@@ -215,14 +363,17 @@ output_node: generate   # NOT critique — critique's text is just APPROVE/REVIS
   literal string `"END"` to end the graph directly.
 - `max_iterations` caps how many times the loop can go back;
   `on_max_iterations: proceed` completes anyway using the last attempt,
-  `fail` raises `PipelineExecutionError` instead.
+  `fail` raises `PipelineExecutionError` instead. For a loop nested inside
+  another, the cap is per pass of the outer loop: each outer pass starts it
+  over.
 - Since `node_outputs` only ever holds the **latest** result per node id,
   `generate`'s entry is automatically its most-revised version by the time the
   loop exits — regardless of how many iterations happened.
 - The `{% if critique is defined %}` guard is required, not optional: on the
   very first pass, `critique` genuinely hasn't run yet, and Jinja raises
   immediately on an unguarded `{{ critique.output }}` reference to an
-  undefined variable — this is intentional (see "Validation" below).
+  undefined variable — so loading the pipeline rejects a missing guard
+  (see "Validation" below).
 
 ## Validation, at load time (`pipeline_config/validation.py`)
 
@@ -232,7 +383,10 @@ output_node: generate   # NOT critique — critique's text is just APPROVE/REVIS
 - **No dangling dependencies / branch or loop targets** — every reference
   must point to a real node id.
 - **Exactly one default route per branch**; every non-default route must set
-  `when`.
+  `when`. A route's `to` list can't be empty or name a node twice.
+- **Classifier `labels`**: at least two, none empty, no duplicates (ignoring
+  case) — and every route from a classifier must be reachable by one of its
+  labels.
 - **`when`/`exit_when` expressions must parse under the safe evaluator** —
   a typo'd or unsafe expression fails at load time, not at request time.
 - **A node's outgoing edges can't be split between plain and conditional** —
@@ -248,6 +402,13 @@ output_node: generate   # NOT critique — critique's text is just APPROVE/REVIS
   `depends_on` entry, or the `from_` node of a loop whose `back_to` is this
   node (the one case where a reference is legitimate without `depends_on`,
   since the loop mechanism — not `depends_on` — guarantees ordering).
+- **Outputs that are sometimes missing must be guarded** — a prompt that
+  uses an output which certainly hasn't run on some runs of its node must
+  wrap that part in `{% if x is defined %}`: a loop's `back_to` reading its
+  `from_` node (not run yet on the first pass), or a join reading an input
+  behind a branch route its other inputs don't need. The error names the
+  node, so the editor highlights it. Cases that depend on timing are left
+  to the run-time error, which also names the node.
 - **At least one true entry point** — after excluding branch route targets
   (which must never run unconditionally at the start), some node with no
   dependencies must remain.
@@ -403,8 +564,9 @@ Response:
   "output_node": "reconcile",
   "final_answer": "All three sources agree: November 9, 1989.",
   "node_outputs": {
-    "answer_local": { "node_id": "answer_local", "model_name": "ollama:qwen3-coder:30b", "output": "...", "duration_ms": 1820.4 },
-    "reconcile": { "node_id": "reconcile", "model_name": "ollama:llama3", "output": "...", "duration_ms": 4230.6 }
+    "answer_local": { "node_id": "answer_local", "model_name": "ollama:qwen3-coder:30b", "output": "...", "duration_ms": 1820.4,
+      "usage": { "prompt_tokens": 412, "completion_tokens": 96, "generation_ms": 1540.2, "context_window": 4096 } },
+    "reconcile": { "node_id": "reconcile", "model_name": "ollama:llama3", "output": "...", "duration_ms": 4230.6, "usage": null }
   },
   "loop_iterations": {}
 }
@@ -412,15 +574,44 @@ Response:
 `output_node` in the response is whichever candidate actually resolved (only
 relevant to distinguish from the definition's list when a pipeline uses
 branches). `loop_iterations` maps each loop id to how many times it looped
-back — `{}` for pipelines with no loops.
+back — for a loop nested in another, in the outer loop's last pass — `{}`
+for pipelines with no loops.
+
+**Token usage.** Each node output carries `usage` — what the model's backend
+reported for its (last) call, `null` when it reports nothing:
+`prompt_tokens`, `completion_tokens`, `generation_ms` (time spent generating,
+so `completion_tokens / generation_ms` is its speed), `context_window` —
+how many tokens the model could see: the node's `num_ctx`, else the context
+the loaded Ollama model ran the call with (from Ollama's `/api/ps`, asked
+right after the call) — and `prompt_chars`, the length sent. **Ollama
+silently drops the start of a prompt longer than the window**, and then
+reports only the tokens it kept (often about half the window), so both
+clients warn when the prompt tokens reach the window *or* the prompt is
+longer than the window could hold even at 5 characters per token.
+
+**Stopping a run.** If the client goes away — a Stop button, Ctrl+C in
+the CLI, a closed tab — the server cancels the run within about half a
+second, and with it the model calls in progress (Ollama stops generating
+when its request is dropped). This holds for `/ask`, `/ask/stream`, the
+OpenAI-compatible endpoint and test runs; see `disconnects.py`.
+
+**Re-running from a node.** Add `"rerun": {"from_node": "reconcile",
+"outputs": {<node>: <output>, …}}` (typically the previous run's node
+outputs, with the same `prompt` and `history`): that node and every node
+after it call their models again; every other node reuses its output
+(`replayed: true` on its `node_start`/`node_complete`, no model call).
+A reused node replays only on its first execution — if a loop sends the run
+back to it, it runs for real — and a reused branch source takes the same
+route as before. See `rerun.py`.
 
 ### `POST /ask/stream`
 
-Same request body as `/ask`. Streams **node-level** progress via
-Server-Sent Events as the pipeline runs, rather than waiting for the whole
-DAG to finish — not token-level streaming from each LLM call (that would
-mean every provider adapter implementing streaming individually; node-level
-works uniformly across all of them via LangGraph's own `astream()`).
+Same request body as `/ask`. Streams progress via Server-Sent Events as
+the pipeline runs, rather than waiting for the whole DAG to finish: when
+each node starts, the **text each node's model is writing, token by
+token**, when it completes, and the final result. Token streaming needs no
+code in the provider adapters — LangChain chat models stream on their own
+when LangGraph's `messages` stream mode is listening.
 
 ```bash
 curl -N -X POST http://localhost:8000/ask/stream \
@@ -432,6 +623,18 @@ curl -N -X POST http://localhost:8000/ask/stream \
 Response body (`Content-Type: text/event-stream`), one SSE event per line-block:
 
 ```
+event: node_start
+data: {"node_id": "answer_local", "model_name": "ollama:qwen3-coder:30b", "attempt": 1, "prompt": "Answer this question accurately and concisely: What year did the Berlin Wall fall?", "system": null}
+
+event: node_start
+data: {"node_id": "answer_b", "model_name": "ollama:llama3"}
+
+event: node_token
+data: {"node_id": "answer_local", "text": "The Berlin"}
+
+event: node_token
+data: {"node_id": "answer_b", "text": "It fell on"}
+
 event: node_complete
 data: {"node": {"node_id": "answer_local", "model_name": "ollama:qwen3-coder:30b", "output": "...", "duration_ms": 1820.4}}
 
@@ -453,7 +656,9 @@ Event types:
 
 | Event | Payload | When |
 |---|---|---|
-| `node_complete` | `{"node": NodeOutput}` | Every time a graph node finishes. Synthetic internal nodes (the multi-root fan-out node, loop increment nodes) are filtered out — only real pipeline-defined nodes appear here. |
+| `node_start` | `{"node_id": str, "model_name": str, "attempt": int, "prompt": str, "system": str \| null, "replayed": bool}` | A node is starting its model call, with exactly what the model receives: `prompt` is the rendered template (the run's input and its dependencies' outputs filled in), `system` the node's system prompt — emitted by the node itself (LangGraph's `custom` stream mode), so clients show exactly what is running instead of guessing from the graph shape. Parallel siblings each get one; a node re-run by a loop gets one per iteration; a retry after a failed call sends another with `attempt` 2+ (discard that node's streamed text so far). |
+| `node_token` | `{"node_id": str, "text": str}` | A piece of text the node's model just generated. A node's tokens since its latest `node_start` concatenate to its output so far; `node_complete` then carries the authoritative full output. Parallel nodes' tokens interleave. |
+| `node_complete` | `{"node": NodeOutput}` | Every time a graph node finishes, with its `usage` (see `/ask`) and `replayed`. Synthetic internal nodes (the multi-root fan-out node, loop increment nodes) are filtered out — only real pipeline-defined nodes appear here. |
 | `loop_iteration` | `{"loop_id": str, "iteration": int}` | A loop's increment node fired — it's about to run another iteration. |
 | `done` | Same shape as `AskResponse` | The pipeline finished successfully. Included in full, not just a delta, so a client that only cares about the final result doesn't need to have accumulated every `node_complete` event. |
 | `error` | Same `ErrorResponse` shape as every other error in this API | Something failed mid-run. |
@@ -468,6 +673,86 @@ payload `/ask` would have returned as an HTTP error body. **Pre-stream**
 failures (unknown pipeline, empty prompt, missing API key, rate limit) still
 behave exactly like `/ask` — real `401`/`404`/`400`/`429`/`422` responses —
 since those are all resolved before any streaming has begun.
+
+## OpenAI-compatible endpoints
+
+Every pipeline is also a "model" behind an OpenAI-style API, so tools that
+speak it — Open WebUI, Continue, the openai SDKs — can chat with pipelines:
+
+```bash
+curl http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" -H "Authorization: Bearer $API_KEY" \
+  -d '{"model": "consensus-qa", "messages": [{"role": "user", "content": "When did the Berlin Wall fall?"}], "stream": true}'
+```
+
+- `GET /v1/models` lists the pipelines; `POST /v1/chat/completions` runs the
+  one named by `model`. Point a client's "OpenAI base URL" at
+  `http://<server>/v1`; the API key (when `API_KEYS` is set) goes in as the
+  usual Bearer token.
+- The last message must be the user's; earlier user/assistant pairs become
+  the conversation history (the pipeline's history settings apply). System
+  messages and generation parameters (`temperature`, `max_tokens`, …) are
+  ignored — a pipeline's nodes have their own.
+- `stream: true` sends `chat.completion.chunk` events. The output node's
+  text streams token by token when the pipeline has exactly one output
+  node, no loops and no reasoning stripping on it; otherwise (a loop would
+  stream every draft) the answer arrives in one piece at the end. If the
+  output node fails mid-answer and retries, a `[retrying after an error]`
+  line marks the restart. `stream_options.include_usage` adds OpenAI's
+  final usage chunk.
+- `usage` sums the tokens of every model call in the run.
+- Errors use OpenAI's shape — `{"error": {"message", "type", "code", …}}`;
+  a failure mid-stream arrives as a `data:` event carrying `error`.
+
+## Editing pipelines from clients
+
+The web editor and the CLI's edit commands (`/edit`, `/set`, `/save`, …)
+read and write pipelines through these endpoints. **Writing is off by
+default**: set `PIPELINE_EDITING_ENABLED=true` to allow it, and set
+`API_KEYS` too on anything reachable beyond localhost — saving rewrites
+files in `PIPELINES_DIR`.
+
+Editing is **refused** (writes return 403, `/health` reports
+`editing_enabled: false` with an `editing_disabled_reason`) when
+`CORS_ALLOWED_ORIGINS` is `*` and no `API_KEYS` are set: in that setup any
+website open in your browser could send write requests to the server.
+Set `API_KEYS`, or list the actual client origins (e.g.
+`http://localhost:5173,http://localhost:8080`).
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /models` | Models an editor may pick: every model installed on `OLLAMA_BASE_URL`, plus the cloud models listed in `EDITOR_CLOUD_MODELS` (`provider:model`, comma-separated). `?refresh=true` skips the short cache. |
+| `GET /models/ollama/{name}` | An installed Ollama model's limits — max context length, parameter size, quantization, family — for editor hints. 404 when it isn't installed or Ollama can't be reached. |
+| `GET /pipelines/{name}/definition` | The full definition (prompts, options, layout) plus its `revision` and whether the file has YAML comments (`has_comments`). |
+| `POST /pipelines/validate` | Body `{"definition": {...}}` or `{"yaml": "..."}`. Validates without saving and returns `{definition, yaml, model_issues, warnings}` — the same call serves live validation, import (YAML in) and export (canonical YAML out). `warnings` flags settings beyond what a model supports (e.g. `num_ctx` above its maximum context) but never blocks a save. A 422 names the offending node in `details.node_id`. |
+| `PUT /pipelines/{name}` | Body `{"definition": {...}, "base_revision": "..."}`. `base_revision: null` creates (409 if it exists); otherwise it must match the file on disk (409 if someone saved in between). Writes `pipelines/<name>.yaml` atomically; the next run uses it. |
+| `DELETE /pipelines/{name}?revision=…` | Moves the file to `pipelines/.deleted/<name>.<timestamp>.yaml` — recoverable by moving it back. `revision` (optional) refuses the delete if the file changed since loaded; the server's `DEFAULT_PIPELINE_NAME` can't be deleted (409). |
+| `POST /pipelines/preview` | Body `{"definition": {...}, "node_id": "...", "prompt": "...", "history": [...], "outputs": {<node>: <text>}}`. What that node would receive — `{prompt, system, missing}` — rendered by the same code a run uses, from a definition that needn't be saved. Inputs with no output given appear as `<node's output>` placeholders (listed in `missing`); older turns a run would summarize are left out (previews never call a model). Needs editing enabled — it renders client-supplied templates. |
+| `POST /pipelines/test` | Body `{"definition": {...}, "cases": [names], "inputs": [messages], "variants": [{"label", "models": {<node>: <model block>}}]}`. Runs the definition's test cases (see "Test cases") — all, or the named ones, plus one-off `inputs` — and again for each variant (the same pipeline with other models for some nodes; at most 3), streaming `case_start` / `case_result` per case and variant, then `tests_done` with per-variant totals. Every variant passes validation and the model allowlist. Needs editing enabled — it runs client-chosen models. |
+| `GET /presets`, `GET /presets/{name}`, `PUT /presets/{name}`, `DELETE /presets/{name}` | The node library ("saved nodes" in the clients): a node's whole configuration — `model` (with options), `system_prompt`, `prompt_template`, `include_history`, `strip_reasoning`, plus a `description` — stored as `presets/<name>.yaml` (`PRESETS_DIR`). The model passes the allowlist and the prompt must parse; which node outputs it references is checked when it lands in a pipeline. Adding or applying one copies its values into a node; pipelines never reference presets by name. Deleting moves the file to `presets/.deleted/`. |
+
+What a save goes through, in order — and nothing is written unless all of
+it passes:
+
+1. The **same** validator the YAML loader uses (`PipelineDefinition`).
+2. The **model allowlist**: an Ollama model must be installed on the
+   configured Ollama server, a cloud model must be in
+   `EDITOR_CLOUD_MODELS`. If Ollama can't be reached the save is refused
+   (fail closed). A model the stored pipeline *already* uses is accepted
+   as-is, so editing just a prompt never needs Ollama to be up.
+3. The revision check, then an atomic write.
+
+**Saving keeps hand-written comments and layout.** The new definition is
+merged into the file's existing YAML document (via `ruamel.yaml`
+round-tripping) instead of replacing it: comments, key order, quoting and
+`{ … }` flow style survive, nodes/branches/loops are matched by id, and
+settings the file left implicit are only written out when they change.
+Saving an unchanged pipeline leaves the file byte-identical. The result is
+re-validated and must mean exactly the saved definition — if it wouldn't,
+the file is written in canonical form instead and the response says
+`comments_preserved: false`. New pipelines are written canonically. The
+compiled-graph cache reloads a pipeline whenever its file changes, so
+saves (and hand edits) apply without a restart.
 
 ## Error handling
 
@@ -535,8 +820,9 @@ already enforce the shape at runtime regardless of what's declared.
 
 ```bash
 uv run ruff check .
+uv run ruff format --check .   # `uv run ruff format .` to apply
 uv run pytest
-uv run mypy llm_pipeline/
+uv run mypy .
 uv run pyright
 ```
 
@@ -551,19 +837,16 @@ which is precisely FastAPI's own recommended DI pattern
 (`x: X = Depends(get_x)`) — `extend-immutable-calls` in the ruff config
 tells it `Depends`/`Header`/`Query`/`Path` are safe here.
 
-`ruff format` isn't enforced in CI yet — this codebase predates ruff and
-hasn't had a full formatting pass run against it once, so turning that on
-immediately would surface a wall of formatting diffs unrelated to any real
-change. Worth adding once that one-time pass has happened.
+`ruff format --check` runs in CI: the whole codebase has been formatted
+once, so the check only ever flags new, unformatted changes.
 
 Both type checkers are run deliberately, not redundantly — they use different
 type-checking algorithms and occasionally disagree, which is useful signal
 rather than noise. `pyright` also drives VSCode's Pylance extension, so the
 `[tool.pyright]` config in `pyproject.toml` keeps CI in sync with what you
-already see live in the editor. `pyright`'s scope (`llm_pipeline/` +
-`tests/`) is slightly wider than the documented `mypy` command above since
-the test suite was brought to the same strict standard as the package
-itself — see `tests/conftest.py` and friends for examples of that.
+already see live in the editor. Both check `llm_pipeline/` *and* `tests/`:
+the test suite is held to the same strict standard as the package, since a
+test can hide a real type problem as easily as the code it tests.
 
 **VSCode/Pylance**: select the uv-managed interpreter explicitly
 (`Cmd/Ctrl+Shift+P` → "Python: Select Interpreter") — it's the `.venv/bin/python`
@@ -623,7 +906,9 @@ there.
   sandboxed AST-based evaluator is the only thing that runs YAML-supplied
   expressions.
 - **CI** (`.github/workflows/ci.yml`) — validates every pipeline YAML file,
-  runs `mypy --strict` + `pytest`, and type-checks both TypeScript clients on
+  runs ruff (lint and formatting), `mypy --strict` and pyright over the code
+  and its tests, `pytest`, the shared client's, CLI's and web client's
+  tests, and type-checks the TypeScript (tests included) on
   every push/PR.
 - **Docker** (`Dockerfile`, root `docker-compose.yml`) — reproducible
   deployment: pipeline server + Ollama, both configurable via environment
@@ -642,7 +927,6 @@ providers — no live network needed).
   formatter change, not an architecture change.
 - Deeper prompt-injection defenses beyond length caps (e.g. detecting
   attempts to manipulate downstream node prompts via conversation history).
-- Streaming `/ask` responses.
 
 ## Deliberately deferred (not in this version)
 
@@ -650,18 +934,38 @@ providers — no live network needed).
   in a runtime-determined list") — needed for batch/RAG-style workloads.
 - **Non-`llm_call` node types** (retrieval, tool execution, human-approval
   gates) — the `type` field exists now to make adding these a non-breaking change.
-- **Token-level streaming** from each individual LLM call — `POST
-  /ask/stream` streams node-level progress (see the API section above),
-  which works uniformly across every provider via LangGraph's own
-  `astream()`. Streaming individual tokens within a single node's LLM call
-  would mean every provider adapter (`providers/ollama.py`, `openai.py`,
-  etc.) implementing its own streaming API individually — a larger,
-  separate undertaking left for later.
+  The roadmap puts deterministic node kinds (transform, validate, …) and
+  typed, structured outputs at Stage 3 and retrieval/tool nodes at Stage 4
+  (`specs/ROADMAP.md`).
 
 ## Conversation history
 
-Implemented as **raw replay**: every prior turn is concatenated as plain text
-into `{{ input }}` before a run, capped per-pipeline by
-`execution.max_history_turns`. Token cost grows with conversation length; for
-long-running conversations, consider summarizing older turns via a cheap
-model instead of replaying them verbatim — not implemented here.
+Clients send the earlier turns with every request (the server keeps no
+conversation state). Per pipeline:
+
+```yaml
+execution:
+  max_history_turns: 6      # most recent turns kept verbatim (0: history off)
+history:
+  intro: "Conversation so far:"                           # first line of the history in {{ input }}
+  turn_template: "User: {{ prompt }}\nAssistant: {{ answer }}"   # how each turn is written
+  max_chars: 4000           # budget for the verbatim turns; oldest dropped first
+  remember: [classify]      # also remember these nodes' outputs with each turn
+  summarize:                # condense turns that don't fit instead of dropping them
+    model: { provider: ollama, model: llama3.2:3b }
+    prompt: "Summarize briefly:\n\n{{ history }}"      # must include {{ history }}
+```
+
+- The defaults reproduce the original fixed format exactly.
+- `turn_template` variables: `prompt`, `answer`, and `outputs` (the remembered
+  node outputs of that turn, e.g. `{{ outputs.classify }}`). The default
+  template lists remembered outputs between the prompt and the answer.
+- **Remembered outputs**: `/ask` and the stream's `done` event return
+  `remembered: {node: output}`; clients store it with the turn and send it
+  back as that turn's `outputs`. Both bundled clients do this.
+- **Summaries** cost one model call per message once the conversation no
+  longer fits, using the pipeline's timeout, retries and circuit breaker. If
+  the summary call fails, the older turns are simply dropped (a warning is
+  logged) — the run itself never fails because of it.
+- A node with `include_history: false` gets just the new message as
+  `{{ input }}` and an empty `{{ history }}`.

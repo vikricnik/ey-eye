@@ -1,9 +1,10 @@
 import pytest
 
 from llm_pipeline.safe_eval import (
-    evaluate_condition,
-    validate_expression_syntax,
     UnsafeExpressionError,
+    evaluate_condition,
+    expression_names,
+    validate_expression_syntax,
 )
 
 
@@ -57,3 +58,25 @@ def test_validate_expression_syntax_rejects_unsafe_expression() -> None:
 def test_invalid_python_syntax_raises_syntax_error() -> None:
     with pytest.raises(SyntaxError):
         evaluate_condition("output.startswith(", "anything")
+
+
+@pytest.mark.parametrize(
+    "expression,expected",
+    [
+        ('"order" in question', True),
+        ('question.startswith("URGENT")', True),
+        ('output == "REFUND" and question.contains("order")', True),
+        ('output == "REFUND" and not question.contains("order")', False),
+    ],
+)
+def test_conditions_can_also_read_the_question(expression: str, expected: bool) -> None:
+    assert evaluate_condition(expression, "REFUND", question="URGENT: my order 42") is expected
+
+
+def test_question_is_empty_when_not_given() -> None:
+    assert evaluate_condition('question == ""', "anything") is True
+
+
+def test_names_used_by_an_expression() -> None:
+    assert expression_names('output == "A" and "x" in question') == {"output", "question"}
+    assert expression_names('output.startswith("A")') == {"output"}

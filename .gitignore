@@ -215,3 +215,6 @@ $RECYCLE.BIN/
 # ==========================
 # Project-specific
 # ==========================
+# Pipelines/presets deleted from the editors are moved here (recoverable)
+# rather than erased — keep them out of commits.
+.deleted/

@@ -15,7 +15,7 @@ class CopilotProvider:
     def __init__(self, spec: ModelSpec) -> None:
         self._spec = spec
 
-    async def generate(self, prompt: str) -> str:
+    async def generate(self, prompt: str, system: str | None = None) -> str:
         raise NotImplementedError(
             "CopilotProvider is a placeholder — no public general-purpose completion "
             "API exists for Copilot today. Implement generate() if you have access to "

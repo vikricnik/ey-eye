@@ -1,0 +1,5 @@
+name: test-node
+model:
+  provider: ollama
+  model: llama3
+  temperature: 0.3

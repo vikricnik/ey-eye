@@ -7,9 +7,66 @@ execution:
   max_history_turns: 6
 
 nodes:
-  - id: answer
+  - id: clasify
     depends_on: []
-    model: { provider: ollama, model: llama3, temperature: 0.3 }
-    prompt_template: "{{ input }}"
+    model:
+      provider: ollama
+      model: llama3
+      temperature: 0.0
+    system_prompt: classify input into 3 categories. "JOKE", "STORY", "OTHER". Use only these three words.
+    prompt_template: '{{ input }}'
+    layout:
+      x: 22.0
+      y: 232.0
+  - id: joke
+    depends_on: []
+    model:
+      provider: ollama
+      model: llama3
+      temperature: 0.3
+    prompt_template: |2
 
-output_node: answer
+      {{ input }}
+    layout:
+      x: -252.0
+      y: 441.0
+    system_prompt: if input contains "JOKE" tell a joke, otherwise dont do anything.
+  - id: story
+    depends_on: []
+    model:
+      provider: ollama
+      model: llama3
+      temperature: 0.3
+    system_prompt: if input contains "STORY" tell a brief story, otherwise dont do anything.
+    prompt_template: |2
+
+      "Answer"
+      {{ input }}
+    layout:
+      x: 24.0
+      y: 440.0
+  - id: other
+    depends_on: []
+    model:
+      provider: ollama
+      model: llama3
+      temperature: 0.3
+    system_prompt: if input contains "OTHER" answer user question, otherwise dont do anything.
+    prompt_template: |2
+
+      Answer:
+      {{ input }}
+    layout:
+      x: 295.0
+      y: 444.0
+output_node: other
+branches:
+  - id: clasify_route
+    from: clasify
+    routes:
+      - when: '"JOKE" in output'
+        to: joke
+      - when: '"STORY" in output'
+        to: story
+      - default: true
+        to: other

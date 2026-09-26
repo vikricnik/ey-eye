@@ -8,28 +8,45 @@ Re-exports the public surface so existing call sites can keep writing
 needing to know which submodule anything lives in.
 """
 
+from llm_pipeline.pipeline_config.loader import list_available_pipelines, load_pipeline_definition
+from llm_pipeline.pipeline_config.presets import NodePreset
 from llm_pipeline.pipeline_config.schema import (
-    ExecutionConfig,
-    NodeModelConfig,
-    NodeConfig,
-    BranchRoute,
     BranchConfig,
+    BranchRoute,
+    EvalCase,
+    EvalExpectation,
+    EvalJudge,
+    ExecutionConfig,
     LoopConfig,
+    NodeConfig,
+    NodeLayout,
+    NodeModelConfig,
     PipelineDefinition,
+    TestsConfig,
 )
-from llm_pipeline.pipeline_config.validation import validate_pipeline_dag, END_SENTINEL
-from llm_pipeline.pipeline_config.loader import load_pipeline_definition, list_available_pipelines
+from llm_pipeline.pipeline_config.validation import (
+    END_SENTINEL,
+    PipelineValidationError,
+    validate_pipeline_dag,
+)
 
 __all__ = [
-    "ExecutionConfig",
-    "NodeModelConfig",
-    "NodeConfig",
-    "BranchRoute",
-    "BranchConfig",
-    "LoopConfig",
-    "PipelineDefinition",
-    "validate_pipeline_dag",
     "END_SENTINEL",
-    "load_pipeline_definition",
+    "BranchConfig",
+    "BranchRoute",
+    "EvalCase",
+    "EvalExpectation",
+    "EvalJudge",
+    "ExecutionConfig",
+    "LoopConfig",
+    "NodeConfig",
+    "NodeLayout",
+    "NodeModelConfig",
+    "NodePreset",
+    "PipelineDefinition",
+    "PipelineValidationError",
+    "TestsConfig",
     "list_available_pipelines",
+    "load_pipeline_definition",
+    "validate_pipeline_dag",
 ]

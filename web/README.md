@@ -1,22 +1,47 @@
-# LLM Pipeline — Web Client (TypeScript + Vite)
+# LLM Pipeline — Web Client (React + React Flow + Vite)
 
-A typed, modular web client for the FastAPI + LangGraph DAG pipeline server.
-HTML, CSS, and TypeScript are kept in separate files; Vite handles bundling
-and dev-server hot reload.
+A visual builder and runner for the FastAPI + LangGraph DAG pipeline server:
+draw the graph, configure every node, save it to the server, run it, and
+watch each node light up as the server reports it running.
 
 ## Project structure
 
 ```
 web/
-├── index.html          # structure only — no inline styles or scripts
-├── package.json          # depends on @llm-pipeline/client (../packages/client)
-├── tsconfig.json
+├── index.html
+├── package.json              # react, react-dom, @xyflow/react + @llm-pipeline/client
+├── tsconfig.json             # "jsx": "react-jsx" — Vite's esbuild compiles TSX directly
 └── src/
-    ├── style.css          # all styling
-    ├── relayAnimator.ts     # builds & animates stage indicators dynamically per pipeline
-    ├── render.ts             # DOM rendering (transcript entries, node outputs, errors)
-    └── main.ts                # entry point — pipeline picker, conversation memory, event wiring
+    ├── main.tsx              # React entry point
+    ├── App.tsx               # loading, editing, live validation, save/import/export, runs
+    ├── config.ts             # server URL / API key from public/runtime-config.js
+    ├── style.css
+    ├── editor/
+    │   ├── PipelineCanvas.tsx  # React Flow canvas: drag nodes, draw edges, drop from palette
+    │   ├── LlmNode.tsx         # a node card: model, temperature, live status
+    │   ├── Inspector.tsx       # node / pipeline / edge / branch / loop settings
+    │   ├── fields.tsx          # model picker, Ollama options form, inputs
+    │   ├── PromptPreview.tsx   # what a node would receive, rendered by the server
+    │   ├── Sidebar.tsx         # the Add tab: blank node, library of saved nodes, legend
+    │   ├── conversion.ts       # pipeline definition -> React Flow nodes/edges
+    │   └── editorState.ts      # the edited document and validation state
+    ├── run/
+    │   ├── Chat.tsx            # the Chat tab (conversation picker, transcript) and the message box
+    │   ├── MessagesView.tsx    # every node's received messages and replies, per run
+    │   ├── MessageEntry.tsx
+    │   └── runHistory.ts       # conversations kept in this browser (IndexedDB)
+    ├── tests/TestsView.tsx     # test cases, test runs and model comparison
+    └── ui/
+        ├── Dialogs.tsx         # in-app confirm / prompt / form dialogs
+        ├── SidePanel.tsx       # the one panel beside the canvas: tabs + message box
+        ├── Splitter.tsx        # resizing the panel
+        └── DisplaySettings.tsx # light/dark theme and text size
 ```
+
+Every edit goes through `draftOps` in `@llm-pipeline/client` — the same
+functions the CLI's edit commands use — and the server is the only
+validator: the editor calls `POST /pipelines/validate` (debounced) and
+shows what it says.
 
 Types and the typed fetch client (`PipelineClient`, `AskResponse`, etc.) live in
 the shared `@llm-pipeline/client` package (`../packages/client`) — the CLI
@@ -38,6 +63,14 @@ cd web
 
 ```bash
 npm run dev
+```
+
+Tests (the edit history, canvas layout and helpers) and the type check,
+which covers the tests too:
+
+```bash
+npm test
+npm run typecheck
 ```
 
 Vite prints a local URL (typically `http://localhost:5173`) — open it in a browser.
@@ -73,7 +106,8 @@ security boundary for a public-facing deployment.
 ## Docker
 
 ```bash
-docker build -t llm-pipeline-web .
+# from the repo root — the image needs the shared packages/client workspace
+docker build -f web/Dockerfile -t llm-pipeline-web .
 docker run -p 8080:80 \
   -e PIPELINE_BASE_URL=http://host.docker.internal:8000 \
   llm-pipeline-web
@@ -117,47 +151,142 @@ already configured server-side via `CORS_ALLOWED_ORIGINS` in `.env`.
 
 ## Features
 
-- **Pipeline picker** in the header — populated from `GET /pipelines` on load,
-  defaults to the server's `default_pipeline_name`. Switching pipelines clears
-  conversation history automatically, since a different DAG shape likely has
-  different context semantics.
-- Type a prompt, press **Enter** to send (**Shift+Enter** for a newline)
-- Live health indicator in the header (self-scheduling async poll every 15s —
-  not `setInterval`, so a slow health check can't cause overlapping requests)
-- A **DAG diagram** (built from `GET /pipelines/{name}`) shows the active
-  pipeline's actual node/edge structure — plain `depends_on` edges, branch
-  routes (labeled with their condition or "default"), and loop edges
-  (labeled with max iterations) each rendered visually distinct. Basic
-  scroll/pan (click-and-drag or your browser's native scrolling) reaches
-  anything larger than the viewport.
-- With **"stream progress"** on (see below), the same diagram updates live
-  while a request is in flight: each node's border shows
-  not-started/running/complete/failed status, the branch route that was
-  actually taken is highlighted while the others dim, and a loop's edge
-  label shows its current iteration count against its configured max —
-  all driven by real `node_complete`/`loop_iteration` SSE events, not
-  simulated pacing. With streaming off, the diagram jumps straight to
-  showing the final state once the single JSON response arrives, since the
-  non-streaming API has no per-node timing to show progressively.
-- **"stream progress"** checkbox (off by default) switches to `POST
-  /ask/stream`, showing each node as it actually completes instead of one
-  spinner until the whole pipeline finishes. This is **node-level**
-  progress, not token-level — the diagram updates when a node finishes,
-  not as the model streams individual words. See
-  `llm_pipeline/README.md`'s `POST /ask/stream` section for why (token-level
-  streaming would mean every provider adapter implementing it individually;
-  node-level works uniformly across all of them).
-- **Conversation memory** — prior turns in the session are sent as context.
-  Click **"reset conversation"** to clear it manually.
-- **"show all node outputs"** checkbox reveals every node's output and which
-  model produced it, alongside its execution time. Combines with streaming —
-  with both on, each node's output appears as soon as that node completes.
-- Every response shows `pipeline_name`, `output_node`, how long the whole run
-  took, and (for pipelines using loops, like `iterative-refinement.yaml`) how
-  many times each loop looped back before exiting.
-- Pipelines using **branches** (like `support-router.yaml`) only ever show the
-  node(s) that actually ran for that request — the routes that weren't taken
-  never appear, since they never executed.
+**Layout**: the canvas fills the window, and **one panel** beside it holds
+everything else as tabs — **Chat** (the conversation), **Settings** (the
+selected node, or the pipeline when nothing is selected), **Add** (a blank
+node or one from your library), **Messages** (what every node received and
+replied) and **Tests**. The message box sits at the bottom of the panel on
+every tab, so you can send a message while editing. Selecting a node opens
+its Settings. Drag the panel's edge to resize it (double-click resets; the
+width is remembered); on a narrow screen the panel sits under the canvas.
+
+**Display** ("Aa" in the header): **light or dark theme** — "System"
+(the default) follows the operating system and switches with it — and
+**text size** from 87.5% to 150%. Text also follows the browser's own
+font-size setting. Canvas cards are a zoomable drawing in fixed
+coordinates, so their text stays put; fitting the view zooms up to the
+text size instead. Both settings are remembered in this browser.
+
+**Building** (needs `PIPELINE_EDITING_ENABLED=true` on the server — without
+it everything below is read-only and a banner says so):
+
+- **New / Save / Save as / Import / Export / Delete** in the header. ⌘S /
+  Ctrl+S saves — keeping the file's comments and layout. Export downloads
+  the canonical YAML; Import loads a `.yaml` file as an unsaved draft.
+  Delete moves the file to `pipelines/.deleted/` on the server
+  (recoverable); the server's default pipeline can't be deleted.
+- **Undo / redo** (↶ ↷, ⌘Z / ⇧⌘Z / Ctrl+Y): up to 100 steps; typing into
+  one field is a single step. Undoing back to the saved state clears
+  "unsaved". Inside a text field, ⌘Z undoes that field's typing instead.
+- Names, confirmations and deletes use in-app dialogs with inline
+  validation (no browser popups).
+- **Add nodes** by dragging "LLM node" (or a saved node from the library)
+  from the **Add** tab onto the canvas, or by clicking it — with a node
+  selected, the new node is added *after* it (below it; further clicks place
+  siblings side by side).
+- **Duplicate a node** with **Duplicate** in its settings or ⌘D / Ctrl+D:
+  the copy has the same settings and inputs and sits beside the original.
+- **Draw edges** by dragging from a node's bottom handle to another node's
+  top handle (that's `depends_on`). Select an edge or node and press
+  Backspace/Delete to remove it.
+- **Configure a node** in **Settings**: id (renaming rewrites every
+  reference), model (picked from what `GET /models` says is installed or
+  allowlisted, with its max context, size and quantization), temperature, system prompt, prompt template (with insert
+  buttons for `{{ input }}` and each dependency's `{{ node.output }}`), all
+  Ollama options (`num_ctx`, `num_predict`, `top_p`, `top_k`,
+  `repeat_penalty`, `seed`, `stop`, `mirostat`, `keep_alive`, `format`, …),
+  output-node flag, and its branch or loop.
+- **Library of saved nodes**: **Save to library** (in a node's settings)
+  keeps everything the node runs with — model, temperature, Ollama options,
+  system prompt, prompt template, history and reasoning settings (a model or
+  system prompt it inherits from the pipeline defaults is written out) —
+  under a name and optional description. Saved nodes are listed in the
+  **Add** tab (hover for the details, filter when there are many): drag or
+  click one to add it to any pipeline, pick one under **Start with** when
+  creating a pipeline, or give an existing node its configuration from the
+  node's **Library** section. It's always a copy — changing a saved node
+  later doesn't change pipelines that use it. A saved prompt is fitted to
+  where it lands: references to nodes the pipeline has become inputs, and
+  when it names one node the pipeline lacks and the new node has one unused
+  input (e.g. added below a selected node), the reference points at that
+  input. ✕ removes a saved node (recoverable on the server).
+- **Live validation**: the header shows valid / invalid / warnings; an
+  invalid node is outlined on the canvas and its Settings show the
+  server's message. Save and Run are disabled while it's invalid. Warnings
+  (a model a save would reject, or e.g. `num_ctx` above the model's maximum
+  context) outline the node in amber but don't block anything.
+- **Pipeline settings** (click empty canvas): description, output node(s),
+  execution (timeout, retries, **parallel model calls**), **conversation
+  history** (turns kept, character budget, intro line, turn format, which
+  nodes' outputs to remember, and an optional summarizer model + prompt),
+  **defaults for all nodes** (model, temperature, Ollama options, system
+  prompt, strip `<think>` reasoning), and a list of branches and loops.
+- On a node: pick "pipeline default" as the model to inherit it, switch
+  "sees the conversation history" off for nodes that should only see the
+  new message, and override reasoning stripping. Prompt insert buttons
+  include `{{ question }}` and `{{ history }}`.
+- Pipelines flow **top to bottom**: each dependency level is a row, and
+  nodes that run in parallel sit side by side. Node positions are saved in
+  the YAML (`layout`); **Auto-layout** re-arranges everything by dependency
+  level (use it on pipelines saved before the layout became vertical).
+
+**Running**:
+
+- Runs always stream. Each node shows idle / **running** (pulsing) / done
+  (with duration) / failed, driven by the server's `node_start` and
+  `node_complete` events — so parallel nodes visibly run at the same time.
+  Edges into a running node animate.
+- **Live text**: a running node's card shows the newest words its model is
+  writing, and the output node's answer types itself into the transcript as
+  it's generated.
+- **Messages** tab: a log of every run in the conversation — each node in
+  the order it started, with the **system prompt and prompt it actually
+  received** (its dependencies' outputs filled in) and the **reply** it
+  produced, streaming live. Loop passes appear as separate entries
+  ("iteration 2", …). Click a node's name to open its Settings.
+- In a node's Settings, its own **Messages** sub-tab shows just that node's
+  received messages and replies, newest run first. The sub-tab stays
+  selected as you click from node to node.
+- **Stop** (the Run button while a run is going, or Esc) ends it: the
+  server stops the model calls, nodes that finished keep their output, and
+  nothing is added to the conversation. Test runs have their own Stop.
+- With unsaved changes, the button says **Save & run**: runs execute what's
+  saved on the server, never an unsaved draft.
+- Selecting a node after a run shows its last output in its Settings.
+- **Tokens and context**: after a run, each node card shows how much of the
+  model's context window its prompt used ("3.9k/4.1k ctx" — amber from 80%,
+  red with ⚠ from 95%; hover for tokens in/out and tokens per second), and
+  each Messages entry lists the same. When the prompt filled the window — or
+  was simply longer than it could hold — Ollama has **cut off the start of
+  the prompt** (silently, reporting only the tokens it kept), and the card
+  and entry say so.
+- **Prompt preview** (under a node's prompt template, while editing): what
+  the node would receive, rendered by the server exactly as a run renders
+  it — for the latest message with that run's outputs (so it matches a
+  re-run), or with placeholders before the first run. Follows your edits.
+- **Re-run from here** (a node's settings, or a node in the latest run's
+  Messages): runs the latest message again from that node — the nodes before
+  it reuse their outputs ("reused" on the card and in the log), so tuning a
+  late prompt doesn't re-run everything before it. The new answer replaces
+  the latest one in the conversation.
+- **Conversations are kept** in this browser (IndexedDB), saved after every
+  run: reloading, or coming back to a pipeline, continues its latest
+  conversation. The picker at the top of **Chat** lists a pipeline's past
+  ones (the last 30) to reopen; "+ new" starts over and ✕ deletes one.
+- **"show every node's output"** (in Chat) lists every node's output in the
+  transcript.
+
+**Tests** (a tab in the panel): the pipeline's test cases — a message
+each, and what the answer must satisfy: contains / doesn't contain
+(case-insensitive), a `check` condition like a branch's, or a requirement a
+**judge model** grades PASS/FAIL with its reason. Cases are saved with the
+pipeline. "Run all cases" (or one) runs the draft as it is — no save needed —
+and fills a results grid case by case, with time and tokens; click a cell
+for the answer and each expectation. **Compare models** runs every case
+again with up to three other models for one node, side by side with the
+pipeline as it is, with pass rates and totals per column. "+ from the last
+message" turns the latest message into a case. Running tests needs editing
+enabled on the server.
 
 ## Response fields
 
@@ -194,9 +323,10 @@ request fails, the transcript shows the error message plus a small
 `X-Request-ID`) — useful to include if reporting an issue, since it's
 searchable directly in server logs.
 
-## Known limitation: history isn't summarized
+## Conversation history
 
-History is sent as raw prior turns, capped server-side by the active
-pipeline's `execution.max_history_turns` (set per-pipeline in its YAML). Long
-conversations mean growing token cost per request — use "reset conversation"
-or switch pipelines to clear it.
+The client sends the earlier turns (with any remembered node outputs) on
+every request; how many are kept, the character budget and whether older
+turns are summarized are per-pipeline settings (click empty canvas →
+Conversation history). "+ new" in Chat starts a new conversation;
+switching pipelines continues that pipeline's latest one.
