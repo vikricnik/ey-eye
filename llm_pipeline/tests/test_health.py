@@ -1,4 +1,5 @@
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -60,3 +61,32 @@ def test_pipeline_detail_exposes_loop_on_max_iterations(client: TestClient) -> N
     assert loop["exit_to"] == "END"
     assert loop["max_iterations"] == 3
     assert loop["on_max_iterations"] == "proceed"
+
+
+def test_pipeline_detail_labels_a_default_model_like_the_client_does(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A node without its own model runs the pipeline's default one — the
+    label says which, the way the client's displayModel does."""
+    (tmp_path / "defaults.yaml").write_text(
+        "name: defaults\n"
+        "defaults:\n"
+        "  model: {provider: ollama, model: llama3}\n"
+        "nodes:\n"
+        "  - {id: draft, prompt_template: '{{ input }}'}\n"
+        "  - id: polish\n"
+        "    depends_on: [draft]\n"
+        "    model: {provider: ollama, model: gemma3}\n"
+        "    prompt_template: '{{ draft.output }}'\n"
+        "output_node: polish\n"
+    )
+    monkeypatch.setattr(settings, "pipelines_dir", str(tmp_path))
+
+    with TestClient(app) as client:  # started after the directory is set
+        response = client.get("/pipelines/defaults")
+
+    assert response.status_code == 200
+    assert [n["model"] for n in response.json()["nodes"]] == [
+        "ollama:llama3 (default)",
+        "ollama:gemma3",
+    ]

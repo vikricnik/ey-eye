@@ -12,6 +12,9 @@ need something not re-exported here (e.g. a specific adapter class for a
 type check).
 """
 
+import importlib
+from typing import TYPE_CHECKING, Any
+
 from llm_pipeline.providers.base import (
     Generation,
     LLMProvider,
@@ -21,13 +24,41 @@ from llm_pipeline.providers.base import (
     ProviderType,
     Usage,
 )
-from llm_pipeline.providers.registry import clear_provider_cache, get_provider
-from llm_pipeline.providers.resilience import (
-    CircuitBreaker,
-    generate_with_retry,
-    generate_with_timeout,
-    reset_circuit_breaker,
-)
+
+if TYPE_CHECKING:
+    from llm_pipeline.providers.registry import clear_provider_cache, get_provider
+    from llm_pipeline.providers.resilience import (
+        CircuitBreaker,
+        generate_with_retry,
+        generate_with_timeout,
+        reset_circuit_breaker,
+    )
+
+# The registry imports every adapter, and resilience reads the settings, so
+# these load on first use (PEP 562) rather than with the package: importing
+# just the types — as pipeline_config does, via providers.base, which runs
+# this file first — must not pull in the whole provider layer.
+_LOADED_ON_FIRST_USE = {
+    "clear_provider_cache": "registry",
+    "get_provider": "registry",
+    "CircuitBreaker": "resilience",
+    "generate_with_retry": "resilience",
+    "generate_with_timeout": "resilience",
+    "reset_circuit_breaker": "resilience",
+}
+
+
+def __dir__() -> list[str]:
+    # The lazily loaded names too, for dir() and REPL completion.
+    return sorted(set(globals()) | set(__all__))
+
+
+def __getattr__(name: str) -> Any:
+    submodule = _LOADED_ON_FIRST_USE.get(name)
+    if submodule is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    return getattr(importlib.import_module(f"{__name__}.{submodule}"), name)
+
 
 __all__ = [
     "CircuitBreaker",

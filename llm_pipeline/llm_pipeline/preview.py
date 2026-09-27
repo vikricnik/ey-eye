@@ -11,7 +11,7 @@ summarize are left out here (previews never call a model).
 
 from dataclasses import dataclass
 
-from llm_pipeline.api_schemas import ConversationTurn
+from llm_pipeline.conversation import ConversationTurn
 from llm_pipeline.dag_builder.node_types import render_node_prompt
 from llm_pipeline.history import prepare_input
 from llm_pipeline.pipeline_config import PipelineDefinition

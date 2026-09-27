@@ -263,9 +263,7 @@ async def run_pipeline_tests(
         if issues:
             raise issues[0]
     variants = [
-        Variant(
-            label, definition, build_graph(definition, cache.circuit_breaker, cache.context_probe)
-        )
+        Variant(label, definition, build_graph(definition, cache.node_services))
         for label, definition in zip(labels, definitions, strict=True)
     ]
     judge = base.tests.judge

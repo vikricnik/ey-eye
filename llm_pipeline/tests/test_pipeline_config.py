@@ -5,6 +5,7 @@ from pydantic import ValidationError
 
 from llm_pipeline.pipeline_config import (
     PipelineDefinition,
+    Topology,
     list_available_pipelines,
     load_pipeline_definition,
 )
@@ -18,7 +19,7 @@ def test_diamond_dag_loads_and_resolves_roots() -> None:
     definition = load_pipeline_definition(VALID_DIR / "diamond.yaml")
     assert definition.name == "diamond"
     assert definition.root_node_ids == ["A"]
-    assert definition.effective_root_ids == ["A"]
+    assert Topology(definition).effective_roots == ("A",)
     assert definition.output_node_candidates == ["D"]
     assert {n.id for n in definition.nodes} == {"A", "B", "C", "D"}
 
@@ -34,7 +35,7 @@ def test_simple_loop_fixture_loads() -> None:
     # (which only looks at depends_on) sees no cycle — the actual cycle in
     # the compiled graph comes entirely from the loop mechanism, which is
     # deliberately exempt from that check.
-    assert definition.conditional_sources == {"critique"}
+    assert Topology(definition).conditional_sources == {"critique"}
 
 
 def test_simple_branch_fixture_loads() -> None:
@@ -45,7 +46,7 @@ def test_simple_branch_fixture_loads() -> None:
     assert {t for r in branch.routes for t in r.targets} == {"path_a", "path_b"}
     # path_a and path_b both have depends_on=[] but must NOT be automatic
     # entry points — only `classify` should be an effective root.
-    assert definition.effective_root_ids == ["classify"]
+    assert Topology(definition).effective_roots == ("classify",)
     assert set(definition.root_node_ids) == {"classify", "path_a", "path_b"}
 
 
@@ -99,7 +100,7 @@ def test_support_router_output_node_is_a_list() -> None:
         "tech_support_flow",
         "general_flow",
     ]
-    assert definition.effective_root_ids == ["classify"]
+    assert Topology(definition).effective_roots == ("classify",)
 
 
 def test_iterative_refinement_output_node_is_the_loop_back_target() -> None:
@@ -123,3 +124,13 @@ def test_llm_call_node_without_model_is_rejected() -> None:
     }
     with pytest.raises(ValidationError, match="node 'A' has no model"):
         PipelineDefinition.model_validate(raw)
+
+
+@pytest.mark.parametrize(
+    "name,safe",
+    [("demo", True), ("my-pipeline_2", True), ("demo\n", False), ("../etc", False), ("", False)],
+)
+def test_only_plain_file_stems_are_safe_names(name: str, safe: bool) -> None:
+    from llm_pipeline.pipeline_config import is_safe_name
+
+    assert is_safe_name(name) is safe

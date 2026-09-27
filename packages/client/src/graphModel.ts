@@ -11,13 +11,8 @@ import type {
 } from "./types.js";
 import type { PipelineApiError } from "./apiClient.js";
 import { effectiveModel } from "./draftOps.js";
+import { conditionalSources, effectiveRoots } from "./topology.js";
 import { routeTargets } from "./types.js";
-
-/** The literal sentinel a loop's `exit_to` uses to mean "terminate the
- * graph directly" rather than naming another node — mirrors the server's
- * dag_builder/loops.py END_SENTINEL. Not a real node id: renderers must
- * treat an edge targeting this as a terminal marker, not a node lookup. */
-export const LOOP_EXIT_END = "END";
 
 /** "provider:model" a node runs with; "(default)" when it inherits the
  * pipeline's default model. */
@@ -66,27 +61,16 @@ export function detailFromDefinition(definition: PipelineDefinition): PipelineDe
  * renders as, from the same PipelineDetail the CLI and web clients already
  * fetch via GET /pipelines/{name}. Pure function: same input always
  * produces the same output. Shared by cli/src/graphRenderer.ts and
- * web/src/graphView.ts so both surfaces render identical structure
- * (SC-005) — see specs/001-visual-dag-graph/data-model.md and
- * contracts/graph-model.md for the full field-by-field rationale.
+ * the web editor so both surfaces render identical structure; the
+ * topology rules it applies live in topology.ts.
  */
 export function buildGraphModel(detail: PipelineDetail): GraphModel {
-  // Nodes whose ENTIRE outgoing routing is governed by a branch or loop —
-  // mirrors pipeline_config/schema.py's `conditional_sources` property.
-  // No plain depends_on-based edge may originate from one of these; their
-  // outgoing edges are exclusively the branch/loop edges built below.
-  const conditionalSources = new Set<string>([
-    ...detail.branches.map((b) => b.from),
-    ...detail.loops.map((l) => l.from),
-  ]);
-
-  // Node ids that are a branch route target — excluded from being
-  // automatic layout roots even when depends_on is empty, mirroring
-  // pipeline_config/schema.py's `effective_root_ids` (a branch target must
-  // never look like it always runs).
-  const branchTargets = new Set<string>(
-    detail.branches.flatMap((b) => b.routes.flatMap(routeTargets))
-  );
+  // The shared topology rules (topology.ts): no plain depends_on-based
+  // edge may originate from a conditional source — its outgoing edges are
+  // exclusively the branch/loop edges built below — and a branch target
+  // never looks like it always runs, even with empty depends_on.
+  const conditional = conditionalSources(detail);
+  const roots = new Set(effectiveRoots(detail));
 
   const nodesById = new Map(detail.nodes.map((n) => [n.id, n]));
 
@@ -101,7 +85,7 @@ export function buildGraphModel(detail: PipelineDetail): GraphModel {
   // itself (see research.md §... loop back_to is not a forward dependency).
   function layoutPredecessors(nodeId: string): string[] {
     const node = nodesById.get(nodeId);
-    const preds = (node?.depends_on ?? []).filter((dep) => !conditionalSources.has(dep));
+    const preds = (node?.depends_on ?? []).filter((dep) => !conditional.has(dep));
     for (const branch of detail.branches) {
       if (branch.routes.some((r) => routeTargets(r).includes(nodeId))) {
         preds.push(branch.from);
@@ -117,11 +101,7 @@ export function buildGraphModel(detail: PipelineDetail): GraphModel {
     const cached = levels.get(nodeId);
     if (cached !== undefined) return cached;
 
-    const node = nodesById.get(nodeId);
-    const isEffectiveRoot =
-      node !== undefined && node.depends_on.length === 0 && !branchTargets.has(nodeId);
-
-    if (isEffectiveRoot) {
+    if (roots.has(nodeId)) {
       levels.set(nodeId, 0);
       return 0;
     }
@@ -156,7 +136,7 @@ export function buildGraphModel(detail: PipelineDetail): GraphModel {
 
   for (const node of detail.nodes) {
     for (const dep of node.depends_on) {
-      if (conditionalSources.has(dep)) continue; // that edge belongs to the branch/loop below instead
+      if (conditional.has(dep)) continue; // that edge belongs to the branch/loop below instead
       edges.push({
         from: dep,
         to: node.id,

@@ -4,8 +4,7 @@ from typing import Any
 import pytest
 import yaml
 
-import llm_pipeline.dag_builder.node_types as node_types_module
-from llm_pipeline.dag_builder import build_graph
+from llm_pipeline.dag_builder import NodeServices, build_graph
 from llm_pipeline.errors import PipelineExecutionError
 from llm_pipeline.pipeline_config import PipelineDefinition, load_pipeline_definition
 from llm_pipeline.providers import LLMProvider, ModelSpec
@@ -22,6 +21,11 @@ class _EchoProvider:
 
     async def generate(self, prompt: str, system: str | None = None) -> str:
         return f"[{self.tag}]:{prompt}"
+
+
+def _answered_by(provider: LLMProvider) -> NodeServices:
+    """Services whose every node is answered by `provider`."""
+    return NodeServices(provider_factory=lambda spec: provider)
 
 
 class _FailingProvider:
@@ -47,7 +51,7 @@ class _SequencedProvider:
 
 
 @pytest.mark.asyncio
-async def test_diamond_dag_executes_and_joins_correctly(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_diamond_dag_executes_and_joins_correctly() -> None:
     """A -> (B, C) -> D: confirms parallel siblings both run and D's join
     correctly sees both of their outputs, purely from the depends_on edges."""
     definition = load_pipeline_definition(FIXTURES_DIR / "diamond.yaml")
@@ -55,9 +59,7 @@ async def test_diamond_dag_executes_and_joins_correctly(monkeypatch: pytest.Monk
     def fake_get_provider(spec: ModelSpec) -> LLMProvider:  # test double, spec shape not needed
         return _EchoProvider(spec.model)
 
-    monkeypatch.setattr(node_types_module, "get_provider", fake_get_provider)
-
-    graph = build_graph(definition)
+    graph = build_graph(definition, NodeServices(provider_factory=fake_get_provider))
     result = await graph.ainvoke(
         {"input": "hello", "contextual_input": "hello", "node_outputs": {}, "loop_counts": {}}
     )
@@ -73,9 +75,7 @@ async def test_diamond_dag_executes_and_joins_correctly(monkeypatch: pytest.Monk
 
 
 @pytest.mark.asyncio
-async def test_node_failure_raises_pipeline_execution_error(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_node_failure_raises_pipeline_execution_error() -> None:
     """A DAG node has no generically safe fallback the way an old per-category
     generator did (a downstream node may uniquely depend on it) — a failure
     should surface clearly as PipelineExecutionError, not be silently dropped."""
@@ -84,9 +84,7 @@ async def test_node_failure_raises_pipeline_execution_error(
     def fake_get_provider(spec: ModelSpec) -> LLMProvider:
         return _FailingProvider()
 
-    monkeypatch.setattr(node_types_module, "get_provider", fake_get_provider)
-
-    graph = build_graph(definition)
+    graph = build_graph(definition, NodeServices(provider_factory=fake_get_provider))
 
     with pytest.raises(PipelineExecutionError):
         await graph.ainvoke(
@@ -95,9 +93,7 @@ async def test_node_failure_raises_pipeline_execution_error(
 
 
 @pytest.mark.asyncio
-async def test_multi_root_pipeline_uses_synthetic_start_node(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_multi_root_pipeline_uses_synthetic_start_node() -> None:
     """consensus-qa.yaml has 3 independent roots — confirms the synthetic
     __dag_root__ node correctly fans out to all of them and the join still works."""
     definition = load_pipeline_definition(FIXTURES_DIR.parent / "pipelines" / "consensus-qa.yaml")
@@ -105,9 +101,7 @@ async def test_multi_root_pipeline_uses_synthetic_start_node(
     def fake_get_provider(spec: ModelSpec) -> LLMProvider:
         return _EchoProvider(spec.identity)
 
-    monkeypatch.setattr(node_types_module, "get_provider", fake_get_provider)
-
-    graph = build_graph(definition)
+    graph = build_graph(definition, NodeServices(provider_factory=fake_get_provider))
     result = await graph.ainvoke(
         {
             "input": "what year is it",
@@ -128,7 +122,7 @@ async def test_multi_root_pipeline_uses_synthetic_start_node(
 
 
 @pytest.mark.asyncio
-async def test_branch_only_runs_the_matching_route(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_branch_only_runs_the_matching_route() -> None:
     """simple_branch.yaml: classify's output decides between path_a/path_b —
     confirms ONLY the matching route actually executes, not both, and the
     non-matching sibling never appears in node_outputs at all."""
@@ -138,9 +132,7 @@ async def test_branch_only_runs_the_matching_route(monkeypatch: pytest.MonkeyPat
         async def generate(self, prompt: str, system: str | None = None) -> str:
             return "A"  # matches the `"A" in output` route
 
-    monkeypatch.setattr(node_types_module, "get_provider", lambda spec: _ClassifierProvider())
-
-    graph = build_graph(definition)
+    graph = build_graph(definition, _answered_by(_ClassifierProvider()))
     result = await graph.ainvoke(
         {"input": "hello", "contextual_input": "hello", "node_outputs": {}, "loop_counts": {}}
     )
@@ -152,7 +144,7 @@ async def test_branch_only_runs_the_matching_route(monkeypatch: pytest.MonkeyPat
 
 
 @pytest.mark.asyncio
-async def test_branch_falls_through_to_default_route(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_branch_falls_through_to_default_route() -> None:
     """When no `when` condition matches, the default route runs instead."""
     definition = load_pipeline_definition(FIXTURES_DIR / "simple_branch.yaml")
 
@@ -160,9 +152,7 @@ async def test_branch_falls_through_to_default_route(monkeypatch: pytest.MonkeyP
         async def generate(self, prompt: str, system: str | None = None) -> str:
             return "neither letter matches"  # doesn't contain "A"
 
-    monkeypatch.setattr(node_types_module, "get_provider", lambda spec: _ClassifierProvider())
-
-    graph = build_graph(definition)
+    graph = build_graph(definition, _answered_by(_ClassifierProvider()))
     result = await graph.ainvoke(
         {"input": "hello", "contextual_input": "hello", "node_outputs": {}, "loop_counts": {}}
     )
@@ -173,7 +163,7 @@ async def test_branch_falls_through_to_default_route(monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.asyncio
-async def test_loop_revises_until_approved(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_loop_revises_until_approved() -> None:
     """simple_loop.yaml: critique says REVISE twice, then APPROVE — confirms
     generate re-runs each time (picking up the latest critique feedback via
     the {% if critique is defined %} template guard) and the loop exits
@@ -188,9 +178,7 @@ async def test_loop_revises_until_approved(monkeypatch: pytest.MonkeyPatch) -> N
             return critique_provider
         return generate_provider
 
-    monkeypatch.setattr(node_types_module, "get_provider", fake_get_provider)
-
-    graph = build_graph(definition)
+    graph = build_graph(definition, NodeServices(provider_factory=fake_get_provider))
     result = await graph.ainvoke(
         {
             "input": "draft this",
@@ -210,7 +198,7 @@ async def test_loop_revises_until_approved(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 @pytest.mark.asyncio
-async def test_loop_hits_max_iterations_and_proceeds(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_loop_hits_max_iterations_and_proceeds() -> None:
     """If exit_when never matches, on_max_iterations=proceed should still
     complete the pipeline rather than looping forever."""
     definition = load_pipeline_definition(FIXTURES_DIR / "simple_loop.yaml")
@@ -223,9 +211,7 @@ async def test_loop_hits_max_iterations_and_proceeds(monkeypatch: pytest.MonkeyP
             return critique_provider
         return generate_provider
 
-    monkeypatch.setattr(node_types_module, "get_provider", fake_get_provider)
-
-    graph = build_graph(definition)
+    graph = build_graph(definition, NodeServices(provider_factory=fake_get_provider))
     result = await graph.ainvoke(
         {
             "input": "draft this",
@@ -242,7 +228,7 @@ async def test_loop_hits_max_iterations_and_proceeds(monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.asyncio
-async def test_loop_hits_max_iterations_and_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_loop_hits_max_iterations_and_fails() -> None:
     """on_max_iterations=fail should raise PipelineExecutionError once the
     cap is reached without ever meeting exit_when."""
     import os
@@ -270,9 +256,7 @@ async def test_loop_hits_max_iterations_and_fails(monkeypatch: pytest.MonkeyPatc
             return critique_provider
         return generate_provider
 
-    monkeypatch.setattr(node_types_module, "get_provider", fake_get_provider)
-
-    graph = build_graph(definition)
+    graph = build_graph(definition, NodeServices(provider_factory=fake_get_provider))
 
     with pytest.raises(PipelineExecutionError, match="exceeded max_iterations"):
         await graph.ainvoke(
@@ -297,16 +281,13 @@ class _RecordingProvider:
 
 
 @pytest.mark.asyncio
-async def test_join_waits_for_all_dependencies_on_uneven_paths(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_join_waits_for_all_dependencies_on_uneven_paths() -> None:
     """J depends on A (one step away) and B2 (two steps away): J must run
     once, after both — not as soon as A finishes and then again."""
     definition = load_pipeline_definition(FIXTURES_DIR / "uneven_join.yaml")
     provider = _RecordingProvider()
-    monkeypatch.setattr(node_types_module, "get_provider", lambda spec: provider)
 
-    result = await build_graph(definition).ainvoke(
+    result = await build_graph(definition, _answered_by(provider)).ainvoke(
         {"input": "hello", "contextual_input": "hello", "node_outputs": {}, "loop_counts": {}}
     )
 
@@ -316,16 +297,13 @@ async def test_join_waits_for_all_dependencies_on_uneven_paths(
 
 
 @pytest.mark.asyncio
-async def test_join_after_exclusive_branch_routes_runs_once(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_join_after_exclusive_branch_routes_runs_once() -> None:
     """summary depends on both routes of a branch, but only one route ever
     runs — summary must still run (once), not wait for the other."""
     definition = load_pipeline_definition(FIXTURES_DIR / "branch_join.yaml")
     provider = _RecordingProvider()
-    monkeypatch.setattr(node_types_module, "get_provider", lambda spec: provider)
 
-    result = await build_graph(definition).ainvoke(
+    result = await build_graph(definition, _answered_by(provider)).ainvoke(
         {"input": "A", "contextual_input": "A", "node_outputs": {}, "loop_counts": {}}
     )
 
@@ -336,9 +314,7 @@ async def test_join_after_exclusive_branch_routes_runs_once(
 
 
 @pytest.mark.asyncio
-async def test_prompt_referencing_an_output_that_did_not_run_yet_fails(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_prompt_referencing_an_output_that_did_not_run_yet_fails() -> None:
     """`join` runs after whichever input arrives (one is re-run by the loop,
     one runs once), and on the first pass `generate` arrives a step before
     `side2` has run. Load-time validation can't know that timing, so the
@@ -358,10 +334,9 @@ async def test_prompt_referencing_an_output_that_did_not_run_yet_fails(
         loops=[_REVISE_LOOP],
         output_node="join",
     )
-    monkeypatch.setattr(node_types_module, "get_provider", lambda spec: _CritiqueProvider())
 
     with pytest.raises(PipelineExecutionError, match="side2") as excinfo:
-        await build_graph(definition).ainvoke(
+        await build_graph(definition, _answered_by(_CritiqueProvider())).ainvoke(
             {"input": "x", "contextual_input": "x", "node_outputs": {}, "loop_counts": {}}
         )
     assert excinfo.value.node_id == "join"
@@ -403,9 +378,7 @@ _REVISE_LOOP = {
 
 
 @pytest.mark.asyncio
-async def test_join_after_one_route_with_uneven_paths_waits_for_both(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_join_after_one_route_with_uneven_paths_waits_for_both() -> None:
     """classify routes to [tech, sec] together; tech has one more step
     (polish) before combine — combine must still run once, after both."""
     definition = _from_nodes(
@@ -434,9 +407,8 @@ async def test_join_after_one_route_with_uneven_paths_waits_for_both(
         output_node=["combine", "other"],
     )
     provider = _RecordingProvider()
-    monkeypatch.setattr(node_types_module, "get_provider", lambda spec: provider)
 
-    await build_graph(definition).ainvoke(
+    await build_graph(definition, _answered_by(provider)).ainvoke(
         {"input": "x", "contextual_input": "x", "node_outputs": {}, "loop_counts": {}}
     )
 
@@ -446,9 +418,7 @@ async def test_join_after_one_route_with_uneven_paths_waits_for_both(
 
 
 @pytest.mark.asyncio
-async def test_join_inside_a_loop_waits_for_both_inputs_on_every_pass(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_join_inside_a_loop_waits_for_both_inputs_on_every_pass() -> None:
     """generate -> a1 -> a2 and generate -> b1 join at `join`, all re-run by
     the loop: each pass must run `join` once, after both a2 and b1."""
     definition = _from_nodes(
@@ -468,9 +438,8 @@ async def test_join_inside_a_loop_waits_for_both_inputs_on_every_pass(
         output_node="join",
     )
     provider = _CritiqueProvider()
-    monkeypatch.setattr(node_types_module, "get_provider", lambda spec: provider)
 
-    await build_graph(definition).ainvoke(
+    await build_graph(definition, _answered_by(provider)).ainvoke(
         {"input": "x", "contextual_input": "x", "node_outputs": {}, "loop_counts": {}}
     )
 
@@ -479,9 +448,7 @@ async def test_join_inside_a_loop_waits_for_both_inputs_on_every_pass(
 
 
 @pytest.mark.asyncio
-async def test_join_of_a_looped_and_a_run_once_input_still_runs_on_every_pass(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_join_of_a_looped_and_a_run_once_input_still_runs_on_every_pass() -> None:
     """`side` runs once, `generate` on every pass: waiting for both on the
     second pass would wait forever, so `join` must not."""
     definition = _from_nodes(
@@ -499,9 +466,8 @@ async def test_join_of_a_looped_and_a_run_once_input_still_runs_on_every_pass(
         output_node="join",
     )
     provider = _CritiqueProvider()
-    monkeypatch.setattr(node_types_module, "get_provider", lambda spec: provider)
 
-    await build_graph(definition).ainvoke(
+    await build_graph(definition, _answered_by(provider)).ainvoke(
         {"input": "x", "contextual_input": "x", "node_outputs": {}, "loop_counts": {}}
     )
 
@@ -510,9 +476,7 @@ async def test_join_of_a_looped_and_a_run_once_input_still_runs_on_every_pass(
 
 
 @pytest.mark.asyncio
-async def test_nested_loop_gets_its_full_budget_on_every_outer_pass(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_nested_loop_gets_its_full_budget_on_every_outer_pass() -> None:
     """outer: plan -> ... -> review, back to plan (1 extra pass).
     inner: draft -> check, back to draft (2 extra passes), exits to review.
     Nobody ever approves, so every loop runs to its limit: `check` runs
@@ -546,9 +510,8 @@ async def test_nested_loop_gets_its_full_budget_on_every_outer_pass(
         output_node="review",
     )
     provider = _RecordingProvider()
-    monkeypatch.setattr(node_types_module, "get_provider", lambda spec: provider)
 
-    result = await build_graph(definition).ainvoke(
+    result = await build_graph(definition, _answered_by(provider)).ainvoke(
         {"input": "x", "contextual_input": "x", "node_outputs": {}, "loop_counts": {}}
     )
 
@@ -558,7 +521,7 @@ async def test_nested_loop_gets_its_full_budget_on_every_outer_pass(
 
 
 @pytest.mark.asyncio
-async def test_branch_can_route_on_the_question(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_branch_can_route_on_the_question() -> None:
     """`question` is the new message itself — routing on it needs no
     classifier call to repeat what the user wrote."""
     definition = _from_nodes(
@@ -579,13 +542,44 @@ async def test_branch_can_route_on_the_question(monkeypatch: pytest.MonkeyPatch)
         ],
         output_node=["escalate", "answer"],
     )
-    monkeypatch.setattr(node_types_module, "get_provider", lambda spec: _RecordingProvider())
 
     async def run(message: str) -> set[str]:
-        result = await build_graph(definition).ainvoke(
+        result = await build_graph(definition, _answered_by(_RecordingProvider())).ainvoke(
             {"input": message, "contextual_input": message, "node_outputs": {}, "loop_counts": {}}
         )
         return set(result["node_outputs"])
 
     assert await run("URGENT: server down") == {"triage", "escalate"}
     assert await run("how do I reset my password?") == {"triage", "answer"}
+
+
+@pytest.mark.asyncio
+async def test_nodes_call_the_injected_provider_factory() -> None:
+    asked: list[ModelSpec] = []
+
+    def factory(spec: ModelSpec) -> LLMProvider:
+        asked.append(spec)
+        return _EchoProvider("fake")
+
+    definition = load_pipeline_definition(FIXTURES_DIR / "diamond.yaml")
+    await build_graph(definition, NodeServices(provider_factory=factory)).ainvoke(
+        {"input": "x", "contextual_input": "x", "node_outputs": {}, "loop_counts": {}}
+    )
+    assert [s.model for s in asked] == ["test-model"] * 4
+
+
+@pytest.mark.asyncio
+async def test_a_pipeline_cache_builds_graphs_with_its_provider_factory() -> None:
+    from llm_pipeline.pipeline_loader import PipelineCache
+
+    asked: list[str] = []
+
+    def factory(spec: ModelSpec) -> LLMProvider:
+        asked.append(spec.model)
+        return _EchoProvider("fake")
+
+    _, graph = PipelineCache(FIXTURES_DIR, provider_factory=factory).get("diamond")
+    await graph.ainvoke(
+        {"input": "x", "contextual_input": "x", "node_outputs": {}, "loop_counts": {}}
+    )
+    assert asked == ["test-model"] * 4

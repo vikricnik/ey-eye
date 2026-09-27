@@ -11,6 +11,7 @@ from llm_pipeline.dag_builder.graph import build_graph
 from llm_pipeline.dag_builder.node_types import (
     NODE_BUILDERS,
     NodeCallable,
+    NodeServices,
     RouterCallable,
     build_llm_call_node,
     build_node,
@@ -19,6 +20,7 @@ from llm_pipeline.dag_builder.node_types import (
 __all__ = [
     "NODE_BUILDERS",
     "NodeCallable",
+    "NodeServices",
     "RouterCallable",
     "build_graph",
     "build_llm_call_node",

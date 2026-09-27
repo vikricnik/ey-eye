@@ -21,7 +21,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
-from llm_pipeline.api_schemas import ConversationTurn
+from llm_pipeline.conversation import ConversationTurn
 from llm_pipeline.pipeline_config import PipelineDefinition
 from llm_pipeline.pipeline_config.templates import render
 

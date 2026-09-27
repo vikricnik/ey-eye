@@ -11,15 +11,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
-class ConversationTurn(BaseModel):
-    """One prior exchange, sent by the client as conversation context."""
-
-    prompt: str
-    final_answer: str
-    # Node outputs the pipeline asked to remember with this turn (its
-    # `history.remember`) — clients send back what `remembered` gave them.
-    outputs: dict[str, str] = {}
+# Shared with history.py, which doesn't import this wire contract.
+from llm_pipeline.conversation import ConversationTurn as ConversationTurn
 
 
 class RerunRequest(BaseModel):

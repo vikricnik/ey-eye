@@ -15,12 +15,7 @@ looped and run-once inputs, nodes reached several ways) keeps one edge per
 input and runs after whichever arrive.
 """
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    # Type hint only — validation.py calls this while a PipelineDefinition
-    # is being built, so a runtime import would be circular.
-    from llm_pipeline.pipeline_config.schema import PipelineDefinition
+from llm_pipeline.pipeline_config.topology import Topology
 
 # A guard is a set of tokens: ("route", branch id, route index),
 # ("loop", loop id), or ("unknown", node id) when a node is reached in a
@@ -30,21 +25,21 @@ Guard = frozenset[tuple[str, ...]]
 _ALWAYS: Guard = frozenset()
 
 
-def joins_that_wait_for_all(definition: "PipelineDefinition") -> set[str]:
+def joins_that_wait_for_all(topology: Topology) -> frozenset[str]:
     """Nodes whose depends_on can be wired as one wait-for-all edge."""
-    return _Activation(definition).joins
+    return frozenset(_Activation(topology).joins)
 
 
-def inputs_that_may_never_arrive(definition: "PipelineDefinition") -> dict[str, set[str]]:
+def inputs_that_may_never_arrive(topology: Topology) -> dict[str, set[str]]:
     """node id -> those of its inputs that, on some requests where it runs,
     never run at all: an input behind a branch route that another of its
     inputs doesn't need (e.g. a join after two different routes — only one
     of them is ever taken). Only joins that run after whichever input
     arrives can have any."""
-    activation = _Activation(definition)
+    activation = _Activation(topology)
     found: dict[str, set[str]] = {}
-    for node_id in activation.nodes:
-        deps = activation.plain_deps(node_id)
+    for node_id in topology.node_ids:
+        deps = topology.plain_dependencies(node_id)
         if len(deps) < 2 or node_id in activation.joins:
             continue
         routes = {d: {t for t in activation.guards[d] if t[0] == "route"} for d in deps}
@@ -55,50 +50,21 @@ def inputs_that_may_never_arrive(definition: "PipelineDefinition") -> dict[str, 
 
 
 class _Activation:
-    def __init__(self, definition: "PipelineDefinition") -> None:
-        self.nodes = {n.id: n for n in definition.nodes}
-        self.conditional_sources = definition.conditional_sources
-        self.roots = set(definition.effective_root_ids)
-        self.exit_targets = {loop.exit_to for loop in definition.loops}
+    def __init__(self, topology: Topology) -> None:
+        self.topology = topology
+        self.roots = set(topology.effective_roots)
 
-        self.routes_into: dict[str, list[tuple[str, tuple[str, ...]]]] = {}
-        for branch in definition.branches:
-            for index, route in enumerate(branch.routes):
-                for target in route.targets:
-                    token = ("route", branch.id, str(index))
-                    self.routes_into.setdefault(target, []).append((branch.from_, token))
+        # node id -> the loops that run it again on each of their passes
+        self.rerun_by: dict[str, set[str]] = {}
+        for loop_id in topology.loop_ids:
+            for node_id in topology.loop_scope(loop_id):
+                self.rerun_by.setdefault(node_id, set()).add(loop_id)
 
-        self.rerun_by = self._loop_scopes(definition)
         self.guards: dict[str, Guard] = {}
         self.joins: set[str] = set()
         self._visiting: set[str] = set()
-        for node_id in self.nodes:
+        for node_id in topology.node_ids:
             self.guard(node_id)
-
-    def plain_deps(self, node_id: str) -> list[str]:
-        return [d for d in self.nodes[node_id].depends_on if d not in self.conditional_sources]
-
-    def _loop_scopes(self, definition: "PipelineDefinition") -> dict[str, set[str]]:
-        """node id -> the loops that re-run it: everything forward of a
-        loop's back_to runs again on each pass."""
-        forward: dict[str, list[str]] = {}
-        for node_id in self.nodes:
-            for dep in self.plain_deps(node_id):
-                forward.setdefault(dep, []).append(node_id)
-        for target, sources in self.routes_into.items():
-            for source, _ in sources:
-                forward.setdefault(source, []).append(target)
-
-        rerun_by: dict[str, set[str]] = {}
-        for loop in definition.loops:
-            pending, seen = [loop.back_to], set[str]()
-            while pending:
-                node_id = pending.pop()
-                if node_id not in seen:
-                    seen.add(node_id)
-                    rerun_by.setdefault(node_id, set()).add(loop.id)
-                    pending.extend(forward.get(node_id, []))
-        return rerun_by
 
     def guard(self, node_id: str) -> Guard:
         if node_id in self.guards:
@@ -108,13 +74,14 @@ class _Activation:
             return unknown
         self._visiting.add(node_id)
 
-        plain = self.plain_deps(node_id)
+        plain = self.topology.plain_dependencies(node_id)
         sources = [self.guard(dep) for dep in plain]
         if node_id in self.roots:
             sources.append(_ALWAYS)
-        for source, token in self.routes_into.get(node_id, []):
-            sources.append(self.guard(source) | {token})
-        if node_id in self.exit_targets:
+        for route in self.topology.routes_into(node_id):
+            token = ("route", route.branch_id, str(route.route_index))
+            sources.append(self.guard(route.source_node_id) | {token})
+        if node_id in self.topology.loop_exit_targets:
             sources.append(unknown)
 
         only_plain = len(sources) == len(plain)

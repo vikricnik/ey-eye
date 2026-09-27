@@ -8,9 +8,15 @@ Re-exports the public surface so existing call sites can keep writing
 needing to know which submodule anything lives in.
 """
 
-from llm_pipeline.pipeline_config.loader import list_available_pipelines, load_pipeline_definition
+from llm_pipeline.pipeline_config.loader import (
+    PipelineListing,
+    is_safe_name,
+    list_available_pipelines,
+    load_pipeline_definition,
+)
 from llm_pipeline.pipeline_config.presets import NodePreset
 from llm_pipeline.pipeline_config.schema import (
+    END_SENTINEL,
     BranchConfig,
     BranchRoute,
     EvalCase,
@@ -24,8 +30,8 @@ from llm_pipeline.pipeline_config.schema import (
     PipelineDefinition,
     TestsConfig,
 )
+from llm_pipeline.pipeline_config.topology import IncomingRoute, Topology
 from llm_pipeline.pipeline_config.validation import (
-    END_SENTINEL,
     PipelineValidationError,
     validate_pipeline_dag,
 )
@@ -38,14 +44,18 @@ __all__ = [
     "EvalExpectation",
     "EvalJudge",
     "ExecutionConfig",
+    "IncomingRoute",
     "LoopConfig",
     "NodeConfig",
     "NodeLayout",
     "NodeModelConfig",
     "NodePreset",
     "PipelineDefinition",
+    "PipelineListing",
     "PipelineValidationError",
     "TestsConfig",
+    "Topology",
+    "is_safe_name",
     "list_available_pipelines",
     "load_pipeline_definition",
     "validate_pipeline_dag",

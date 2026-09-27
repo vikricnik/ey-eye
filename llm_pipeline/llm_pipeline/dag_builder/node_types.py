@@ -12,6 +12,7 @@ build_node() and doesn't know or care how many types exist.
 import logging
 import time
 from collections.abc import Awaitable, Callable, Hashable
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 from jinja2 import UndefinedError
@@ -23,16 +24,18 @@ from llm_pipeline.dag_builder.templating import render_template
 from llm_pipeline.errors import PipelineExecutionError
 from llm_pipeline.pipeline_config import NodeConfig, PipelineDefinition
 from llm_pipeline.pipeline_config.effective import EffectiveNode, effective_node
-from llm_pipeline.pipeline_config.schema import DEFAULT_TEMPERATURE
+from llm_pipeline.pipeline_config.schema import DEFAULT_TEMPERATURE, NodeModelConfig
 from llm_pipeline.providers import (
+    LLMProvider,
     ModelSpec,
     ProviderError,
     ProviderType,
+    Usage,
     generate_with_retry,
     get_provider,
 )
 from llm_pipeline.providers.resilience import CircuitBreaker
-from llm_pipeline.state import NodeResult, PipelineState
+from llm_pipeline.state import NodeResult, NodeUsage, PipelineState
 
 logger: logging.Logger = logging.getLogger("llm_pipeline")
 
@@ -51,6 +54,27 @@ LoopIncrementCallable = Callable[[PipelineState], Awaitable[dict[str, dict[str, 
 # ModelCatalog.running_context, which main.py injects through PipelineCache.
 ContextProbe = Callable[[str], Awaitable[int | None]]
 
+# Makes the provider that answers for one model.
+ProviderFactory = Callable[[ModelSpec], LLMProvider]
+
+
+@dataclass(frozen=True)
+class NodeServices:
+    """What a compiled graph's nodes call out to — passed in rather than
+    looked up, so a graph can run against fakes (tests) or with state scoped
+    to its owner (a PipelineCache's circuit breaker). Each field's None has
+    its own meaning, noted beside it."""
+
+    # None: the provider registry (get_provider), looked up when a node
+    # runs — tests that go through the HTTP app replace that function.
+    provider_factory: ProviderFactory | None = None
+    # None: the process-wide breaker in providers/resilience.py, shared by
+    # every graph built without one (a PipelineCache always passes its own).
+    circuit_breaker: CircuitBreaker | None = None
+    # None: don't ask the model's backend for its context size; usage then
+    # reports only a configured num_ctx.
+    context_probe: ContextProbe | None = None
+
 
 class NodeBuilder(Protocol):
     """Builders get the whole definition, not just the node: a node's
@@ -61,8 +85,7 @@ class NodeBuilder(Protocol):
         self,
         node_cfg: NodeConfig,
         definition: PipelineDefinition,
-        circuit_breaker: CircuitBreaker | None = None,
-        context_probe: ContextProbe | None = None,
+        services: NodeServices,
     ) -> NodeCallable: ...
 
 
@@ -96,11 +119,76 @@ def render_node_prompt(node_cfg: NodeConfig, effective: EffectiveNode, state: Pi
     )
 
 
+def _render_or_fail(node_cfg: NodeConfig, effective: EffectiveNode, state: PipelineState) -> str:
+    """The node's prompt; an output the template needs but that didn't run
+    on this path fails the run naming the node."""
+    try:
+        return render_node_prompt(node_cfg, effective, state)
+    except UndefinedError as e:
+        # Validation guarantees every reference is a real dependency, so this
+        # is one that didn't run on this path (another branch route, or a
+        # loop's first pass).
+        raise PipelineExecutionError(
+            f"Node '{node_cfg.id}': its prompt uses output that isn't available on "
+            f"this run ({e.message}) — wrap it in {{% if <node> is defined %}}",
+            node_id=node_cfg.id,
+        ) from e
+
+
+def _replayed_result(node_cfg: NodeConfig, spec: ModelSpec, output: str) -> NodeResult:
+    return {
+        "node_id": node_cfg.id,
+        "model_name": spec.identity,
+        "output": output,
+        "duration_ms": 0.0,
+        "replayed": True,
+    }
+
+
+def _finalize_answer(node_cfg: NodeConfig, effective: EffectiveNode, text: str) -> str:
+    """What the node outputs: the model's text without its reasoning (when
+    the node strips it) and, for a classifier, exactly the label it names."""
+    answer = strip_reasoning(text) if effective.strip_reasoning else text
+    if node_cfg.labels is None:
+        return answer
+    label = match_label(answer, node_cfg.labels)
+    if label is None:
+        raise PipelineExecutionError(
+            f"Node '{node_cfg.id}' answered {answer[:200]!r}, which names none of "
+            f"its labels ({', '.join(node_cfg.labels)}) — or more than one",
+            node_id=node_cfg.id,
+        )
+    return label
+
+
+async def _context_window(
+    model: NodeModelConfig, spec: ModelSpec, probe: ContextProbe | None
+) -> int | None:
+    """The context size the model ran with: its configured num_ctx, else
+    what Ollama reports for the loaded model."""
+    if model.options is not None and model.options.num_ctx is not None:
+        return model.options.num_ctx
+    if probe is not None and spec.provider == ProviderType.OLLAMA:
+        return await probe(spec.model)
+    return None
+
+
+def _node_usage(usage: Usage, context_window: int | None, prompt_chars: int) -> NodeUsage:
+    return {
+        "prompt_tokens": usage.prompt_tokens,
+        "completion_tokens": usage.completion_tokens,
+        "generation_ms": usage.generation_ms,
+        "context_window": context_window,
+        # Ollama counts tokens AFTER cutting a prompt that didn't fit, so
+        # clients also compare the length that was sent.
+        "prompt_chars": prompt_chars,
+    }
+
+
 def build_llm_call_node(
     node_cfg: NodeConfig,
     definition: PipelineDefinition,
-    circuit_breaker: CircuitBreaker | None = None,
-    context_probe: ContextProbe | None = None,
+    services: NodeServices,
 ) -> NodeCallable:
     """The only node builder implemented today. Calls a single LLM per
     invocation, rendering its prompt_template against the current state,
@@ -121,17 +209,7 @@ def build_llm_call_node(
     async def node_fn(
         state: PipelineState, writer: StreamWriter = _no_stream
     ) -> dict[str, dict[str, NodeResult]]:
-        try:
-            prompt = render_node_prompt(node_cfg, effective, state)
-        except UndefinedError as e:
-            # Validation guarantees every reference is a real dependency, so
-            # this is one that didn't run on this path (another branch
-            # route, or a loop's first pass).
-            raise PipelineExecutionError(
-                f"Node '{node_cfg.id}': its prompt uses output that isn't available on "
-                f"this run ({e.message}) — wrap it in {{% if <node> is defined %}}",
-                node_id=node_cfg.id,
-            ) from e
+        prompt = _render_or_fail(node_cfg, effective, state)
         replay = state.get("replay") or {}
         # A re-run reuses this node's previous output — on its first
         # execution only: a loop sending the run back here runs it for real.
@@ -156,18 +234,10 @@ def build_llm_call_node(
         announce_start(1)
         if replaying:
             return {
-                "node_outputs": {
-                    node_cfg.id: {
-                        "node_id": node_cfg.id,
-                        "model_name": spec.identity,
-                        "output": replay[node_cfg.id],
-                        "duration_ms": 0.0,
-                        "replayed": True,
-                    }
-                }
+                "node_outputs": {node_cfg.id: _replayed_result(node_cfg, spec, replay[node_cfg.id])}
             }
-        provider = get_provider(spec)
 
+        provider = (services.provider_factory or get_provider)(spec)
         started_at = time.monotonic()
         try:
             generation = await generate_with_retry(
@@ -177,7 +247,7 @@ def build_llm_call_node(
                 execution.model_timeout_seconds,
                 max_attempts=execution.max_retries + 1,
                 backoff_base_seconds=execution.retry_backoff_seconds,
-                circuit_breaker=circuit_breaker,
+                circuit_breaker=services.circuit_breaker,
                 system=effective.system_prompt,
                 # A retry restarts the model's output from scratch, so it is
                 # announced as a fresh start of this node.
@@ -188,44 +258,18 @@ def build_llm_call_node(
             raise PipelineExecutionError(
                 f"Node '{node_cfg.id}' failed: {e}", node_id=node_cfg.id
             ) from e
-
         duration_ms = (time.monotonic() - started_at) * 1000
-        answer = generation.text
-        if effective.strip_reasoning:
-            answer = strip_reasoning(answer)
-        if node_cfg.labels is not None:
-            label = match_label(answer, node_cfg.labels)
-            if label is None:
-                raise PipelineExecutionError(
-                    f"Node '{node_cfg.id}' answered {answer[:200]!r}, which names none of "
-                    f"its labels ({', '.join(node_cfg.labels)}) — or more than one",
-                    node_id=node_cfg.id,
-                )
-            answer = label
 
         result: NodeResult = {
             "node_id": node_cfg.id,
             "model_name": spec.identity,
-            "output": answer,
+            "output": _finalize_answer(node_cfg, effective, generation.text),
             "duration_ms": duration_ms,
         }
         if generation.usage is not None:
-            context = model.options.num_ctx if model.options else None
-            if (
-                context is None
-                and context_probe is not None
-                and spec.provider == ProviderType.OLLAMA
-            ):
-                context = await context_probe(spec.model)
-            result["usage"] = {
-                "prompt_tokens": generation.usage.prompt_tokens,
-                "completion_tokens": generation.usage.completion_tokens,
-                "generation_ms": generation.usage.generation_ms,
-                "context_window": context,
-                # Ollama counts tokens AFTER cutting a prompt that didn't
-                # fit, so clients also compare the length that was sent.
-                "prompt_chars": len(prompt) + len(effective.system_prompt or ""),
-            }
+            context_window = await _context_window(model, spec, services.context_probe)
+            prompt_chars = len(prompt) + len(effective.system_prompt or "")
+            result["usage"] = _node_usage(generation.usage, context_window, prompt_chars)
         logger.info(f"[node:{node_cfg.id}] model={spec.identity} duration_ms={duration_ms:.0f}")
         return {"node_outputs": {node_cfg.id: result}}
 
@@ -243,8 +287,7 @@ NODE_BUILDERS: dict[str, NodeBuilder] = {
 def build_node(
     node_cfg: NodeConfig,
     definition: PipelineDefinition,
-    circuit_breaker: CircuitBreaker | None = None,
-    context_probe: ContextProbe | None = None,
+    services: NodeServices,
 ) -> NodeCallable:
     """Dispatches to the registered builder for node_cfg.type. This is the
     one place that grows when a new node type is added — graph.py just
@@ -254,4 +297,4 @@ def build_node(
         raise ValueError(
             f"Unknown node type: {node_cfg.type!r} (registered: {list(NODE_BUILDERS)})"
         )
-    return builder(node_cfg, definition, circuit_breaker, context_probe)
+    return builder(node_cfg, definition, services)

@@ -37,48 +37,45 @@ from langgraph.graph import END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from llm_pipeline.dag_builder.branches import wire_branch
-from llm_pipeline.dag_builder.loops import nested_loops, wire_loop
-from llm_pipeline.dag_builder.node_types import ContextProbe, build_node
-from llm_pipeline.pipeline_config import PipelineDefinition
+from llm_pipeline.dag_builder.loops import wire_loop
+from llm_pipeline.dag_builder.node_types import NodeServices, build_node
+from llm_pipeline.pipeline_config import PipelineDefinition, Topology
 from llm_pipeline.pipeline_config.activation import joins_that_wait_for_all
-from llm_pipeline.providers.resilience import CircuitBreaker
 from llm_pipeline.state import NodeResult, PipelineState
 
 
 def build_graph(
-    definition: PipelineDefinition,
-    circuit_breaker: CircuitBreaker | None = None,
-    context_probe: ContextProbe | None = None,
+    definition: PipelineDefinition, services: NodeServices | None = None
 ) -> CompiledStateGraph:
-    """`circuit_breaker` is optional dependency injection: pass an
-    explicitly-owned instance (e.g. one held by a PipelineCache) to scope
-    circuit-breaker state to that cache rather than sharing the process-wide
-    default in providers/resilience.py. Every llm_call node built for this
-    graph receives the same instance, threaded down through build_node() —
-    and likewise `context_probe`, which lets a node report how much context
-    its Ollama model had (see node_types.ContextProbe)."""
+    """`services` is what every node calls out to (see NodeServices): the
+    provider factory, and optionally a circuit breaker owned by the caller
+    (e.g. a PipelineCache, scoping breaker state to that cache rather than
+    the process-wide default in providers/resilience.py) and a context
+    probe that lets a node report how much context its Ollama model had.
+    Every node built for this graph receives the same instance."""
+    services = services or NodeServices()
     graph: StateGraph = StateGraph(PipelineState)
 
     for node_cfg in definition.nodes:
-        graph.add_node(
-            node_cfg.id, build_node(node_cfg, definition, circuit_breaker, context_probe)
-        )
+        graph.add_node(node_cfg.id, build_node(node_cfg, definition, services))
 
-    conditional_sources = definition.conditional_sources
-    waits_for_all = joins_that_wait_for_all(definition)
+    # One snapshot of the definition's shape: the join analysis and the
+    # wiring below must agree on exactly the same dependency lists.
+    topology = Topology(definition)
+    waits_for_all = joins_that_wait_for_all(topology)
 
     # Base wiring from depends_on, EXCEPT where the source is a branch/loop's
     # from_ node — that source's entire outgoing routing is added via
     # wire_branch/wire_loop below instead.
     for node_cfg in definition.nodes:
-        deps = [d for d in node_cfg.depends_on if d not in conditional_sources]
+        deps = list(topology.plain_dependencies(node_cfg.id))
         if node_cfg.id in waits_for_all:
             graph.add_edge(deps, node_cfg.id)  # waits for all of them
             continue
         for dep_id in deps:
             graph.add_edge(dep_id, node_cfg.id)
 
-    root_ids = definition.effective_root_ids
+    root_ids = topology.effective_roots
     if len(root_ids) == 1:
         graph.set_entry_point(root_ids[0])
     else:
@@ -96,18 +93,14 @@ def build_graph(
     for branch in definition.branches:
         wire_branch(graph, branch)
 
-    nested = nested_loops(definition)
     for loop in definition.loops:
-        wire_loop(graph, loop, nested[loop.id])
+        wire_loop(graph, loop, topology.inner_loops(loop.id))
 
     # output_node(s) -> END, only for candidates with no other outgoing edge
     # already defined (plain or conditional) — see module docstring for why
     # this can't be unconditional once loops/branches exist.
-    nodes_with_outgoing_edges = {
-        dep for n in definition.nodes for dep in n.depends_on
-    } | conditional_sources
     for candidate in definition.output_node_candidates:
-        if candidate not in nodes_with_outgoing_edges:
+        if not topology.has_outgoing_edges(candidate):
             graph.add_edge(candidate, END)
 
     return graph.compile()

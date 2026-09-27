@@ -6,9 +6,8 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-import llm_pipeline.dag_builder.node_types as node_types_module
-from llm_pipeline.dag_builder import build_graph
-from llm_pipeline.pipeline_config import PipelineDefinition
+from llm_pipeline.dag_builder import NodeServices, build_graph
+from llm_pipeline.pipeline_config import PipelineDefinition, Topology
 from llm_pipeline.pipeline_store import definition_to_yaml, parse_definition_yaml
 from llm_pipeline.rerun import downstream
 
@@ -54,10 +53,12 @@ class _Answers:
 
 
 async def _run(definition: PipelineDefinition, provider: _Answers) -> dict[str, Any]:
-    result = await build_graph(definition).ainvoke(
+    services = NodeServices(provider_factory=lambda spec: provider)
+    result = await build_graph(definition, services).ainvoke(
         {"input": "hi", "contextual_input": "hi", "node_outputs": {}, "loop_counts": {}}
     )
-    return result["node_outputs"]
+    outputs: dict[str, Any] = result["node_outputs"]
+    return outputs
 
 
 def test_route_accepts_a_single_target_or_a_list() -> None:
@@ -66,15 +67,14 @@ def test_route_accepts_a_single_target_or_a_list() -> None:
 
     assert single.branches[0].routes[0].targets == ["tech_answer"]
     assert several.branches[0].routes[0].targets == ["tech_answer", "security_check"]
-    assert several.branch_targets == {"tech_answer", "security_check", "general_flow"}
-    assert several.effective_root_ids == ["classify"]
+    assert Topology(several).branch_targets == {"tech_answer", "security_check", "general_flow"}
+    assert Topology(several).effective_roots == ("classify",)
 
 
 @pytest.mark.asyncio
-async def test_taken_route_runs_every_target(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_taken_route_runs_every_target() -> None:
     definition = PipelineDefinition.model_validate(_definition(["tech_answer", "security_check"]))
     provider = _Answers("TECHNICAL")
-    monkeypatch.setattr(node_types_module, "get_provider", lambda spec: provider)
 
     outputs = await _run(definition, provider)
 
@@ -82,12 +82,9 @@ async def test_taken_route_runs_every_target(monkeypatch: pytest.MonkeyPatch) ->
 
 
 @pytest.mark.asyncio
-async def test_other_route_runs_none_of_the_fanned_out_targets(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_other_route_runs_none_of_the_fanned_out_targets() -> None:
     definition = PipelineDefinition.model_validate(_definition(["tech_answer", "security_check"]))
     provider = _Answers("something else")
-    monkeypatch.setattr(node_types_module, "get_provider", lambda spec: provider)
 
     outputs = await _run(definition, provider)
 
@@ -95,9 +92,7 @@ async def test_other_route_runs_none_of_the_fanned_out_targets(
 
 
 @pytest.mark.asyncio
-async def test_node_joining_the_targets_of_one_route_runs_once_after_both(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_node_joining_the_targets_of_one_route_runs_once_after_both() -> None:
     combine = {
         "id": "combine",
         "depends_on": ["tech_answer", "security_check"],
@@ -107,7 +102,6 @@ async def test_node_joining_the_targets_of_one_route_runs_once_after_both(
     raw["output_node"] = ["combine", "general_flow"]
     definition = PipelineDefinition.model_validate(raw)
     provider = _Answers("TECHNICAL")
-    monkeypatch.setattr(node_types_module, "get_provider", lambda spec: provider)
 
     outputs = await _run(definition, provider)
 

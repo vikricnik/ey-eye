@@ -30,6 +30,7 @@ import logging
 import os
 import re
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -50,9 +51,8 @@ from llm_pipeline.errors import (
     RevisionConflictError,
 )
 from llm_pipeline.model_catalog import ModelCatalog, ModelNotAllowedError, ModelUse, model_identity
-from llm_pipeline.pipeline_config import NodePreset, PipelineDefinition
+from llm_pipeline.pipeline_config import NodePreset, PipelineDefinition, is_safe_name
 from llm_pipeline.pipeline_config.effective import effective_node
-from llm_pipeline.pipeline_loader import SAFE_NAME_PATTERN, PipelineCache
 
 # Top-level key order for written pipeline files — matches the hand-written
 # files in pipelines/ (name first), rather than the model's field order.
@@ -98,7 +98,7 @@ def revision_of(content: bytes) -> str:
 
 
 def _check_name(name: str) -> None:
-    if not SAFE_NAME_PATTERN.match(name):
+    if not is_safe_name(name):
         raise InvalidNameError(f"invalid name {name!r} — use only letters, digits, '-' and '_'")
 
 
@@ -401,15 +401,19 @@ class StoredPreset:
 class PipelineStore:
     def __init__(
         self,
+        *,
         pipelines_dir: Path,
         presets_dir: Path,
-        cache: PipelineCache,
+        on_pipeline_changed: Callable[[str], None],
         catalog: ModelCatalog,
         default_pipeline_name: str | None = None,
     ) -> None:
+        """`on_pipeline_changed` is called with a pipeline's name after it is
+        saved or deleted — main.py passes PipelineCache.invalidate, so the
+        next run rebuilds its graph."""
         self.pipelines_dir = pipelines_dir
         self.presets_dir = presets_dir
-        self.cache = cache
+        self._on_pipeline_changed = on_pipeline_changed
         self.catalog = catalog
         # Clients fall back to this pipeline, so it can't be deleted.
         self.default_pipeline_name = default_pipeline_name
@@ -455,7 +459,7 @@ class PipelineStore:
     ) -> list[ModelNotAllowedError]:
         """What a save of `definition` under `name` would reject, without
         saving — used for live validation feedback."""
-        already = self._stored_model_identities(name) if SAFE_NAME_PATTERN.match(name) else set()
+        already = self._stored_model_identities(name) if is_safe_name(name) else set()
         return await self.catalog.issues(model_blocks(definition), already)
 
     async def save_pipeline(
@@ -492,7 +496,7 @@ class PipelineStore:
                 definition, current.decode("utf-8") if current is not None else None
             )
             _atomic_write(path, text)
-            self.cache.invalidate(name)
+            self._on_pipeline_changed(name)
 
         return StoredPipeline(
             definition,
@@ -546,7 +550,7 @@ class PipelineStore:
                     f"pipeline '{name}' changed since you loaded it — reload before deleting"
                 )
             moved = _soft_delete(path)
-            self.cache.invalidate(name)
+            self._on_pipeline_changed(name)
         return str(moved.relative_to(self.pipelines_dir))
 
     # -- presets -----------------------------------------------------------

@@ -12,7 +12,7 @@ from llm_pipeline.pipeline_config.schema import (
     NodeModelConfig,
     PipelineDefinition,
 )
-from llm_pipeline.providers import OllamaOptions, ProviderType
+from llm_pipeline.providers.base import OllamaOptions, ProviderType
 
 
 @dataclass(frozen=True)

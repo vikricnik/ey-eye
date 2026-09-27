@@ -14,23 +14,20 @@ app instances in the same process) now have fully independent state with
 no shared global to leak through.
 """
 
-import re
 from pathlib import Path
 
 from fastapi import Request
 from langgraph.graph.state import CompiledStateGraph
 
 from llm_pipeline.dag_builder import build_graph
-from llm_pipeline.dag_builder.node_types import ContextProbe
+from llm_pipeline.dag_builder.node_types import ContextProbe, NodeServices, ProviderFactory
 from llm_pipeline.errors import PipelineNotFoundError
-from llm_pipeline.pipeline_config import PipelineDefinition, load_pipeline_definition
+from llm_pipeline.pipeline_config import (
+    PipelineDefinition,
+    is_safe_name,
+    load_pipeline_definition,
+)
 from llm_pipeline.providers.resilience import CircuitBreaker
-
-# Only safe filename characters — pipeline_name comes straight from client
-# input and is used to build a filesystem path, so this closes off any
-# path-traversal attempt (e.g. "../../etc/passwd") before it reaches disk.
-# Shared with pipeline_store.py, which applies the same rule to writes.
-SAFE_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 # (mtime_ns, size) of the file a cache entry was built from.
 _FileStamp = tuple[int, int]
@@ -57,6 +54,7 @@ class PipelineCache:
         failure_threshold: int = 3,
         cooldown_seconds: float = 30.0,
         context_probe: ContextProbe | None = None,
+        provider_factory: ProviderFactory | None = None,
     ) -> None:
         self.pipelines_dir = pipelines_dir
         self.circuit_breaker = circuit_breaker or CircuitBreaker(
@@ -64,6 +62,7 @@ class PipelineCache:
         )
         # Handed to every node this cache builds (see node_types.ContextProbe).
         self.context_probe = context_probe
+        self._provider_factory = provider_factory
         self._cache: dict[str, tuple[_FileStamp, PipelineDefinition, CompiledStateGraph]] = {}
 
     def get(self, name: str) -> tuple[PipelineDefinition, CompiledStateGraph]:
@@ -72,7 +71,7 @@ class PipelineCache:
         stat() per call). That keeps every worker process current after an
         editor saves through ANY of them, and applies hand edits without a
         restart."""
-        if not SAFE_NAME_PATTERN.match(name):
+        if not is_safe_name(name):
             raise PipelineNotFoundError(name)
 
         yaml_path = self.pipelines_dir / f"{name}.yaml"
@@ -88,11 +87,20 @@ class PipelineCache:
             return cached[1], cached[2]
 
         definition = load_pipeline_definition(yaml_path)
-        graph = build_graph(
-            definition, circuit_breaker=self.circuit_breaker, context_probe=self.context_probe
-        )
+        graph = build_graph(definition, self.node_services)
         self._cache[name] = (stamp, definition, graph)
         return definition, graph
+
+    @property
+    def node_services(self) -> NodeServices:
+        """What the graphs this cache builds call out to: its own circuit
+        breaker and context probe, and its provider factory (None: the
+        provider registry — see NodeServices)."""
+        return NodeServices(
+            provider_factory=self._provider_factory,
+            circuit_breaker=self.circuit_breaker,
+            context_probe=self.context_probe,
+        )
 
     def invalidate(self, name: str) -> None:
         """Drops one pipeline's compiled graph — called right after a save,

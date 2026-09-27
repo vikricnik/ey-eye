@@ -20,14 +20,11 @@ from typing import TYPE_CHECKING
 from llm_pipeline.pipeline_config.activation import inputs_that_may_never_arrive
 from llm_pipeline.pipeline_config.schema import JUDGE_VARIABLES, TEMPLATE_INPUT_VARIABLES
 from llm_pipeline.pipeline_config.templates import undeclared_variables, unguarded_references
+from llm_pipeline.pipeline_config.topology import Topology
 from llm_pipeline.safe_eval import evaluate_condition, expression_names
 
 if TYPE_CHECKING:
     from llm_pipeline.pipeline_config.schema import BranchConfig, PipelineDefinition
-
-# The literal sentinel meaning "route straight to the end of the graph"
-# rather than to another named node.
-END_SENTINEL = "END"
 
 
 class PipelineValidationError(ValueError):
@@ -82,13 +79,15 @@ def validate_pipeline_dag(definition: "PipelineDefinition") -> None:
     _check_for_cycles(definition, ids)
     _validate_branches(definition, id_set)
     _validate_loops(definition, id_set)
-    _check_no_conflicting_conditional_edges(definition, id_set)
+    # Built once the ids it indexes are known to be valid.
+    topology = Topology(definition)
+    _check_no_conflicting_conditional_edges(definition, topology)
     _check_template_references(definition, id_set)
-    _check_outputs_that_may_be_missing(definition)
+    _check_outputs_that_may_be_missing(definition, topology)
     _validate_history(definition, id_set)
     _validate_tests(definition)
 
-    if not definition.effective_root_ids:
+    if not topology.effective_roots:
         raise ValueError(
             "pipeline has no entry point — every node with no dependencies "
             "is exclusively a branch route target"
@@ -185,7 +184,7 @@ def _validate_loops(definition: "PipelineDefinition", id_set: set[str]) -> None:
 
         if loop.back_to not in id_set:
             raise ValueError(f"loop '{loop.id}' back_to unknown node '{loop.back_to}'")
-        if loop.exit_to != END_SENTINEL and loop.exit_to not in id_set:
+        if loop.exit_node is not None and loop.exit_node not in id_set:
             raise ValueError(
                 f"loop '{loop.id}' exit_to unknown node '{loop.exit_to}' "
                 f'(use the literal string "END" to exit the graph directly)'
@@ -193,7 +192,7 @@ def _validate_loops(definition: "PipelineDefinition", id_set: set[str]) -> None:
 
 
 def _check_no_conflicting_conditional_edges(
-    definition: "PipelineDefinition", id_set: set[str]
+    definition: "PipelineDefinition", topology: Topology
 ) -> None:
     """A node's OUTGOING edges must be either entirely plain (depends_on
     driven) or entirely conditional (branch/loop driven) — never both,
@@ -203,22 +202,12 @@ def _check_no_conflicting_conditional_edges(
     silently dropped by the builder (which skips base-wiring for
     conditional sources) unless it's also a declared destination of that
     exact construct — catch that misconfiguration here instead."""
-    conditional_sources = definition.conditional_sources
-
-    allowed_destinations: dict[str, set[str]] = {}
-    for branch in definition.branches:
-        allowed_destinations.setdefault(branch.from_, set()).update(
-            target for route in branch.routes for target in route.targets
-        )
-    for loop in definition.loops:
-        dests = {loop.back_to}
-        if loop.exit_to != END_SENTINEL:
-            dests.add(loop.exit_to)
-        allowed_destinations.setdefault(loop.from_, set()).update(dests)
-
     for node in definition.nodes:
         for dep in node.depends_on:
-            if dep in conditional_sources and node.id not in allowed_destinations.get(dep, set()):
+            if (
+                dep in topology.conditional_sources
+                and node.id not in topology.declared_destinations(dep)
+            ):
                 raise PipelineValidationError(
                     f"node '{node.id}' depends_on '{dep}', but '{dep}' is a branch/loop "
                     f"source — its outgoing edges are fully governed by that construct, "
@@ -275,7 +264,9 @@ def _check_template_references(definition: "PipelineDefinition", id_set: set[str
                 )
 
 
-def _check_outputs_that_may_be_missing(definition: "PipelineDefinition") -> None:
+def _check_outputs_that_may_be_missing(
+    definition: "PipelineDefinition", topology: Topology
+) -> None:
     """A prompt must guard ({% if x is defined %}) every output that is
     certain to be missing on some run of its node — otherwise those runs
     fail halfway through a request. Two cases are certain:
@@ -284,7 +275,7 @@ def _check_outputs_that_may_be_missing(definition: "PipelineDefinition") -> None
         need: on requests that take another route, that input never runs
     (Other timing-dependent cases are left to the run-time error.)"""
     reasons: dict[str, dict[str, str]] = {}
-    for node_id, inputs in inputs_that_may_never_arrive(definition).items():
+    for node_id, inputs in inputs_that_may_never_arrive(topology).items():
         for name in inputs:
             reasons.setdefault(node_id, {})[name] = (
                 f"'{name}' is behind a branch route its other inputs don't need, "

@@ -372,6 +372,14 @@ def test_path_traversal_name_is_rejected_on_save(
     assert not (dirs[0].parent / "escape.yaml").exists()
 
 
+def test_a_name_with_a_trailing_newline_is_not_saved(
+    client: TestClient, dirs: tuple[Path, Path]
+) -> None:
+    response = client.put("/pipelines/demo%0A", json={"definition": _pipeline(name="demo\n")})
+    assert 400 <= response.status_code < 500
+    assert list(dirs[0].glob("demo*")) == []
+
+
 def test_name_in_url_must_match_the_definition(client: TestClient) -> None:
     response = client.put("/pipelines/other", json={"definition": _pipeline(name="fresh")})
     assert response.status_code == 422

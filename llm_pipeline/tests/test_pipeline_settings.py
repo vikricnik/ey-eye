@@ -16,7 +16,7 @@ from jinja2.exceptions import SecurityError
 import llm_pipeline.dag_builder.node_types as node_types_module
 import llm_pipeline.rate_limit as rate_limit_module
 import llm_pipeline.routers.ask as ask_module
-from llm_pipeline.dag_builder.node_types import strip_reasoning
+from llm_pipeline.dag_builder.reasoning import strip_reasoning
 from llm_pipeline.main import app
 from llm_pipeline.model_catalog import CatalogModel, ModelCatalog
 from llm_pipeline.pipeline_config import PipelineDefinition

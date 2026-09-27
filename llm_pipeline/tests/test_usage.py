@@ -138,7 +138,7 @@ async def test_each_node_asks_for_its_context_right_after_its_own_call(
     """Two nodes on one Ollama model: the second loads it with a smaller
     num_ctx. Asking once at the end would report the second's context for
     both — each node asks right after its call instead."""
-    from llm_pipeline.dag_builder import build_graph
+    from llm_pipeline.dag_builder import NodeServices, build_graph
     from llm_pipeline.pipeline_config import PipelineDefinition
 
     loaded = [4096, 256]  # what Ollama reports after each successive call
@@ -148,7 +148,6 @@ async def test_each_node_asks_for_its_context_right_after_its_own_call(
         calls.append(model)
         return loaded[len(calls) - 1]
 
-    monkeypatch.setattr(node_types_module, "get_provider", _provider_for)
     definition = PipelineDefinition.model_validate(
         {
             "name": "p",
@@ -168,7 +167,9 @@ async def test_each_node_asks_for_its_context_right_after_its_own_call(
             "output_node": "second",
         }
     )
-    graph = build_graph(definition, context_probe=probe)
+    graph = build_graph(
+        definition, NodeServices(provider_factory=_provider_for, context_probe=probe)
+    )
     state = await graph.ainvoke(
         {
             "input": "hi",

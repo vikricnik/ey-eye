@@ -83,7 +83,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.pipeline_store = PipelineStore(
         pipelines_dir=settings.pipelines_path,
         presets_dir=settings.presets_path,
-        cache=app.state.pipeline_cache,
+        on_pipeline_changed=app.state.pipeline_cache.invalidate,
         catalog=app.state.model_catalog,
         default_pipeline_name=settings.default_pipeline_name,
     )

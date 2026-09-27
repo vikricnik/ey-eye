@@ -6,8 +6,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-import llm_pipeline.dag_builder.node_types as node_types_module
-from llm_pipeline.dag_builder import build_graph
+from llm_pipeline.dag_builder import NodeServices, build_graph
 from llm_pipeline.dag_builder.labels import match_label
 from llm_pipeline.errors import PipelineExecutionError
 from llm_pipeline.pipeline_config import PipelineDefinition
@@ -80,22 +79,21 @@ class _Answers:
         return self.classifier_answer if prompt.startswith("classify") else f"out({prompt})"
 
 
-async def _run(definition: PipelineDefinition) -> dict[str, Any]:
-    result = await build_graph(definition).ainvoke(
+async def _run(definition: PipelineDefinition, provider: _Answers) -> dict[str, Any]:
+    services = NodeServices(provider_factory=lambda spec: provider)
+    result = await build_graph(definition, services).ainvoke(
         {"input": "hi", "contextual_input": "hi", "node_outputs": {}, "loop_counts": {}}
     )
-    return result["node_outputs"]
+    outputs: dict[str, Any] = result["node_outputs"]
+    return outputs
 
 
 @pytest.mark.asyncio
-async def test_classifier_output_is_the_matched_label_and_routes_on_it(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_classifier_output_is_the_matched_label_and_routes_on_it() -> None:
     definition = PipelineDefinition.model_validate(_router(LABELS))
     provider = _Answers("Refund.\nThey were charged twice.")
-    monkeypatch.setattr(node_types_module, "get_provider", lambda spec: provider)
 
-    outputs = await _run(definition)
+    outputs = await _run(definition, provider)
 
     assert outputs["classify"]["output"] == "REFUND"
     assert "refund_flow" in outputs
@@ -103,15 +101,12 @@ async def test_classifier_output_is_the_matched_label_and_routes_on_it(
 
 
 @pytest.mark.asyncio
-async def test_classifier_answer_matching_no_label_fails_naming_the_node(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_classifier_answer_matching_no_label_fails_naming_the_node() -> None:
     definition = PipelineDefinition.model_validate(_router(LABELS))
     provider = _Answers("I cannot help with that")
-    monkeypatch.setattr(node_types_module, "get_provider", lambda spec: provider)
 
     with pytest.raises(PipelineExecutionError, match="none of its labels") as excinfo:
-        await _run(definition)
+        await _run(definition, provider)
     assert excinfo.value.node_id == "classify"
 
 

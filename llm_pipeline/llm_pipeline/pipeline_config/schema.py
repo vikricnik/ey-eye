@@ -18,7 +18,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from llm_pipeline.providers import OllamaOptions, ProviderType
+from llm_pipeline.providers.base import OllamaOptions, ProviderType
 from llm_pipeline.safe_eval import UnsafeExpressionError, validate_expression_syntax
 
 # Every model below forbids unknown fields: a typo'd key (e.g. `temprature`)
@@ -26,6 +26,9 @@ from llm_pipeline.safe_eval import UnsafeExpressionError, validate_expression_sy
 # same rule whether the definition came from a YAML file on disk or from an
 # editor client over the API, since both go through these same models.
 _STRICT = ConfigDict(extra="forbid")
+
+# A loop's exit_to that ends the run instead of continuing at a node.
+END_SENTINEL = "END"
 
 # Used when neither the node nor the pipeline's defaults set a temperature.
 DEFAULT_TEMPERATURE = 0.2
@@ -305,13 +308,19 @@ class LoopConfig(BaseModel):
     id: str
     from_: str = Field(alias="from")
     back_to: str
-    # A real node id, or the literal string "END" to terminate the graph
-    # directly once the loop exits (see dag_builder/loops.py for how this
-    # composes with the pipeline's output_node resolution).
+    # A real node id, or END_SENTINEL to end the run once the loop exits
+    # (see dag_builder/loops.py for how this composes with the pipeline's
+    # output_node resolution).
     exit_to: str
     exit_when: str
     max_iterations: int = Field(default=3, ge=1)
     on_max_iterations: Literal["proceed", "fail"] = "proceed"
+
+    @property
+    def exit_node(self) -> str | None:
+        """The node the run continues at once the loop exits; None when the
+        loop ends the run — even if some node happens to be named END."""
+        return None if self.exit_to == END_SENTINEL else self.exit_to
 
     @model_validator(mode="after")
     def validate_exit_when_syntax(self) -> "LoopConfig":
@@ -346,33 +355,11 @@ class PipelineDefinition(BaseModel):
         return [self.output_node] if isinstance(self.output_node, str) else self.output_node
 
     @property
-    def branch_targets(self) -> set[str]:
-        return {target for b in self.branches for route in b.routes for target in route.targets}
-
-    @property
-    def conditional_sources(self) -> set[str]:
-        """Node ids whose ENTIRE outgoing routing is governed by a branch or
-        loop's conditional dispatch — no plain depends_on-based edge may
-        originate from these, since LangGraph doesn't support mixing a plain
-        edge and a conditional edge from the same source node."""
-        return {b.from_ for b in self.branches} | {loop.from_ for loop in self.loops}
-
-    @property
     def root_node_ids(self) -> list[str]:
-        """Plain DAG roots — nodes with no depends_on. NOT yet adjusted for
-        branch targets; see effective_root_ids for the version dag_builder
-        should actually use as entry points."""
+        """Plain DAG roots — nodes with no depends_on. NOT adjusted for
+        branch targets; Topology.effective_roots is what the graph actually
+        starts from."""
         return [n.id for n in self.nodes if not n.depends_on]
-
-    @property
-    def effective_root_ids(self) -> list[str]:
-        """Entry points dag_builder should wire the graph's start to.
-        Excludes branch route targets: those have depends_on=[] (nothing
-        upstream in the base DAG) but must NEVER run except when the branch
-        actually routes to them — including them as automatic entry points
-        would run them unconditionally at the very start of every request,
-        which defeats the entire point of a branch being conditional."""
-        return [nid for nid in self.root_node_ids if nid not in self.branch_targets]
 
     @model_validator(mode="after")
     def validate_dag(self) -> "PipelineDefinition":

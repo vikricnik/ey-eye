@@ -1,0 +1,477 @@
+{
+  "$comment": "Topology rules shared by the server (llm_pipeline/pipeline_config/topology.py, schema.py) and the editor (packages/client/src/topology.ts). Both test suites run every case: llm_pipeline/tests/test_topology_contract.py and packages/client/test/topology.test.ts. Expected lists are sorted.",
+  "cases": [
+    {
+      "name": "diamond",
+      "definition": {
+        "name": "diamond",
+        "defaults": {
+          "model": {
+            "provider": "ollama",
+            "model": "m"
+          }
+        },
+        "nodes": [
+          {
+            "id": "a",
+            "prompt_template": "{{ input }}"
+          },
+          {
+            "id": "b",
+            "prompt_template": "{{ input }}",
+            "depends_on": [
+              "a"
+            ]
+          },
+          {
+            "id": "c",
+            "prompt_template": "{{ input }}",
+            "depends_on": [
+              "a"
+            ]
+          },
+          {
+            "id": "d",
+            "prompt_template": "{{ input }}",
+            "depends_on": [
+              "b",
+              "c"
+            ]
+          }
+        ],
+        "output_node": "d"
+      },
+      "expected": {
+        "effective_roots": [
+          "a"
+        ],
+        "conditional_sources": [],
+        "branch_targets": []
+      }
+    },
+    {
+      "name": "branch",
+      "definition": {
+        "name": "branch",
+        "defaults": {
+          "model": {
+            "provider": "ollama",
+            "model": "m"
+          }
+        },
+        "nodes": [
+          {
+            "id": "classify",
+            "prompt_template": "{{ input }}"
+          },
+          {
+            "id": "a",
+            "prompt_template": "{{ input }}"
+          },
+          {
+            "id": "b",
+            "prompt_template": "{{ input }}"
+          }
+        ],
+        "output_node": [
+          "a",
+          "b"
+        ],
+        "branches": [
+          {
+            "id": "br",
+            "from": "classify",
+            "routes": [
+              {
+                "when": "\"A\" in output",
+                "to": "a"
+              },
+              {
+                "default": true,
+                "to": "b"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "effective_roots": [
+          "classify"
+        ],
+        "conditional_sources": [
+          "classify"
+        ],
+        "branch_targets": [
+          "a",
+          "b"
+        ]
+      }
+    },
+    {
+      "name": "multi-target-route",
+      "definition": {
+        "name": "multi",
+        "defaults": {
+          "model": {
+            "provider": "ollama",
+            "model": "m"
+          }
+        },
+        "nodes": [
+          {
+            "id": "classify",
+            "prompt_template": "{{ input }}"
+          },
+          {
+            "id": "a",
+            "prompt_template": "{{ input }}"
+          },
+          {
+            "id": "b",
+            "prompt_template": "{{ input }}"
+          },
+          {
+            "id": "c",
+            "prompt_template": "{{ input }}"
+          }
+        ],
+        "output_node": [
+          "a",
+          "c"
+        ],
+        "branches": [
+          {
+            "id": "br",
+            "from": "classify",
+            "routes": [
+              {
+                "when": "\"A\" in output",
+                "to": [
+                  "a",
+                  "b"
+                ]
+              },
+              {
+                "default": true,
+                "to": "c"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "effective_roots": [
+          "classify"
+        ],
+        "conditional_sources": [
+          "classify"
+        ],
+        "branch_targets": [
+          "a",
+          "b",
+          "c"
+        ]
+      }
+    },
+    {
+      "name": "loop",
+      "definition": {
+        "name": "loop",
+        "defaults": {
+          "model": {
+            "provider": "ollama",
+            "model": "m"
+          }
+        },
+        "nodes": [
+          {
+            "id": "generate",
+            "prompt_template": "{{ input }}"
+          },
+          {
+            "id": "critique",
+            "prompt_template": "{{ input }}",
+            "depends_on": [
+              "generate"
+            ]
+          }
+        ],
+        "output_node": "generate",
+        "loops": [
+          {
+            "id": "revise",
+            "from": "critique",
+            "back_to": "generate",
+            "exit_to": "END",
+            "exit_when": "output.startswith(\"APPROVE\")"
+          }
+        ]
+      },
+      "expected": {
+        "effective_roots": [
+          "generate"
+        ],
+        "conditional_sources": [
+          "critique"
+        ],
+        "branch_targets": []
+      }
+    },
+    {
+      "name": "nested-loops",
+      "definition": {
+        "name": "nested",
+        "defaults": {
+          "model": {
+            "provider": "ollama",
+            "model": "m"
+          }
+        },
+        "nodes": [
+          {
+            "id": "plan",
+            "prompt_template": "{{ input }}"
+          },
+          {
+            "id": "draft",
+            "prompt_template": "{{ input }}",
+            "depends_on": [
+              "plan"
+            ]
+          },
+          {
+            "id": "check",
+            "prompt_template": "{{ input }}",
+            "depends_on": [
+              "draft"
+            ]
+          },
+          {
+            "id": "review",
+            "prompt_template": "{{ input }}",
+            "depends_on": [
+              "check"
+            ]
+          }
+        ],
+        "output_node": "review",
+        "loops": [
+          {
+            "id": "inner",
+            "from": "check",
+            "back_to": "draft",
+            "exit_to": "review",
+            "exit_when": "output.startswith(\"APPROVE\")"
+          },
+          {
+            "id": "outer",
+            "from": "review",
+            "back_to": "plan",
+            "exit_to": "END",
+            "exit_when": "output.startswith(\"APPROVE\")"
+          }
+        ]
+      },
+      "expected": {
+        "effective_roots": [
+          "plan"
+        ],
+        "conditional_sources": [
+          "check",
+          "review"
+        ],
+        "branch_targets": []
+      }
+    },
+    {
+      "name": "branch-target-declares-its-source",
+      "definition": {
+        "name": "declared",
+        "defaults": {
+          "model": {
+            "provider": "ollama",
+            "model": "m"
+          }
+        },
+        "nodes": [
+          {
+            "id": "classify",
+            "prompt_template": "{{ input }}"
+          },
+          {
+            "id": "a",
+            "prompt_template": "{{ input }}",
+            "depends_on": [
+              "classify"
+            ]
+          },
+          {
+            "id": "b",
+            "prompt_template": "{{ input }}"
+          }
+        ],
+        "output_node": [
+          "a",
+          "b"
+        ],
+        "branches": [
+          {
+            "id": "br",
+            "from": "classify",
+            "routes": [
+              {
+                "when": "\"A\" in output",
+                "to": "a"
+              },
+              {
+                "default": true,
+                "to": "b"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "effective_roots": [
+          "classify"
+        ],
+        "conditional_sources": [
+          "classify"
+        ],
+        "branch_targets": [
+          "a",
+          "b"
+        ]
+      }
+    },
+    {
+      "name": "two-branches-one-target",
+      "definition": {
+        "name": "two",
+        "defaults": {
+          "model": {
+            "provider": "ollama",
+            "model": "m"
+          }
+        },
+        "nodes": [
+          {
+            "id": "x",
+            "prompt_template": "{{ input }}"
+          },
+          {
+            "id": "y",
+            "prompt_template": "{{ input }}"
+          },
+          {
+            "id": "t",
+            "prompt_template": "{{ input }}"
+          },
+          {
+            "id": "u",
+            "prompt_template": "{{ input }}"
+          }
+        ],
+        "output_node": [
+          "t",
+          "u"
+        ],
+        "branches": [
+          {
+            "id": "bx",
+            "from": "x",
+            "routes": [
+              {
+                "when": "\"A\" in output",
+                "to": "t"
+              },
+              {
+                "default": true,
+                "to": "u"
+              }
+            ]
+          },
+          {
+            "id": "by",
+            "from": "y",
+            "routes": [
+              {
+                "when": "\"A\" in output",
+                "to": "t"
+              },
+              {
+                "default": true,
+                "to": "u"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "effective_roots": [
+          "x",
+          "y"
+        ],
+        "conditional_sources": [
+          "x",
+          "y"
+        ],
+        "branch_targets": [
+          "t",
+          "u"
+        ]
+      }
+    },
+    {
+      "name": "loop-exits-to-node",
+      "definition": {
+        "name": "exit",
+        "defaults": {
+          "model": {
+            "provider": "ollama",
+            "model": "m"
+          }
+        },
+        "nodes": [
+          {
+            "id": "generate",
+            "prompt_template": "{{ input }}"
+          },
+          {
+            "id": "critique",
+            "prompt_template": "{{ input }}",
+            "depends_on": [
+              "generate"
+            ]
+          },
+          {
+            "id": "publish",
+            "prompt_template": "{{ input }}",
+            "depends_on": [
+              "critique"
+            ]
+          }
+        ],
+        "output_node": "publish",
+        "loops": [
+          {
+            "id": "revise",
+            "from": "critique",
+            "back_to": "generate",
+            "exit_to": "publish",
+            "exit_when": "output.startswith(\"APPROVE\")"
+          }
+        ]
+      },
+      "expected": {
+        "effective_roots": [
+          "generate"
+        ],
+        "conditional_sources": [
+          "critique"
+        ],
+        "branch_targets": []
+      }
+    }
+  ]
+}
