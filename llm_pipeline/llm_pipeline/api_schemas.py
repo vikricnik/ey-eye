@@ -26,13 +26,13 @@ class RerunRequest(BaseModel):
     outputs: dict[str, str] = {}
 
 
-class AskRequest(BaseModel):
+class RunRequest(BaseModel):
+    """POST /pipelines/{name}/runs. The pipeline is named in the path, per
+    request, rather than a server-side "active pipeline" — every worker
+    process loads the same YAML files from the same disk independently;
+    there's no shared mutable state to disagree about across workers."""
+
     prompt: str
-    # Pipeline selection is stateless and per-request rather than a server-side
-    # "active pipeline" — every worker process loads the same YAML files from
-    # the same disk independently; there's no shared mutable state to
-    # disagree about across multiple uvicorn workers.
-    pipeline_name: str
     history: list[ConversationTurn] = []
     rerun: RerunRequest | None = None
 
@@ -68,7 +68,7 @@ class NodeOutputDTO(BaseModel):
     replayed: bool = False
 
 
-class AskResponse(BaseModel):
+class RunResponse(BaseModel):
     pipeline_name: str
     output_node: str  # whichever output_node candidate actually resolved
     final_answer: str
@@ -80,7 +80,8 @@ class AskResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Streaming (POST /ask/stream) — Server-Sent Events, one event per line below
+# Streaming (POST /pipelines/{name}/runs, Accept: text/event-stream) — Server-
+# Sent Events, one event per line below
 # ---------------------------------------------------------------------------
 #
 # Node-level streaming, not token-level: each event fires when a graph node
@@ -131,7 +132,7 @@ class NodeCompleteEvent(BaseModel):
     """One graph node just finished. Synthetic/internal nodes (the
     multi-root fan-out node, loop increment/failed nodes) are filtered out
     before reaching the client — this only ever describes a real
-    pipeline-defined node, the same NodeOutputDTO shape AskResponse uses."""
+    pipeline-defined node, the same NodeOutputDTO shape RunResponse uses."""
 
     node: NodeOutputDTO
 
@@ -146,7 +147,7 @@ class LoopIterationEvent(BaseModel):
 
 
 class StreamDoneEvent(BaseModel):
-    """The pipeline finished successfully. Same information AskResponse
+    """The pipeline finished successfully. Same information RunResponse
     carries — included in full (not just a delta) so a client that only
     cares about the final result doesn't need to have accumulated every
     node_complete event along the way."""
@@ -156,7 +157,7 @@ class StreamDoneEvent(BaseModel):
     final_answer: str
     node_outputs: dict[str, NodeOutputDTO]
     loop_iterations: dict[str, int] = {}
-    remembered: dict[str, str] = {}  # see AskResponse.remembered
+    remembered: dict[str, str] = {}  # see RunResponse.remembered
 
 
 # ---------------------------------------------------------------------------
@@ -446,7 +447,7 @@ class ErrorResponse(BaseModel):
     error: str  # HTTP reason phrase, e.g. "Not Found", "Too Many Requests"
     code: ErrorCode  # which failure this is — what clients branch on
     message: str  # human-readable detail — what used to be the bare "detail" string
-    request: str  # "<METHOD> <path>", e.g. "POST /ask"
+    request: str  # "<METHOD> <path>", e.g. "POST /pipelines/support-router/runs"
     exceptionUID: str  # ties this error to server log lines carrying the same id
     details: dict[str, object] = {}  # extra structured context, varies by error type
     validations: list[ValidationIssue] = []  # populated only for 422 schema validation errors

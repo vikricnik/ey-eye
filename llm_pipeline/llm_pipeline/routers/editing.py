@@ -1,8 +1,10 @@
 """
 Endpoints for reading and editing pipelines (the web builder and the CLI):
-the models an editor may select, reading a pipeline, validation/import/
-export, saving, and node presets. GET and PUT /pipelines/{name} speak the
-same representation — what you read is what you save back.
+the models an editor may select, reading and saving a pipeline, node
+presets, and /drafts/… — validation/import/export, prompt previews and
+test runs on a definition that needn't be saved (their own path space, so
+no pipeline name can collide with them). GET and PUT /pipelines/{name}
+speak the same representation — what you read is what you save back.
 
 Reads are available whenever the client is authenticated. Every write is
 additionally gated by `pipeline_editing_enabled` (off by default) — see
@@ -58,7 +60,7 @@ from llm_pipeline.pipeline_store import (
 )
 from llm_pipeline.preview import preview_prompt
 from llm_pipeline.rate_limit import enforce_rate_limit
-from llm_pipeline.routers.ask import sse_event
+from llm_pipeline.routers.runs import sse_event
 from llm_pipeline.settings import settings
 
 router = APIRouter(dependencies=[Depends(require_api_key), Depends(enforce_rate_limit)])
@@ -192,7 +194,7 @@ async def get_pipeline(
 
 
 @router.post(
-    "/pipelines/validate",
+    "/drafts/validation",
     response_model=ValidatePipelineResponse,
     responses={k: ERROR_RESPONSES[k] for k in (401, 422, 429)},
 )
@@ -221,7 +223,7 @@ async def validate_pipeline(
 
 
 @router.post(
-    "/pipelines/preview",
+    "/drafts/prompt-preview",
     response_model=PreviewPromptResponse,
     # Renders templates a client sends: the same trust as saving them.
     dependencies=[Depends(require_editing_enabled)],
@@ -262,7 +264,7 @@ def _with_models(
 
 
 @router.post(
-    "/pipelines/test",
+    "/drafts/test-runs",
     # Runs models and templates a client chose: the same trust as saving.
     dependencies=[Depends(require_editing_enabled)],
     responses={
@@ -340,7 +342,7 @@ async def save_pipeline(
     """Creates (If-None-Match: *) or updates (If-Match: the ETag you loaded)
     pipelines/<name>.yaml. One of the two is required: pipelines are
     shared, and a blind overwrite could silently undo someone else's save.
-    Runs are picked up immediately — the next /ask uses the saved version."""
+    Runs are picked up immediately — the next run uses the saved version."""
     if not precondition.is_set:
         raise ApiError(
             ErrorCode.PRECONDITION_REQUIRED,

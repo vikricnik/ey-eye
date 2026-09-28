@@ -17,6 +17,9 @@ from llm_pipeline.model_catalog import ModelCatalog
 from llm_pipeline.providers import Generation, ModelSpec, Usage
 from llm_pipeline.settings import settings
 
+# Asks a run to stream its progress as Server-Sent Events.
+STREAM = {"Accept": "text/event-stream"}
+
 PIPELINE: dict[str, Any] = {
     "name": "usage",
     "nodes": [
@@ -77,7 +80,7 @@ def _usage_by_node(node_outputs: dict[str, Any]) -> dict[str, Any]:
 
 
 def test_usage_and_context_window_per_node(client: TestClient) -> None:
-    response = client.post("/ask", json={"prompt": "hi", "pipeline_name": "usage"})
+    response = client.post("/pipelines/usage/runs", json={"prompt": "hi"})
     assert response.status_code == 200
     usage = _usage_by_node(response.json()["node_outputs"])
     assert usage["sized"] == {
@@ -92,7 +95,13 @@ def test_usage_and_context_window_per_node(client: TestClient) -> None:
 
 
 def test_streamed_node_complete_and_done_carry_the_same_usage(client: TestClient) -> None:
-    response = client.post("/ask/stream", json={"prompt": "hi", "pipeline_name": "usage"})
+    response = client.post(
+        "/pipelines/usage/runs",
+        json={
+            "prompt": "hi",
+        },
+        headers=STREAM,
+    )
     events = []
     for block in response.text.strip().split("\n\n"):
         lines = block.split("\n")

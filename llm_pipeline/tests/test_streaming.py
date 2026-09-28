@@ -13,9 +13,12 @@ from llm_pipeline.dag_builder.loops import make_loop_failed_node
 from llm_pipeline.errors import PipelineExecutionError
 from llm_pipeline.main import app
 from llm_pipeline.providers import LLMProvider, ModelSpec
-from llm_pipeline.routers.ask import extract_stream_part, message_text
+from llm_pipeline.routers.runs import extract_stream_part, message_text
 from llm_pipeline.settings import settings
 from llm_pipeline.state import PipelineState
+
+# Asks a run to stream its progress as Server-Sent Events.
+STREAM = {"Accept": "text/event-stream"}
 
 
 def test_extract_stream_part_treats_plain_dict_as_updates() -> None:
@@ -111,6 +114,37 @@ def _parse_sse_events(raw_text: str) -> list[tuple[str, dict[str, object]]]:
     return events
 
 
+def test_a_run_streams_only_when_the_client_accepts_an_event_stream(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One endpoint, two representations: the finished RunResponse, or the
+    run's progress as Server-Sent Events — chosen by Accept."""
+    monkeypatch.setattr(node_types_module, "get_provider", lambda spec: _EchoProvider(spec.model))
+    run = {"prompt": "hello", "history": []}
+
+    def content_type(accept: str | None) -> str:
+        headers = {"Accept": accept} if accept is not None else {}
+        response = client.post("/pipelines/simple-local/runs", json=run, headers=headers)
+        assert response.status_code == 200
+        return response.headers["content-type"].split(";")[0]
+
+    assert content_type(None) == "application/json"
+    assert content_type("application/json") == "application/json"
+    assert content_type("*/*") == "application/json"
+    assert content_type("text/event-stream") == "text/event-stream"
+    # The client's preference decides: JSON wins a tie, and */* is no request
+    # for a stream.
+    assert content_type("application/json, text/event-stream;q=0.5") == "application/json"
+    assert content_type("text/event-stream, application/json;q=0.5") == "text/event-stream"
+    assert content_type("text/event-stream;q=0, application/json") == "application/json"
+
+
+def test_the_rpc_style_run_paths_are_gone(client: TestClient) -> None:
+    run = {"prompt": "hello", "pipeline_name": "simple-local", "history": []}
+    assert client.post("/ask", json=run).status_code == 404
+    assert client.post("/ask/stream", json=run).status_code == 404
+
+
 def test_stream_single_node_pipeline_emits_node_complete_then_done(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -120,8 +154,9 @@ def test_stream_single_node_pipeline_emits_node_complete_then_done(
     monkeypatch.setattr(node_types_module, "get_provider", fake_get_provider)
 
     response = client.post(
-        "/ask/stream",
-        json={"prompt": "hello", "pipeline_name": "simple-local", "history": []},
+        "/pipelines/simple-local/runs",
+        json={"prompt": "hello", "history": []},
+        headers=STREAM,
     )
 
     assert response.status_code == 200
@@ -153,8 +188,9 @@ def test_stream_multi_root_pipeline_emits_one_node_complete_per_node(
     monkeypatch.setattr(node_types_module, "get_provider", fake_get_provider)
 
     response = client.post(
-        "/ask/stream",
-        json={"prompt": "what year is it", "pipeline_name": "consensus-qa", "history": []},
+        "/pipelines/consensus-qa/runs",
+        json={"prompt": "what year is it", "history": []},
+        headers=STREAM,
     )
 
     assert response.status_code == 200
@@ -184,8 +220,9 @@ def test_stream_provider_failure_yields_error_event_with_200_status(
     monkeypatch.setattr(node_types_module, "get_provider", fake_get_provider)
 
     response = client.post(
-        "/ask/stream",
-        json={"prompt": "hello", "pipeline_name": "simple-local", "history": []},
+        "/pipelines/simple-local/runs",
+        json={"prompt": "hello", "history": []},
+        headers=STREAM,
     )
 
     assert response.status_code == 200  # NOT 502, even though the pipeline failed
@@ -254,8 +291,9 @@ def test_stream_pipeline_not_found_returns_normal_404_before_streaming(
     exactly like /ask's 404 — a normal HTTP error status, since nothing has
     started streaming yet at that point."""
     response = client.post(
-        "/ask/stream",
-        json={"prompt": "hello", "pipeline_name": "does-not-exist", "history": []},
+        "/pipelines/does-not-exist/runs",
+        json={"prompt": "hello", "history": []},
+        headers=STREAM,
     )
     assert response.status_code == 404
     body = response.json()
@@ -276,8 +314,9 @@ def test_stream_every_node_start_precedes_its_node_complete(
     monkeypatch.setattr(node_types_module, "get_provider", fake_get_provider)
 
     response = client.post(
-        "/ask/stream",
-        json={"prompt": "q", "pipeline_name": "consensus-qa", "history": []},
+        "/pipelines/consensus-qa/runs",
+        json={"prompt": "q", "history": []},
+        headers=STREAM,
     )
     events = _parse_sse_events(response.text)
 
@@ -329,8 +368,9 @@ def test_stream_parallel_roots_all_start_before_any_completes(
     monkeypatch.setattr(node_types_module, "get_provider", lambda spec: barrier)
 
     response = client.post(
-        "/ask/stream",
-        json={"prompt": "q", "pipeline_name": "consensus-qa", "history": []},
+        "/pipelines/consensus-qa/runs",
+        json={"prompt": "q", "history": []},
+        headers=STREAM,
     )
     events = _parse_sse_events(response.text)
     event_types = [e[0] for e in events]
@@ -457,8 +497,9 @@ def test_stream_emits_tokens_per_node_between_start_and_complete(
         lambda spec: _StreamingChatProvider(f"answer from {spec.model} here"),
     )
     response = client.post(
-        "/ask/stream",
-        json={"prompt": "q", "pipeline_name": "consensus-qa", "history": []},
+        "/pipelines/consensus-qa/runs",
+        json={"prompt": "q", "history": []},
+        headers=STREAM,
     )
     events = _parse_sse_events(response.text)
     assert events[-1][0] == "done"
@@ -531,8 +572,9 @@ def test_node_start_carries_the_messages_the_node_received(
     prompt travel with node_start, so clients can show what each node got."""
     monkeypatch.setattr(node_types_module, "get_provider", lambda spec: _EchoProvider(spec.model))
     response = client.post(
-        "/ask/stream",
-        json={"prompt": "what year is it", "pipeline_name": "consensus-qa", "history": []},
+        "/pipelines/consensus-qa/runs",
+        json={"prompt": "what year is it", "history": []},
+        headers=STREAM,
     )
     starts = {
         str(data["node_id"]): data

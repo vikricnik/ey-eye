@@ -96,7 +96,7 @@ def error_response_from_http_exception(request: Request, exc: HTTPException) -> 
 def error_response_from_validation_error(
     request: Request, exc: RequestValidationError
 ) -> ErrorResponse:
-    """FastAPI's automatic 422 (e.g. a malformed AskRequest body) normally
+    """FastAPI's automatic 422 (e.g. a malformed RunRequest body) normally
     returns Pydantic's own nested error-list shape. Mapped into the same
     ErrorResponse contract instead — each individual field problem becomes
     one ValidationIssue in `validations`, rather than being flattened away."""

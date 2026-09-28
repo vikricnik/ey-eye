@@ -16,13 +16,13 @@ before(async () => {
   server = createServer((req, res) => {
     req.on("close", () => hangUps++);
     req.resume();
-    if (req.url === "/ask/stream" || req.url === "/pipelines/test") {
+    if (req.headers.accept === "text/event-stream") {
       res.writeHead(200, { "Content-Type": "text/event-stream" });
-      const event = req.url === "/ask/stream" ? "node_start" : "case_start";
+      const event = req.url === "/drafts/test-runs" ? "case_start" : "node_start";
       res.write(`event: ${event}\ndata: {"node_id": "a", "model_name": "m", "case": "c", "variant": "current"}\n\n`);
       return; // …and never another byte
     }
-    // POST /ask: no answer until the client gives up
+    // an answered run: no answer until the client gives up
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -94,6 +94,6 @@ describe("stopping a request", () => {
     const client = new PipelineClient(`http://127.0.0.1:${(echo.address() as AddressInfo).port}`);
     await client.ask("q", "p", [], { signal: new AbortController().signal });
     echo.close();
-    assert.deepEqual(Object.keys(JSON.parse(body)).sort(), ["history", "pipeline_name", "prompt"]);
+    assert.deepEqual(Object.keys(JSON.parse(body)).sort(), ["history", "prompt"]);
   });
 });

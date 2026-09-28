@@ -29,7 +29,7 @@ let base = "";
 before(async () => {
   server = createServer((req, res) => {
     req.resume();
-    if (req.url === "/ask/stream") {
+    if (req.headers.accept === "text/event-stream") {
       res.writeHead(200, { "Content-Type": "text/event-stream" });
       const failure = errorBody(502, "PIPELINE_RUN_FAILED", "Node 'a' failed", { node_id: "a" });
       res.end(`event: error\ndata: ${JSON.stringify(failure)}\n\n`);

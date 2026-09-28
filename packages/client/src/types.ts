@@ -14,9 +14,9 @@ export interface RerunRequest {
   outputs: Record<string, string>;
 }
 
-export interface AskRequest {
+/** POST /pipelines/{name}/runs — the pipeline is named in the path. */
+export interface RunRequest {
   prompt: string;
-  pipeline_name: string;
   history: ConversationTurn[];
   rerun?: RerunRequest;
 }
@@ -59,7 +59,7 @@ export interface NodeOutput {
   replayed?: boolean;
 }
 
-export interface AskResponse {
+export interface RunResponse {
   pipeline_name: string;
   output_node: string; // whichever output_node candidate actually resolved
   final_answer: string;
@@ -71,9 +71,10 @@ export interface AskResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Streaming (POST /ask/stream) — Server-Sent Events. Node-level streaming,
-// not token-level: one event per graph node completion, not per LLM token.
-// See PipelineClient.askStream() for how these are consumed.
+// Streaming (POST /pipelines/{name}/runs with Accept: text/event-stream) —
+// Server-Sent Events: node_start, node_token as models generate text,
+// node_complete, loop_iteration, then done. See PipelineClient.askStream()
+// for how these are consumed.
 // ---------------------------------------------------------------------------
 
 /** A node just started calling its model — sent by the server itself, so
@@ -607,11 +608,12 @@ export interface GraphViewState {
   /** Set once the server has sent a node_start event. From then on,
    * `running` comes only from those events rather than being inferred
    * from the graph shape (inference remains the fallback for buffered
-   * /ask runs and for servers that don't send node_start). */
+   * answered (not streamed) runs and for servers that don't send
+   * node_start). */
   serverReportsStarts: boolean;
 }
 
-/** POST /pipelines/preview — what a node of `definition` (saved or not)
+/** POST /drafts/prompt-preview — what a node of `definition` (saved or not)
  * would receive, given a message, the conversation so far and other
  * nodes' outputs (e.g. the last run's). Needs editing enabled. */
 export interface PreviewPromptRequest {
@@ -636,7 +638,7 @@ export interface VariantRequest {
   models: Record<string, NodeModelConfig>;
 }
 
-/** POST /pipelines/test. `cases` picks some by name (default: all);
+/** POST /drafts/test-runs. `cases` picks some by name (default: all);
  * `inputs` adds one-off messages; each variant runs every case too, next
  * to the definition as it is ("current"). Needs editing enabled. */
 export interface RunTestsRequest {

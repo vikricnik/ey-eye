@@ -3,8 +3,8 @@ Internal pipeline execution state — LangGraph plumbing, not part of the
 public HTTP API. See api_schemas.py for the request/response contract
 clients actually depend on; this module is free to change shape without
 that being a breaking API change, since nothing here crosses the wire
-directly (main.py's /ask endpoint translates PipelineState into
-AskResponse before it ever reaches a client).
+directly (routers/runs.py translates PipelineState into RunResponse
+before it ever reaches a client).
 """
 
 from typing import Annotated, NotRequired, TypedDict

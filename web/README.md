@@ -40,10 +40,10 @@ web/
 
 Every edit goes through `draftOps` in `@llm-pipeline/client` — the same
 functions the CLI's edit commands use — and the server is the only
-validator: the editor calls `POST /pipelines/validate` (debounced) and
+validator: the editor calls `POST /drafts/validation` (debounced) and
 shows what it says.
 
-Types and the typed fetch client (`PipelineClient`, `AskResponse`, etc.) live in
+Types and the typed fetch client (`PipelineClient`, `RunResponse`, etc.) live in
 the shared `@llm-pipeline/client` package (`../packages/client`) — the CLI
 depends on the exact same package, so the request/response contract only has
 one source of truth. See the root README's "Project structure" section.

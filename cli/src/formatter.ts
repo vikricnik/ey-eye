@@ -1,7 +1,7 @@
 import chalk from "chalk";
 import { buildGraphModel, describeUsage } from "@llm-pipeline/client";
 import type {
-  AskResponse,
+  RunResponse,
   HealthResponse,
   NodeOutput,
   PipelineDetail,
@@ -85,8 +85,8 @@ function formatNode(nodeId: string, node: NodeOutput, isOutputNode: boolean): st
   return `${header}\n${indent(node.output, 2)}`;
 }
 
-export function formatAskResponse(
-  response: AskResponse,
+export function formatRunResponse(
+  response: RunResponse,
   verbose: boolean,
   elapsedMs: number
 ): string {

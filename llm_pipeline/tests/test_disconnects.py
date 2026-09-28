@@ -10,11 +10,10 @@ from fastapi import HTTPException, Request
 
 import llm_pipeline.dag_builder.node_types as node_types_module
 import llm_pipeline.disconnects as disconnects_module
-from llm_pipeline.api_schemas import AskRequest
 from llm_pipeline.dag_builder import build_graph
 from llm_pipeline.disconnects import cancel_on_disconnect, until_disconnected
 from llm_pipeline.pipeline_config import PipelineDefinition
-from llm_pipeline.routers.ask import pipeline_events
+from llm_pipeline.routers.runs import pipeline_events
 from llm_pipeline.state import PipelineState
 
 
@@ -25,7 +24,7 @@ class _Client:
     method = "POST"
 
     class url:
-        path = "/ask/stream"
+        path = "/pipelines/slow/runs"
 
     def __init__(self) -> None:
         self.gone = False
@@ -129,9 +128,8 @@ async def test_leaving_mid_run_cancels_the_model_call(monkeypatch: pytest.Monkey
     request = cast(Request, client)
 
     async def sse() -> AsyncGenerator[str, None]:
-        req = AskRequest(prompt="q", pipeline_name="slow")
         async for kind, _data in pipeline_events(
-            request, req, definition, build_graph(definition), state
+            request, definition, build_graph(definition), state
         ):
             yield kind
 

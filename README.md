@@ -82,7 +82,7 @@ llm-pipeline-monorepo/
     ├── pipeline_config/                  schema.py (pure Pydantic models) +
     │                                     validation.py (standalone DAG-level checks,
     │                                     independently testable) + loader.py
-    ├── routers/                            health.py + ask.py (FastAPI route handlers)
+    ├── routers/                            health.py, runs.py, editing.py, … (FastAPI route handlers)
     ├── api_schemas.py                        the public HTTP contract (request/response
     │                                         models — anything that crosses the wire)
     ├── state.py                                internal LangGraph state — free to change
@@ -273,7 +273,7 @@ notes on summarization as a future improvement.
 
 ## Stateless pipeline selection — why there's no "activate" endpoint
 
-Every `/ask` call specifies `pipeline_name` explicitly; the server has no
+Every run names its pipeline in the path (`POST /pipelines/{name}/runs`); the server has no
 server-side "currently active pipeline" to mutate. This was a deliberate
 choice over a stateful `/pipelines/{name}/activate` design: a global "active"
 variable would live independently in each worker process under

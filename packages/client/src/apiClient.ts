@@ -3,9 +3,7 @@ import type {
   DeletedResponse,
   ErrorCode,
   AskOptions,
-  AskRequest,
   RequestOptions,
-  AskResponse,
   AskStreamEvent,
   ConversationTurn,
   HealthResponse,
@@ -18,6 +16,8 @@ import type {
   PresetResponse,
   PreviewPromptRequest,
   PreviewPromptResponse,
+  RunRequest,
+  RunResponse,
   RunTestsRequest,
   PresetsListResponse,
   SavePipelineResponse,
@@ -134,6 +134,11 @@ function ifMatch(revision: string): Record<string, string> {
   return { "If-Match": `"${revision}"` };
 }
 
+/** Where a pipeline's runs are started (answered or streamed, by Accept). */
+function runsPath(pipelineName: string): string {
+  return `/pipelines/${encodeURIComponent(pipelineName)}/runs`;
+}
+
 const ASK_EVENTS: ReadonlySet<string> = new Set(["node_start", "node_token", "node_complete", "loop_iteration", "done"]);
 const TEST_EVENTS: ReadonlySet<string> = new Set(["case_start", "case_result", "tests_done"]);
 
@@ -235,12 +240,12 @@ export class PipelineClient {
   async validatePipeline(
     input: { definition: PipelineDefinition } | { yaml: string }
   ): Promise<ValidatePipelineResponse> {
-    return this.request<ValidatePipelineResponse>("POST", "/pipelines/validate", input);
+    return this.request<ValidatePipelineResponse>("POST", "/drafts/validation", input);
   }
 
   /** What a node would receive — see PreviewPromptRequest. */
   async previewPrompt(req: PreviewPromptRequest): Promise<PreviewPromptResponse> {
-    return this.request<PreviewPromptResponse>("POST", "/pipelines/preview", req);
+    return this.request<PreviewPromptResponse>("POST", "/drafts/prompt-preview", req);
   }
 
   /** Creates (`baseRevision` null) or updates a pipeline — sent as
@@ -307,15 +312,19 @@ export class PipelineClient {
     pipelineName: string,
     history: ConversationTurn[] = [],
     options: AskOptions & RequestOptions = {}
-  ): Promise<AskResponse> {
+  ): Promise<RunResponse> {
     const { signal, ...request } = options;
-    const body: AskRequest = { prompt, pipeline_name: pipelineName, history, ...request };
+    const body: RunRequest = { prompt, history, ...request };
 
     let response: Response;
     try {
-      response = await fetch(`${this.baseUrl}/ask`, {
+      response = await fetch(`${this.baseUrl}${runsPath(pipelineName)}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...this.authHeaders() },
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          ...this.authHeaders(),
+        },
         body: JSON.stringify(body),
         ...(signal ? { signal } : {}),
       });
@@ -333,7 +342,7 @@ export class PipelineClient {
     }
 
     try {
-      return (await response.json()) as AskResponse;
+      return (await response.json()) as RunResponse;
     } catch (err) {
       if (signal?.aborted) throw new RequestCancelledError();
       throw err;
@@ -341,13 +350,13 @@ export class PipelineClient {
   }
 
   /**
-   * Streaming variant of ask() — yields a node_start event as each graph
-   * node begins and a node_complete as it finishes (node-level streaming,
-   * not token-level; see the server's
-   * routers/ask.py docstring for why). Browser's native EventSource only
-   * supports GET requests, so this parses Server-Sent Events manually from
-   * fetch()'s streaming response body instead — works identically in
-   * Node.js (CLI) and browsers (web client).
+   * Streaming variant of ask() — the same run, requested with
+   * `Accept: text/event-stream`: yields node_start as each node begins,
+   * node_token as its model generates text, and node_complete as it
+   * finishes (see the server's routers/runs.py). The browser's native
+   * EventSource only supports GET requests, so this parses Server-Sent
+   * Events manually from fetch()'s streaming response body instead — works
+   * identically in Node.js (CLI) and browsers (web client).
    *
    * Throws PipelineApiError for both pre-stream failures (auth, rate
    * limit, pipeline not found — same as ask()) AND mid-stream execution
@@ -362,8 +371,8 @@ export class PipelineClient {
     options: AskOptions & RequestOptions = {}
   ): AsyncGenerator<AskStreamEvent, void, undefined> {
     const { signal, ...request } = options;
-    const body: AskRequest = { prompt, pipeline_name: pipelineName, history, ...request };
-    for await (const { event, data } of this.postStream("/ask/stream", body, ASK_EVENTS, signal)) {
+    const body: RunRequest = { prompt, history, ...request };
+    for await (const { event, data } of this.postStream(runsPath(pipelineName), body, ASK_EVENTS, signal)) {
       yield { type: event, data } as AskStreamEvent;
     }
   }
@@ -375,7 +384,7 @@ export class PipelineClient {
     req: RunTestsRequest,
     options: RequestOptions = {}
   ): AsyncGenerator<TestRunEvent, void, undefined> {
-    for await (const { event, data } of this.postStream("/pipelines/test", req, TEST_EVENTS, options.signal)) {
+    for await (const { event, data } of this.postStream("/drafts/test-runs", req, TEST_EVENTS, options.signal)) {
       yield { type: event, data } as TestRunEvent;
     }
   }
@@ -397,7 +406,11 @@ export class PipelineClient {
     try {
       response = await fetch(`${this.baseUrl}${path}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...this.authHeaders() },
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "text/event-stream",
+          ...this.authHeaders(),
+        },
         body: JSON.stringify(body),
         ...(signal ? { signal } : {}),
       });

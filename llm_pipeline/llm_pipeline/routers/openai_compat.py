@@ -19,7 +19,7 @@ every draft) and no reasoning stripping on it (the <think> block would
 stream too); otherwise the answer arrives in one piece at the end. `usage`
 sums every model call in the run.
 
-Auth and rate limits are the same as /ask — OpenAI clients send the API key
+Auth and rate limits are the same as for runs — OpenAI clients send the API key
 as `Authorization: Bearer`, which require_api_key accepts. Errors use
 OpenAI's error shape (see openai_error and OpenAIErrorRoute).
 """
@@ -38,13 +38,13 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from llm_pipeline.api_error import ApiError
 from llm_pipeline.api_schemas import (
-    AskRequest,
     ConversationTurn,
     ErrorCode,
     ErrorResponse,
     NodeOutputDTO,
     NodeStartEvent,
     NodeTokenEvent,
+    RunRequest,
     StreamDoneEvent,
 )
 from llm_pipeline.auth import require_api_key
@@ -57,7 +57,7 @@ from llm_pipeline.pipeline_config import PipelineDefinition, list_available_pipe
 from llm_pipeline.pipeline_config.effective import effective_node
 from llm_pipeline.pipeline_loader import PipelineCache, get_pipeline_cache
 from llm_pipeline.rate_limit import enforce_rate_limit
-from llm_pipeline.routers.ask import pipeline_events, prepare_ask, run_ask
+from llm_pipeline.routers.runs import pipeline_events, prepare_run, run_pipeline
 from llm_pipeline.settings import settings
 
 # Shown between the output node's failed attempt and its retry: text that
@@ -287,12 +287,12 @@ async def chat_completions(
     cache: PipelineCache = Depends(get_pipeline_cache),
 ) -> ChatCompletion | StreamingResponse:
     prompt, history = conversation(body.messages)
-    req = AskRequest(prompt=prompt, pipeline_name=body.model, history=history)
+    req = RunRequest(prompt=prompt, history=history)
     completion_id = f"chatcmpl-{uuid.uuid4().hex}"
     created = int(time.time())
 
     if not body.stream:
-        answer = await run_ask(req, cache, request)
+        answer = await run_pipeline(body.model, req, cache, request)
         return ChatCompletion(
             id=completion_id,
             created=created,
@@ -301,7 +301,7 @@ async def chat_completions(
             usage=total_usage(answer.node_outputs.values()),
         )
 
-    definition, graph, initial_state = await prepare_ask(req, cache)
+    definition, graph, initial_state = await prepare_run(body.model, req, cache)
     include_usage = body.stream_options is not None and body.stream_options.include_usage
 
     def chunk(delta: Delta, finish: bool = False) -> str:
@@ -317,7 +317,7 @@ async def chat_completions(
         live = live_output_node(definition)
         streamed = False
         yield chunk(Delta(role="assistant", content=""))
-        async for _kind, data in pipeline_events(request, req, definition, graph, initial_state):
+        async for _kind, data in pipeline_events(request, definition, graph, initial_state):
             if isinstance(data, NodeTokenEvent) and data.node_id == live:
                 streamed = True
                 yield chunk(Delta(content=data.text))

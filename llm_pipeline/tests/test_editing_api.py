@@ -120,7 +120,7 @@ def test_saving_is_forbidden_when_editing_is_disabled(
     assert "PIPELINE_EDITING_ENABLED" in response.json()["message"]
     assert not (dirs[0] / "fresh.yaml").exists()
     # Reads and validation stay available.
-    assert client.post("/pipelines/validate", json={"definition": _pipeline()}).status_code == 200
+    assert client.post("/drafts/validation", json={"definition": _pipeline()}).status_code == 200
     assert client.get("/health").json()["editing_enabled"] is False
 
 
@@ -229,6 +229,15 @@ def test_a_pipeline_reads_as_what_a_save_accepts(client: TestClient) -> None:
     assert saved.json()["revision"] == loaded["revision"]  # nothing changed on disk
 
 
+@pytest.mark.parametrize("action", ["validate", "preview", "test"])
+def test_draft_operations_no_longer_share_the_pipeline_name_space(
+    client: TestClient, action: str
+) -> None:
+    """They moved to /drafts/…, so /pipelines/<action> is just a pipeline
+    name again — POSTing to it is no longer an operation."""
+    assert client.post(f"/pipelines/{action}", json={"definition": _pipeline()}).status_code == 405
+
+
 def test_the_separate_definition_path_is_gone(client: TestClient) -> None:
     assert client.get("/pipelines/consensus-qa/definition").status_code == 404
 
@@ -257,11 +266,11 @@ def test_models_reports_unreachable_ollama_without_failing(client: TestClient) -
 
 
 def test_validate_returns_canonical_yaml_that_round_trips(client: TestClient) -> None:
-    response = client.post("/pipelines/validate", json={"definition": _pipeline()})
+    response = client.post("/drafts/validation", json={"definition": _pipeline()})
     assert response.status_code == 200
     body = response.json()
     assert body["model_issues"] == []
-    reloaded = client.post("/pipelines/validate", json={"yaml": body["yaml"]}).json()
+    reloaded = client.post("/drafts/validation", json={"yaml": body["yaml"]}).json()
     assert reloaded["definition"] == body["definition"]
     # Multi-line prompts are written as literal blocks.
     assert "prompt_template: |" in body["yaml"]
@@ -270,7 +279,7 @@ def test_validate_returns_canonical_yaml_that_round_trips(client: TestClient) ->
 def test_validate_names_the_offending_node(client: TestClient) -> None:
     broken = _pipeline()
     broken["nodes"][1]["prompt_template"] = "{{ nowhere.output }}"
-    response = client.post("/pipelines/validate", json={"definition": broken})
+    response = client.post("/drafts/validation", json={"definition": broken})
     assert response.status_code == 422
     body = response.json()
     assert body["details"] == {"node_id": "polish"}
@@ -280,14 +289,14 @@ def test_validate_names_the_offending_node(client: TestClient) -> None:
 def test_validate_maps_field_errors_to_their_node(client: TestClient) -> None:
     broken = _pipeline()
     broken["nodes"][1]["model"]["temperature"] = 9
-    body = client.post("/pipelines/validate", json={"definition": broken}).json()
+    body = client.post("/drafts/validation", json={"definition": broken}).json()
     assert body["details"] == {"node_id": "polish"}
     assert body["validations"][0]["field"] == "nodes.1.model.temperature"
 
 
 def test_validate_reports_model_issues_as_warnings(client: TestClient) -> None:
     body = client.post(
-        "/pipelines/validate", json={"definition": _pipeline(model="not-pulled")}
+        "/drafts/validation", json={"definition": _pipeline(model="not-pulled")}
     ).json()
     assert body["model_issues"] == [
         {
@@ -301,10 +310,10 @@ def test_validate_reports_model_issues_as_warnings(client: TestClient) -> None:
 
 
 def test_validate_rejects_bad_yaml_and_needs_exactly_one_input(client: TestClient) -> None:
-    assert client.post("/pipelines/validate", json={"yaml": "nodes: [unclosed"}).status_code == 422
-    assert client.post("/pipelines/validate", json={}).status_code == 422
+    assert client.post("/drafts/validation", json={"yaml": "nodes: [unclosed"}).status_code == 422
+    assert client.post("/drafts/validation", json={}).status_code == 422
     both = {"definition": _pipeline(), "yaml": "x: 1"}
-    assert client.post("/pipelines/validate", json=both).status_code == 422
+    assert client.post("/drafts/validation", json=both).status_code == 422
 
 
 # -- saving ------------------------------------------------------------------
@@ -328,7 +337,7 @@ def test_create_writes_the_file_and_runs_use_it_immediately(
             return f"<{system}>{prompt}"
 
     monkeypatch.setattr(node_types_module, "get_provider", lambda spec: _Echo())
-    answer = client.post("/ask", json={"prompt": "hi", "pipeline_name": "fresh"}).json()
+    answer = client.post("/pipelines/fresh/runs", json={"prompt": "hi"}).json()
     assert answer["final_answer"].startswith("<You are an editor.>Polish this:")
 
 
@@ -616,7 +625,7 @@ def test_delete_moves_the_file_aside_and_drops_it_from_listings(
     names = [p["name"] for p in client.get("/pipelines").json()["pipelines"]]
     assert "fresh" not in names
     assert client.get("/pipelines/fresh").status_code == 404
-    assert client.post("/ask", json={"prompt": "x", "pipeline_name": "fresh"}).status_code == 404
+    assert client.post("/pipelines/fresh/runs", json={"prompt": "x"}).status_code == 404
 
 
 def test_delete_refuses_the_default_pipeline_stale_revisions_and_unknown_names(
@@ -861,7 +870,7 @@ def test_model_limits_endpoint(client: TestClient) -> None:
 def test_validate_warns_when_num_ctx_exceeds_the_model_maximum(client: TestClient) -> None:
     too_big = _pipeline()
     too_big["nodes"][0]["model"]["options"] = {"num_ctx": 32768}
-    body = client.post("/pipelines/validate", json={"definition": too_big}).json()
+    body = client.post("/drafts/validation", json={"definition": too_big}).json()
     assert body["warnings"] == [
         {
             "node_id": "draft",
@@ -872,7 +881,7 @@ def test_validate_warns_when_num_ctx_exceeds_the_model_maximum(client: TestClien
     ]
     fits = _pipeline()
     fits["nodes"][0]["model"]["options"] = {"num_ctx": 4096}
-    assert client.post("/pipelines/validate", json={"definition": fits}).json()["warnings"] == []
+    assert client.post("/drafts/validation", json={"definition": fits}).json()["warnings"] == []
     # A warning never blocks saving.
     assert (
         client.put("/pipelines/fresh", json={"definition": too_big}, headers=CREATE).status_code
@@ -887,7 +896,7 @@ def test_limits_are_best_effort_when_ollama_is_down(client: TestClient) -> None:
     _use_catalog(client, shower=down)
     too_big = _pipeline()
     too_big["nodes"][0]["model"]["options"] = {"num_ctx": 32768}
-    response = client.post("/pipelines/validate", json={"definition": too_big})
+    response = client.post("/drafts/validation", json={"definition": too_big})
     assert response.status_code == 200
     assert response.json()["warnings"] == []
     assert client.get("/models/ollama/llama3").status_code == 404

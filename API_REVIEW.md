@@ -48,7 +48,7 @@ problems are where the parts meet:
 | [API-003](#api-003-status-codes-disagree-for-the-same-kind-of-failure) | WARNING | Status codes disagree for the same kind of failure — ✅ fixed |
 | [API-004](#api-004-get-pipelinesname-doesnt-return-what-put-accepts) | WARNING | `GET /pipelines/{name}` doesn't return what `PUT` accepts — ✅ fixed |
 | [API-005](#api-005-optimistic-concurrency-is-spelled-three-different-ways) | WARNING | Optimistic concurrency is spelled three different ways — ✅ fixed |
-| [API-006](#api-006-rpc-style-endpoints-with-the-pipeline-named-in-the-body) | WARNING | RPC-style endpoints, with the pipeline named in the body |
+| [API-006](#api-006-rpc-style-endpoints-with-the-pipeline-named-in-the-body) | WARNING | RPC-style endpoints, with the pipeline named in the body — ✅ fixed |
 | [API-007](#api-007-the-contract-documentation-contradicts-actual-behaviour) | WARNING | The contract documentation contradicts actual behaviour |
 | [API-008](#api-008-pipelineclient-method-signatures-make-incorrect-calls-easy) | WARNING | `PipelineClient` method signatures make incorrect calls easy |
 | [API-009](#api-009-the-draftops-field-setters-use-string-paths-with-unknown-values) | WARNING | The `draftOps` field setters use string paths with `unknown` values |
@@ -269,6 +269,20 @@ working around them.
 ### API-006: RPC-style endpoints, with the pipeline named in the body
 
 - **Severity**: WARNING
+- **Status**: ✅ Fixed (2026-09-28).
+  - `POST /ask` and `POST /ask/stream` are now one `POST /pipelines/{name}/runs`
+    (body `RunRequest`: `prompt`, `history`, `rerun`). It answers with
+    `RunResponse`, or streams Server-Sent Events when the client prefers
+    `text/event-stream` (by q-value; JSON wins a tie, and `*/*` never
+    streams).
+  - The draft operations moved to their own path space: `/drafts/validation`,
+    `/drafts/prompt-preview` and `/drafts/test-runs`. So `validate`, `preview`
+    and `test` are ordinary pipeline names again.
+  - The wire types are renamed on both sides (`AskRequest`/`AskResponse` →
+    `RunRequest`/`RunResponse`), the router module is `routers/runs.py`, and
+    `pipeline_events` no longer takes the request body.
+  - The client keeps its method names (`ask()`, `askStream()`); reshaping
+    them is API-008.
 - **Principle**: REST URL structure (nouns; the resource goes in the path)
 - **File(s)**:
   - [ask.py:199-210](llm_pipeline/llm_pipeline/routers/ask.py#L199-L210)
@@ -304,7 +318,9 @@ working around them.
   - [api_schemas.py:193](llm_pipeline/llm_pipeline/api_schemas.py#L193)
     (compare [health.py:26-30](llm_pipeline/llm_pipeline/routers/health.py#L26-L30))
 - **Description**:
-  - **Streaming:** three docs say streaming is "node-level, not token-level".
+  - **Streaming:** *(partly resolved by API-006: `apiClient.ts`'s and
+    `types.ts`'s docs were rewritten; `api_schemas.py` still has it)* three
+    docs say streaming is "node-level, not token-level".
     But `node_token` events exist, and `NodeTokenEvent` describes itself as
     token-level streaming. Someone following the `askStream()` doc would never
     handle `node_token`.

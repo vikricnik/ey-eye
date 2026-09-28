@@ -15,7 +15,7 @@ from jinja2.exceptions import SecurityError
 
 import llm_pipeline.dag_builder.node_types as node_types_module
 import llm_pipeline.rate_limit as rate_limit_module
-import llm_pipeline.routers.ask as ask_module
+import llm_pipeline.routers.runs as runs_module
 from llm_pipeline.dag_builder.reasoning import strip_reasoning
 from llm_pipeline.main import app
 from llm_pipeline.model_catalog import CatalogModel, ModelCatalog
@@ -23,6 +23,9 @@ from llm_pipeline.pipeline_config import PipelineDefinition
 from llm_pipeline.pipeline_config.templates import render
 from llm_pipeline.providers import ModelSpec
 from llm_pipeline.settings import settings
+
+# Asks a run to stream its progress as Server-Sent Events.
+STREAM = {"Accept": "text/event-stream"}
 
 CREATE = {"If-None-Match": "*"}  # a save creates only if the pipeline is new
 
@@ -112,9 +115,7 @@ def test_nodes_inherit_the_pipeline_defaults(
     )
     recorder = _Recorder()
     monkeypatch.setattr(node_types_module, "get_provider", recorder.provider_for)
-    assert (
-        client.post("/ask", json={"prompt": "hi", "pipeline_name": "defaults"}).status_code == 200
-    )
+    assert client.post("/pipelines/defaults/runs", json={"prompt": "hi"}).status_code == 200
 
     (spec_a, _, system_a), (spec_b, _, system_b) = recorder.calls
     assert (spec_a.model, spec_a.temperature, system_a) == ("base", 0.6, "Be kind.")
@@ -190,7 +191,7 @@ def test_history_reaches_only_the_nodes_that_include_it(
     monkeypatch.setattr(node_types_module, "get_provider", recorder.provider_for)
     history = [{"prompt": "earlier", "final_answer": "ok", "outputs": {"classify": "OTHER"}}]
     body = client.post(
-        "/ask", json={"prompt": "tell one", "pipeline_name": "chat", "history": history}
+        "/pipelines/chat/runs", json={"prompt": "tell one", "history": history}
     ).json()
 
     classify_prompt, answer_prompt = recorder.calls[0][1], recorder.calls[1][1]
@@ -207,7 +208,13 @@ def test_streamed_runs_also_report_remembered_outputs(
 ) -> None:
     _write(pipelines, _classifier_pipeline())
     monkeypatch.setattr(node_types_module, "get_provider", _Recorder({"m": "STORY"}).provider_for)
-    response = client.post("/ask/stream", json={"prompt": "x", "pipeline_name": "chat"})
+    response = client.post(
+        "/pipelines/chat/runs",
+        json={
+            "prompt": "x",
+        },
+        headers=STREAM,
+    )
     done = _sse(response.text)[-1]
     assert done[0] == "done" and done[1]["remembered"] == {"classify": "STORY"}
 
@@ -220,12 +227,12 @@ def test_older_turns_are_summarized_with_the_chosen_model(
     _write(pipelines, definition)
     _use_catalog(client)
     summarizer = _Recorder({"small": "they talked about cats"})
-    monkeypatch.setattr(ask_module, "get_provider", summarizer.provider_for)
+    monkeypatch.setattr(runs_module, "get_provider", summarizer.provider_for)
     nodes = _Recorder()
     monkeypatch.setattr(node_types_module, "get_provider", nodes.provider_for)
 
     history = [{"prompt": f"q{i}", "final_answer": f"a{i}"} for i in range(1, 4)]
-    client.post("/ask", json={"prompt": "now", "pipeline_name": "chat", "history": history})
+    client.post("/pipelines/chat/runs", json={"prompt": "now", "history": history})
 
     ((spec, summary_prompt, _),) = summarizer.calls
     assert spec.model == "small"
@@ -270,9 +277,7 @@ def test_reasoning_is_stripped_per_pipeline_default_and_node_override(
     monkeypatch.setattr(
         node_types_module, "get_provider", _Recorder({"m": "<think>x</think>Done"}).provider_for
     )
-    outputs = client.post("/ask", json={"prompt": "q", "pipeline_name": "think"}).json()[
-        "node_outputs"
-    ]
+    outputs = client.post("/pipelines/think/runs", json={"prompt": "q"}).json()["node_outputs"]
     assert outputs["a"]["output"] == "Done"
     assert outputs["b"]["output"] == "<think>x</think>Done"
 
@@ -304,7 +309,7 @@ def test_max_concurrency_limits_parallel_model_calls(
                 return "ok"
 
         monkeypatch.setattr(node_types_module, "get_provider", lambda spec: _Slow())
-        assert client.post("/ask", json={"prompt": "q", "pipeline_name": name}).status_code == 200
+        assert client.post(f"/pipelines/{name}/runs", json={"prompt": "q"}).status_code == 200
         return state["peak"]
 
     assert measure("limited") == 1
@@ -364,7 +369,7 @@ def test_an_injected_node_template_fails_the_node_instead_of_running(
     )
     recorder = _Recorder()
     monkeypatch.setattr(node_types_module, "get_provider", recorder.provider_for)
-    response = client.post("/ask", json={"prompt": "x", "pipeline_name": "evil"})
+    response = client.post("/pipelines/evil/runs", json={"prompt": "x"})
     assert response.status_code == 502
     # A template the sandbox refuses fails its node, like any node failure —
     # not an internal error, and named so an editor can point at it.

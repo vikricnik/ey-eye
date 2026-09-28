@@ -14,7 +14,7 @@ import {
   RequestCancelledError,
 } from "@llm-pipeline/client";
 import {
-  formatAskResponse,
+  formatRunResponse,
   formatPreview,
   formatHealth,
   formatPipelineList,
@@ -378,7 +378,7 @@ async function handlePrompt(
     const elapsedMs = Date.now() - startedAt;
     stopSpinner(spinner);
     console.log();
-    console.log(formatAskResponse(response, verbose, elapsedMs));
+    console.log(formatRunResponse(response, verbose, elapsedMs));
     console.log();
     // Only the final answer (the output_node's result) is kept as context
     // for the next turn — intermediate node outputs aren't carried forward.

@@ -54,7 +54,7 @@ pipeline_config/            YAML schema + validation
 routers/                    FastAPI route handlers
 ├── health.py                 GET /health, /pipelines
 ├── editing.py                GET/PUT/DELETE /pipelines/{name}, models, presets, …
-└── ask.py                      POST /ask + prompt/history validation
+└── runs.py                     POST /pipelines/{name}/runs + prompt/history validation
 
 safe_eval.py                Sandboxed expression language for `when`/`exit_when` —
                              never eval(), a small whitelisted AST subset
@@ -98,7 +98,7 @@ between test runs (see `tests/test_error_responses.py`, which uses
 
 ### Why stateless per-request pipeline *selection*?
 
-Every `/ask` call includes `pipeline_name` explicitly, and the server loads/caches
+Every run names its pipeline in the path (`/pipelines/{name}/runs`), and the server loads/caches
 compiled graphs by name rather than mutating a global "currently active"
 pipeline. This matters once you run more than one worker process
 (`uvicorn --workers N`): a global "active pipeline" would live independently
@@ -233,7 +233,7 @@ node leaves them out. Every `llm_call` node must end up with a model.
 
 A pipeline can carry test cases — messages to run it with, and what each
 answer must satisfy. The engine ignores them; editor clients run them
-(`POST /pipelines/test`, the web **Tests** view, the CLI's `/test`) and
+(`POST /drafts/test-runs`, the web **Tests** view, the CLI's `/test`) and
 compare models on them.
 
 ```yaml
@@ -548,20 +548,21 @@ A client that draws the pipeline derives its structure from this definition
 (`detailFromDefinition()` in the shared client package) — the same way it
 draws an unsaved draft.
 
-### `POST /ask`
+### `POST /pipelines/{name}/runs`
 
-Requires an API key if `API_KEYS` is set (see `.env.example`):
+Runs a pipeline. Answered when the run finishes — or, sent with
+`Accept: text/event-stream`, streamed while it runs (see *Streaming a run*
+below). Requires an API key if `API_KEYS` is set (see `.env.example`):
 ```bash
-curl -X POST http://localhost:8000/ask \
+curl -X POST http://localhost:8000/pipelines/consensus-qa/runs \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $API_KEY" \
-  -d '{"prompt": "What year did the Berlin Wall fall?", "pipeline_name": "consensus-qa", "history": []}'
+  -d '{"prompt": "What year did the Berlin Wall fall?", "history": []}'
 ```
 
 ```json
 {
   "prompt": "What year did the Berlin Wall fall?",
-  "pipeline_name": "consensus-qa",
   "history": []
 }
 ```
@@ -601,8 +602,8 @@ longer than the window could hold even at 5 characters per token.
 **Stopping a run.** If the client goes away — a Stop button, Ctrl+C in
 the CLI, a closed tab — the server cancels the run within about half a
 second, and with it the model calls in progress (Ollama stops generating
-when its request is dropped). This holds for `/ask`, `/ask/stream`, the
-OpenAI-compatible endpoint and test runs; see `disconnects.py`.
+when its request is dropped). This holds for runs, answered or streamed,
+the OpenAI-compatible endpoint and test runs; see `disconnects.py`.
 
 **Re-running from a node.** Add `"rerun": {"from_node": "reconcile",
 "outputs": {<node>: <output>, …}}` (typically the previous run's node
@@ -613,20 +614,21 @@ A reused node replays only on its first execution — if a loop sends the run
 back to it, it runs for real — and a reused branch source takes the same
 route as before. See `rerun.py`.
 
-### `POST /ask/stream`
+### Streaming a run
 
-Same request body as `/ask`. Streams progress via Server-Sent Events as
-the pipeline runs, rather than waiting for the whole DAG to finish: when
+The same `POST /pipelines/{name}/runs`, sent with `Accept: text/event-stream`,
+streams progress via Server-Sent Events as the pipeline runs, rather than waiting for the whole DAG to finish: when
 each node starts, the **text each node's model is writing, token by
 token**, when it completes, and the final result. Token streaming needs no
 code in the provider adapters — LangChain chat models stream on their own
 when LangGraph's `messages` stream mode is listening.
 
 ```bash
-curl -N -X POST http://localhost:8000/ask/stream \
+curl -N -X POST http://localhost:8000/pipelines/consensus-qa/runs \
   -H "Content-Type: application/json" \
+  -H "Accept: text/event-stream" \
   -H "Authorization: Bearer $API_KEY" \
-  -d '{"prompt": "What year did the Berlin Wall fall?", "pipeline_name": "consensus-qa", "history": []}'
+  -d '{"prompt": "What year did the Berlin Wall fall?", "history": []}'
 ```
 
 Response body (`Content-Type: text/event-stream`), one SSE event per line-block:
@@ -657,7 +659,7 @@ event: node_complete
 data: {"node": {"node_id": "reconcile", "model_name": "ollama:llama3", "output": "...", "duration_ms": 4230.6}}
 
 event: done
-data: {"pipeline_name": "consensus-qa", "output_node": "reconcile", "final_answer": "...", "node_outputs": {...all four, same shape as /ask...}, "loop_iterations": {}}
+data: {"pipeline_name": "consensus-qa", "output_node": "reconcile", "final_answer": "...", "node_outputs": {...all four, same shape as an answered run...}, "loop_iterations": {}}
 
 ```
 
@@ -667,20 +669,21 @@ Event types:
 |---|---|---|
 | `node_start` | `{"node_id": str, "model_name": str, "attempt": int, "prompt": str, "system": str \| null, "replayed": bool}` | A node is starting its model call, with exactly what the model receives: `prompt` is the rendered template (the run's input and its dependencies' outputs filled in), `system` the node's system prompt — emitted by the node itself (LangGraph's `custom` stream mode), so clients show exactly what is running instead of guessing from the graph shape. Parallel siblings each get one; a node re-run by a loop gets one per iteration; a retry after a failed call sends another with `attempt` 2+ (discard that node's streamed text so far). |
 | `node_token` | `{"node_id": str, "text": str}` | A piece of text the node's model just generated. A node's tokens since its latest `node_start` concatenate to its output so far; `node_complete` then carries the authoritative full output. Parallel nodes' tokens interleave. |
-| `node_complete` | `{"node": NodeOutput}` | Every time a graph node finishes, with its `usage` (see `/ask`) and `replayed`. Synthetic internal nodes (the multi-root fan-out node, loop increment nodes) are filtered out — only real pipeline-defined nodes appear here. |
+| `node_complete` | `{"node": NodeOutput}` | Every time a graph node finishes, with its `usage` (see above) and `replayed`. Synthetic internal nodes (the multi-root fan-out node, loop increment nodes) are filtered out — only real pipeline-defined nodes appear here. |
 | `loop_iteration` | `{"loop_id": str, "iteration": int}` | A loop's increment node fired — it's about to run another iteration. |
-| `done` | Same shape as `AskResponse` | The pipeline finished successfully. Included in full, not just a delta, so a client that only cares about the final result doesn't need to have accumulated every `node_complete` event. |
+| `done` | Same shape as an answered run (`RunResponse`) | The pipeline finished successfully. Included in full, not just a delta, so a client that only cares about the final result doesn't need to have accumulated every `node_complete` event. |
 | `error` | Same `ErrorResponse` shape as every other error in this API | Something failed mid-run. |
 
 **The one thing that's genuinely different from every other endpoint in this
-API**: once a `/ask/stream` response starts, the HTTP status is locked at
-`200` — headers have already gone out, so there's no way to send back a
-different status code partway through. A pipeline failure therefore can't
-`raise HTTPException` the way `/ask` does; it's sent as an `error` SSE event
-within that `200` response instead, carrying the exact same `ErrorResponse`
-payload `/ask` would have returned as an HTTP error body. **Pre-stream**
-failures (unknown pipeline, empty prompt, missing API key, rate limit) still
-behave exactly like `/ask` — real `401`/`404`/`400`/`429`/`422` responses —
+API**: once a streamed run starts, the HTTP status is locked at `200` —
+headers have already gone out, so there's no way to send back a different
+status code partway through. A pipeline failure therefore can't
+`raise HTTPException` the way an answered run does; it's sent as an `error`
+SSE event within that `200` response instead, carrying the exact same
+`ErrorResponse` payload the answered run would have returned as an HTTP
+error body. **Pre-stream** failures (unknown pipeline, empty prompt, missing
+API key, rate limit) still behave exactly like an answered run — real
+`401`/`404`/`400`/`429`/`422` responses —
 since those are all resolved before any streaming has begun.
 
 ## OpenAI-compatible endpoints
@@ -736,11 +739,11 @@ Set `API_KEYS`, or list the actual client origins (e.g.
 | `GET /models` | Models an editor may pick: every model installed on `OLLAMA_BASE_URL`, plus the cloud models listed in `EDITOR_CLOUD_MODELS` (`provider:model`, comma-separated). `?refresh=true` skips the short cache. |
 | `GET /models/ollama/{name}` | An installed Ollama model's limits — max context length, parameter size, quantization, family — for editor hints. 404 when it isn't installed or Ollama can't be reached. |
 | `GET /pipelines/{name}` | The full definition (prompts, options, layout) plus its `revision` and whether the file has YAML comments (`has_comments`) — what `PUT` takes back. |
-| `POST /pipelines/validate` | Body `{"definition": {...}}` or `{"yaml": "..."}`. Validates without saving and returns `{definition, yaml, model_issues, warnings}` — the same call serves live validation, import (YAML in) and export (canonical YAML out). `warnings` flags settings beyond what a model supports (e.g. `num_ctx` above its maximum context) but never blocks a save. A 422 names the offending node in `details.node_id`. |
+| `POST /drafts/validation` | Body `{"definition": {...}}` or `{"yaml": "..."}`. Validates without saving and returns `{definition, yaml, model_issues, warnings}` — the same call serves live validation, import (YAML in) and export (canonical YAML out). `warnings` flags settings beyond what a model supports (e.g. `num_ctx` above its maximum context) but never blocks a save. A 422 names the offending node in `details.node_id`. |
 | `PUT /pipelines/{name}` | Body `{"definition": {...}}`, and a header saying whether this creates or updates: `If-None-Match: *` creates (412 `ALREADY_EXISTS` if the name is taken); `If-Match: "<revision>"` updates only the version you loaded (412 `REVISION_CONFLICT` if someone saved in between; `If-Match: *` updates whatever is there). Neither is `428 PRECONDITION_REQUIRED` — a blind overwrite could undo someone else's save. Writes `pipelines/<name>.yaml` atomically; the response's `ETag` is the new revision, and the next run uses it. |
 | `DELETE /pipelines/{name}` | Moves the file to `pipelines/.deleted/<name>.<timestamp>.yaml` — recoverable by moving it back. `If-Match: "<revision>"` (optional) refuses the delete if the file changed since loaded (412); the server's `DEFAULT_PIPELINE_NAME` can't be deleted (409). The old `?revision=` query is refused (422) rather than ignored. |
-| `POST /pipelines/preview` | Body `{"definition": {...}, "node_id": "...", "prompt": "...", "history": [...], "outputs": {<node>: <text>}}`. What that node would receive — `{prompt, system, missing}` — rendered by the same code a run uses, from a definition that needn't be saved. Inputs with no output given appear as `<node's output>` placeholders (listed in `missing`); older turns a run would summarize are left out (previews never call a model). Needs editing enabled — it renders client-supplied templates. |
-| `POST /pipelines/test` | Body `{"definition": {...}, "cases": [names], "inputs": [messages], "variants": [{"label", "models": {<node>: <model block>}}]}`. Runs the definition's test cases (see "Test cases") — all, or the named ones, plus one-off `inputs` — and again for each variant (the same pipeline with other models for some nodes; at most 3), streaming `case_start` / `case_result` per case and variant, then `tests_done` with per-variant totals. Every variant passes validation and the model allowlist. Needs editing enabled — it runs client-chosen models. |
+| `POST /drafts/prompt-preview` | Body `{"definition": {...}, "node_id": "...", "prompt": "...", "history": [...], "outputs": {<node>: <text>}}`. What that node would receive — `{prompt, system, missing}` — rendered by the same code a run uses, from a definition that needn't be saved. Inputs with no output given appear as `<node's output>` placeholders (listed in `missing`); older turns a run would summarize are left out (previews never call a model). Needs editing enabled — it renders client-supplied templates. |
+| `POST /drafts/test-runs` | Body `{"definition": {...}, "cases": [names], "inputs": [messages], "variants": [{"label", "models": {<node>: <model block>}}]}`. Runs the definition's test cases (see "Test cases") — all, or the named ones, plus one-off `inputs` — and again for each variant (the same pipeline with other models for some nodes; at most 3), streaming `case_start` / `case_result` per case and variant, then `tests_done` with per-variant totals. Every variant passes validation and the model allowlist. Needs editing enabled — it runs client-chosen models. |
 | `GET /presets`, `GET /presets/{name}`, `PUT /presets/{name}`, `DELETE /presets/{name}` | The node library ("saved nodes" in the clients): a node's whole configuration — `model` (with options), `system_prompt`, `prompt_template`, `include_history`, `strip_reasoning`, plus a `description` — stored as `presets/<name>.yaml` (`PRESETS_DIR`). The model passes the allowlist and the prompt must parse; which node outputs it references is checked when it lands in a pipeline. Adding or applying one copies its values into a node; pipelines never reference presets by name. Deleting moves the file to `presets/.deleted/`. Writes are last-write-wins unless you send `If-Match` (the `ETag` from reading it) or `If-None-Match: *`, as for pipelines. |
 
 What a save goes through, in order — and nothing is written unless all of
@@ -796,7 +799,7 @@ helper:
   "error": "Not Found",
   "code": "PIPELINE_NOT_FOUND",
   "message": "No pipeline named 'does-not-exist'",
-  "request": "POST /ask",
+  "request": "POST /pipelines/does-not-exist/runs",
   "exceptionUID": "a1b2c3d4e5f6",
   "details": {},
   "validations": []
@@ -847,7 +850,7 @@ be added, so a client should handle a code it doesn't know by its `status`.
 | `PIPELINE_RUN_FAILED` | `502` | A node fails — its model call after retries are exhausted, or its prompt can't be rendered — or a loop hits `max_iterations` with `on_max_iterations: fail` (`details` names the node or loop), or no `output_node` candidate produced a result |
 | `REQUEST_CANCELLED` | `499` | The client disconnected mid-run — logged only, nobody receives it |
 
-`pipeline_name` is validated against a strict filename-safe pattern
+A pipeline name is validated against a strict filename-safe pattern
 (`^[a-zA-Z0-9_-]+$`) before being used to build a filesystem path.
 
 Every endpoint also documents its possible error responses in OpenAPI via
@@ -908,7 +911,7 @@ there.
 
 ## Robustness & security features
 
-- **Authentication** (`auth.py`) — `/ask` and `/pipelines/*` require an API
+- **Authentication** (`auth.py`) — every endpoint except `/health` requires an API
   key via `Authorization: Bearer <key>` or `X-API-Key: <key>`, checked with
   constant-time comparison (`secrets.compare_digest`). **Disabled by default**
   (empty `API_KEYS`) for local dev convenience — a startup warning is logged
@@ -936,7 +939,7 @@ there.
 - **Startup pipeline validation** — every `pipelines/*.yaml` file is
   re-validated (schema only, no real model calls) when the server starts;
   failures are logged clearly rather than only surfacing on first request.
-- **Path-traversal safety** — `pipeline_name` is validated against
+- **Path-traversal safety** — a pipeline name is validated against
   `^[a-zA-Z0-9_-]+$` before being used to build a filesystem path.
 - **Read-only, stateless endpoints** — no "upload a pipeline" or "activate a
   pipeline" mutation endpoint exists. Treat pipeline YAML files as
@@ -999,7 +1002,7 @@ history:
 - `turn_template` variables: `prompt`, `answer`, and `outputs` (the remembered
   node outputs of that turn, e.g. `{{ outputs.classify }}`). The default
   template lists remembered outputs between the prompt and the answer.
-- **Remembered outputs**: `/ask` and the stream's `done` event return
+- **Remembered outputs**: a run's response and the stream's `done` event return
   `remembered: {node: output}`; clients store it with the turn and send it
   back as that turn's `outputs`. Both bundled clients do this.
 - **Summaries** cost one model call per message once the conversation no

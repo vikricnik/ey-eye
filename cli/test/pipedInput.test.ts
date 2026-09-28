@@ -39,7 +39,7 @@ before(async () => {
           has_comments: false,
         });
       }
-      if (req.url === "/ask") {
+      if (req.url === "/pipelines/p/runs") {
         const { prompt } = JSON.parse(body) as { prompt: string };
         // Slow enough that the next piped line arrives mid-run.
         setTimeout(

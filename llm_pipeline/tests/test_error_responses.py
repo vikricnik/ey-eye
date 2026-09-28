@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 import llm_pipeline
 import llm_pipeline.rate_limit as rate_limit_module
-import llm_pipeline.routers.ask as ask_module
+import llm_pipeline.routers.runs as runs_module
 from llm_pipeline.api_error import STATUS_BY_CODE
 from llm_pipeline.api_schemas import ErrorCode
 from llm_pipeline.error_handling import register_exception_handlers
@@ -74,9 +74,7 @@ def _assert_matches_error_shape(body: dict[str, object]) -> None:
 
 
 def test_pipeline_not_found_matches_error_shape(client: TestClient) -> None:
-    response = client.post(
-        "/ask", json={"prompt": "hi", "pipeline_name": "does-not-exist", "history": []}
-    )
+    response = client.post("/pipelines/does-not-exist/runs", json={"prompt": "hi", "history": []})
     assert response.status_code == 404
     body = response.json()
     _assert_matches_error_shape(body)
@@ -84,14 +82,12 @@ def test_pipeline_not_found_matches_error_shape(client: TestClient) -> None:
     assert body["error"] == "Not Found"
     assert body["code"] == "PIPELINE_NOT_FOUND"
     assert "does-not-exist" in body["message"]
-    assert body["request"] == "POST /ask"
+    assert body["request"] == "POST /pipelines/does-not-exist/runs"
     assert body["validations"] == []
 
 
 def test_empty_prompt_matches_error_shape(client: TestClient) -> None:
-    response = client.post(
-        "/ask", json={"prompt": "   ", "pipeline_name": "anything", "history": []}
-    )
+    response = client.post("/pipelines/anything/runs", json={"prompt": "   ", "history": []})
     assert response.status_code == 400
     body = response.json()
     _assert_matches_error_shape(body)
@@ -105,9 +101,7 @@ def test_an_oversized_prompt_is_input_too_large(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(settings, "max_prompt_length", 10)
-    response = client.post(
-        "/ask", json={"prompt": "x" * 11, "pipeline_name": "simple-local", "history": []}
-    )
+    response = client.post("/pipelines/simple-local/runs", json={"prompt": "x" * 11, "history": []})
     assert response.status_code == 400
     assert response.json()["code"] == "INPUT_TOO_LARGE"
 
@@ -115,10 +109,10 @@ def test_an_oversized_prompt_is_input_too_large(
 def test_malformed_request_body_matches_error_shape_with_validations(
     client: TestClient,
 ) -> None:
-    """Missing required field `pipeline_name` — FastAPI's automatic 422 must
+    """Missing required field `prompt` — FastAPI's automatic 422 must
     be mapped into the same ErrorResponse contract, with each individual
     field problem populated as a ValidationIssue in `validations`."""
-    response = client.post("/ask", json={"prompt": "hi"})
+    response = client.post("/pipelines/simple-local/runs", json={"history": []})
     assert response.status_code == 422
     body = response.json()
     _assert_matches_error_shape(body)
@@ -128,16 +122,14 @@ def test_malformed_request_body_matches_error_shape_with_validations(
     assert len(body["validations"]) >= 1
     issue = body["validations"][0]
     assert set(issue.keys()) == {"field", "message", "type"}
-    assert any("pipeline_name" in v["field"] for v in body["validations"])
+    assert any("prompt" in v["field"] for v in body["validations"])
 
 
 def test_missing_api_key_matches_error_shape(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(settings, "api_keys", "secret-key")
-    response = client.post(
-        "/ask", json={"prompt": "hi", "pipeline_name": "anything", "history": []}
-    )
+    response = client.post("/pipelines/anything/runs", json={"prompt": "hi", "history": []})
     assert response.status_code == 401
     body = response.json()
     _assert_matches_error_shape(body)
@@ -221,16 +213,18 @@ def test_an_unexpected_failure_during_a_run_is_a_500_that_keeps_its_details_priv
     def broken(definition: object) -> None:
         raise RuntimeError("secret internals")
 
-    monkeypatch.setattr(ask_module, "_run_config", broken)
-    run = {"prompt": "hi", "pipeline_name": "simple-local", "history": []}
+    monkeypatch.setattr(runs_module, "_run_config", broken)
+    run = {"prompt": "hi", "history": []}
 
-    answered = client.post("/ask", json=run)
+    answered = client.post("/pipelines/simple-local/runs", json=run)
     assert answered.status_code == 500
     _assert_matches_error_shape(answered.json())
     assert answered.json()["code"] == "INTERNAL_ERROR"
     assert "secret internals" not in answered.text
 
-    streamed = client.post("/ask/stream", json=run)
+    streamed = client.post(
+        "/pipelines/simple-local/runs", json=run, headers={"Accept": "text/event-stream"}
+    )
     error_block = next(b for b in streamed.text.split("\n\n") if b.startswith("event: error"))
     event = json.loads(error_block.split("data: ", 1)[1])
     assert event["status"] == 500 and event["code"] == "INTERNAL_ERROR"
@@ -240,8 +234,6 @@ def test_an_unexpected_failure_during_a_run_is_a_500_that_keeps_its_details_priv
 def test_exception_uid_is_consistent_within_one_request(client: TestClient) -> None:
     """exceptionUID should match X-Request-ID for the same request, so ops
     can correlate an error body directly with server log lines."""
-    response = client.post(
-        "/ask", json={"prompt": "hi", "pipeline_name": "does-not-exist", "history": []}
-    )
+    response = client.post("/pipelines/does-not-exist/runs", json={"prompt": "hi", "history": []})
     body = response.json()
     assert response.headers.get("X-Request-ID") == body["exceptionUID"]

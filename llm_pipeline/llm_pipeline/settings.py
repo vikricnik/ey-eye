@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     # is DISABLED — fine for local development, but a real gap in anything
     # reachable beyond localhost. Set this to enable a startup warning to
     # stop, and require `Authorization: Bearer <key>` (or `X-API-Key: <key>`)
-    # on /ask, /pipelines, and /pipelines/{name}. /health stays open, since
+    # on every endpoint except /health, which stays open since
     # load balancers/orchestrators typically probe it without credentials.
     api_keys: str = ""
 

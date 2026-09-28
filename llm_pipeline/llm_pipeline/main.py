@@ -4,7 +4,7 @@ app.state.pipeline_cache (dependency-injected into routers via
 pipeline_loader.get_pipeline_cache — see that module's docstring for why
 this replaced a bare module-level global), registers exception handlers,
 and includes the routers. No route logic or business logic lives here
-directly — see routers/health.py, routers/ask.py, error_handling.py,
+directly — see routers/health.py, routers/runs.py, error_handling.py,
 pipeline_loader.py.
 """
 
@@ -21,7 +21,7 @@ from llm_pipeline.model_catalog import ModelCatalog
 from llm_pipeline.pipeline_config import load_pipeline_definition
 from llm_pipeline.pipeline_loader import PipelineCache
 from llm_pipeline.pipeline_store import PipelineStore
-from llm_pipeline.routers import ask, editing, health, openai_compat
+from llm_pipeline.routers import editing, health, openai_compat, runs
 from llm_pipeline.settings import settings
 
 configure_logging()
@@ -79,7 +79,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
     # Same injection pattern for the editor's collaborators: the store
     # writes through the SAME cache the run endpoints read from, so a save
-    # invalidates exactly the compiled graph that /ask would use.
+    # invalidates exactly the compiled graph that the next run would use.
     app.state.pipeline_store = PipelineStore(
         pipelines_dir=settings.pipelines_path,
         presets_dir=settings.presets_path,
@@ -118,7 +118,7 @@ def create_app() -> FastAPI:
     register_exception_handlers(app)
 
     app.include_router(health.router)
-    app.include_router(ask.router)
+    app.include_router(runs.router)
     app.include_router(editing.router)
     app.include_router(openai_compat.router)
 

@@ -17,6 +17,9 @@ from llm_pipeline.providers import ModelSpec
 from llm_pipeline.rerun import downstream, replay_outputs
 from llm_pipeline.settings import settings
 
+# Asks a run to stream its progress as Server-Sent Events.
+STREAM = {"Accept": "text/event-stream"}
+
 FIXTURES = Path(__file__).parent / "fixtures" / "pipelines"
 
 
@@ -95,10 +98,9 @@ def test_rerun_calls_only_the_node_and_what_follows(
     calls = _Calls({("llama3", 0.1): ["new b"], ("llama3", 0.0): ["reconciled"]})
     monkeypatch.setattr(node_types_module, "get_provider", calls.provider_for)
     response = client.post(
-        "/ask/stream",
+        "/pipelines/consensus-qa/runs",
         json={
             "prompt": "q",
-            "pipeline_name": "consensus-qa",
             "rerun": {
                 "from_node": "answer_b",
                 "outputs": {
@@ -109,6 +111,7 @@ def test_rerun_calls_only_the_node_and_what_follows(
                 },
             },
         },
+        headers=STREAM,
     )
     events = _events(response.text)
     assert events[-1][0] == "done"
@@ -137,10 +140,9 @@ def test_a_loop_coming_back_to_a_reused_node_runs_it_for_real(
     )
     monkeypatch.setattr(node_types_module, "get_provider", calls.provider_for)
     response = client.post(
-        "/ask",
+        "/pipelines/iterative-refinement/runs",
         json={
             "prompt": "q",
-            "pipeline_name": "iterative-refinement",
             "rerun": {"from_node": "critique", "outputs": {"generate": "old draft"}},
         },
     )
@@ -159,10 +161,9 @@ def test_a_reused_branch_source_takes_the_same_route(
     calls = _Calls({("qwen3-coder:30b", 0.2): ["try restarting"]})
     monkeypatch.setattr(node_types_module, "get_provider", calls.provider_for)
     response = client.post(
-        "/ask",
+        "/pipelines/support-router/runs",
         json={
             "prompt": "my laptop is broken",
-            "pipeline_name": "support-router",
             "rerun": {"from_node": "tech_support_flow", "outputs": {"classify": "TECHNICAL"}},
         },
     )
@@ -172,8 +173,8 @@ def test_a_reused_branch_source_takes_the_same_route(
 
 def test_rerun_from_an_unknown_node_is_rejected(client: TestClient) -> None:
     response = client.post(
-        "/ask",
-        json={"prompt": "q", "pipeline_name": "consensus-qa", "rerun": {"from_node": "nope"}},
+        "/pipelines/consensus-qa/runs",
+        json={"prompt": "q", "rerun": {"from_node": "nope"}},
     )
     assert response.status_code == 404
     assert response.json()["code"] == "NODE_NOT_FOUND"
@@ -191,7 +192,7 @@ def test_preview_renders_what_the_node_would_receive(client: TestClient) -> None
     definition = _definition("consensus-qa.yaml")
     definition["defaults"] = {"system_prompt": "Be exact."}
     response = client.post(
-        "/pipelines/preview",
+        "/drafts/prompt-preview",
         json={
             "definition": definition,
             "node_id": "reconcile",
@@ -211,18 +212,20 @@ def test_preview_renders_what_the_node_would_receive(client: TestClient) -> None
 
 def test_preview_problems(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     definition = _definition("simple-local.yaml")
-    unknown = client.post("/pipelines/preview", json={"definition": definition, "node_id": "x"})
+    unknown = client.post("/drafts/prompt-preview", json={"definition": definition, "node_id": "x"})
     assert unknown.status_code == 404
     assert unknown.json()["code"] == "NODE_NOT_FOUND"
 
     definition["nodes"][0]["prompt_template"] = "{{ input.__class__.__mro__ }}"
-    unsafe = client.post("/pipelines/preview", json={"definition": definition, "node_id": "answer"})
+    unsafe = client.post(
+        "/drafts/prompt-preview", json={"definition": definition, "node_id": "answer"}
+    )
     assert unsafe.status_code == 422 and "can't be rendered" in unsafe.json()["message"]
     assert unsafe.json()["code"] == "TEMPLATE_RENDER_FAILED"
 
     monkeypatch.setattr(settings, "pipeline_editing_enabled", False)
     blocked = client.post(
-        "/pipelines/preview", json={"definition": definition, "node_id": "answer"}
+        "/drafts/prompt-preview", json={"definition": definition, "node_id": "answer"}
     )
     assert blocked.status_code == 403
     assert blocked.json()["code"] == "EDITING_DISABLED"

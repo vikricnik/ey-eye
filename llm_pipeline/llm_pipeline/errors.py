@@ -5,7 +5,7 @@ class PipelineExecutionError(Exception):
     left to return.
 
     node_id/loop_id optionally identify WHICH node or loop the failure is
-    attributable to, when that's known at the raise site — routers/ask.py
+    attributable to, when that's known at the raise site — routers/runs.py
     surfaces whichever is set in the streamed error event's `details` so a
     live-status client (the visual DAG graph) can mark that specific node
     as failed instead of only knowing the run as a whole failed."""

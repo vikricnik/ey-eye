@@ -1,3 +1,9 @@
+"""
+Running a pipeline: POST /pipelines/{name}/runs — answered when the run
+finishes, or streamed as Server-Sent Events while it runs when the client
+prefers `text/event-stream` (see wants_event_stream).
+"""
+
 import logging
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import aclosing
@@ -11,14 +17,14 @@ from pydantic import BaseModel
 
 from llm_pipeline.api_error import ApiError
 from llm_pipeline.api_schemas import (
-    AskRequest,
-    AskResponse,
     ErrorCode,
     LoopIterationEvent,
     NodeCompleteEvent,
     NodeOutputDTO,
     NodeStartEvent,
     NodeTokenEvent,
+    RunRequest,
+    RunResponse,
     StreamDoneEvent,
 )
 from llm_pipeline.auth import require_api_key
@@ -43,7 +49,7 @@ logger: logging.Logger = logging.getLogger("llm_pipeline")
 router = APIRouter()
 
 
-def _validate_prompt_and_history(req: AskRequest) -> None:
+def _validate_prompt_and_history(req: RunRequest) -> None:
     if not req.prompt.strip():
         raise ApiError(ErrorCode.INPUT_INVALID, "prompt cannot be empty")
 
@@ -123,20 +129,19 @@ def _remembered(
     }
 
 
-async def prepare_ask(
-    req: AskRequest, cache: PipelineCache
+async def prepare_run(
+    name: str, req: RunRequest, cache: PipelineCache
 ) -> tuple[PipelineDefinition, CompiledStateGraph, PipelineState]:
-    """Shared setup for both /ask and /ask/stream: validates the request,
-    resolves the pipeline, and builds the initial LangGraph state. Every
+    """Shared setup for a run, answered or streamed: validates the request,
+    resolves pipeline `name`, and builds the initial LangGraph state. Every
     error raised here is an ApiError with the correct status and code —
-    this always runs BEFORE either endpoint has sent any response
-    (streaming or not), so raising here is always safe. Once /ask/stream
-    starts actually streaming, that safety no longer holds — see
-    pipeline_events' docstring."""
+    this always runs BEFORE any response has been sent (streaming or not),
+    so raising here is always safe. Once a run starts actually streaming,
+    that safety no longer holds — see pipeline_events' docstring."""
     _validate_prompt_and_history(req)
 
     try:
-        definition, graph = cache.get(req.pipeline_name)
+        definition, graph = cache.get(name)
     except PipelineNotFoundError as e:
         raise ApiError(ErrorCode.PIPELINE_NOT_FOUND, str(e)) from e
 
@@ -157,7 +162,7 @@ async def prepare_ask(
     return definition, graph, initial_state
 
 
-def _replay(req: AskRequest, definition: PipelineDefinition) -> dict[str, str]:
+def _replay(req: RunRequest, definition: PipelineDefinition) -> dict[str, str]:
     """A re-run's reused outputs (see rerun.py) — empty for a normal run."""
     if req.rerun is None:
         return {}
@@ -211,25 +216,13 @@ def _resolve_output_node(
     return None
 
 
-@router.post(
-    "/ask",
-    response_model=AskResponse,
-    dependencies=[Depends(require_api_key), Depends(enforce_rate_limit)],
-    responses={k: ERROR_RESPONSES[k] for k in (400, 401, 404, 422, 429, 500, 502)},
-)
-async def ask(
-    req: AskRequest,
-    request: Request,
-    cache: PipelineCache = Depends(get_pipeline_cache),
-) -> AskResponse:
-    return await run_ask(req, cache, request)
-
-
-async def run_ask(req: AskRequest, cache: PipelineCache, request: Request) -> AskResponse:
-    """One whole run, answered when it finishes — /ask, and the OpenAI-
-    compatible endpoint when it isn't streaming. Stopped if the client
-    disconnects (see disconnects.py). Raises ApiError."""
-    definition, graph, initial_state = await prepare_ask(req, cache)
+async def run_pipeline(
+    name: str, req: RunRequest, cache: PipelineCache, request: Request
+) -> RunResponse:
+    """One whole run, answered when it finishes — a run that isn't
+    streamed, here or through the OpenAI-compatible endpoint. Stopped if the
+    client disconnects (see disconnects.py). Raises ApiError."""
+    definition, graph, initial_state = await prepare_run(name, req, cache)
 
     try:
         # graph.ainvoke's declared return type is generic (LangGraph doesn't
@@ -245,10 +238,10 @@ async def run_ask(req: AskRequest, cache: PipelineCache, request: Request) -> As
     except HTTPException:
         raise  # the client disconnected
     except PipelineExecutionError as e:
-        logger.exception(f"Pipeline '{req.pipeline_name}' run failed")
+        logger.exception(f"Pipeline '{name}' run failed")
         raise ApiError(ErrorCode.PIPELINE_RUN_FAILED, str(e), details=_failure_details(e)) from e
     except Exception as e:
-        logger.exception(f"Pipeline '{req.pipeline_name}' run failed unexpectedly")
+        logger.exception(f"Pipeline '{name}' run failed unexpectedly")
         raise ApiError(ErrorCode.INTERNAL_ERROR, UNEXPECTED_RUN_FAILURE) from e
 
     node_outputs = final_state["node_outputs"]
@@ -261,7 +254,7 @@ async def run_ask(req: AskRequest, cache: PipelineCache, request: Request) -> As
             f"({', '.join(definition.output_node_candidates)}) produced a result",
         )
 
-    return AskResponse(
+    return RunResponse(
         pipeline_name=definition.name,
         output_node=resolved_output_node,
         final_answer=node_outputs[resolved_output_node]["output"],
@@ -329,7 +322,6 @@ def message_text(message: object) -> str:
 
 async def pipeline_events(
     request: Request,
-    req: AskRequest,
     definition: PipelineDefinition,
     graph: CompiledStateGraph,
     initial_state: PipelineState,
@@ -350,13 +342,13 @@ async def pipeline_events(
 
     Ends with a `done` event carrying the complete result.
 
-    CRITICAL DIFFERENCE FROM /ask'S ERROR HANDLING: by the time this
+    CRITICAL DIFFERENCE FROM AN ANSWERED RUN'S ERROR HANDLING: by the time this
     generator starts running, StreamingResponse has already sent a 200
     status and started the response body — there is no way to change the
     HTTP status code partway through a response. So failures here can't
-    `raise HTTPException` the way /ask does; they're instead sent as an
-    `error` SSE event carrying the same ErrorResponse shape /ask would have
-    returned as an HTTP error, and the generator then simply stops (ending
+    `raise HTTPException` the way an answered run does; they're instead sent
+    as an `error` SSE event carrying the same ErrorResponse shape it would
+    have returned as an HTTP error, and the generator then simply stops (ending
     the stream) rather than propagating the exception further.
     """
     node_outputs: dict[str, NodeResult] = {}
@@ -383,7 +375,7 @@ async def pipeline_events(
                 part = extract_stream_part(step)
                 if part is None:
                     logger.warning(
-                        f"[stream:{req.pipeline_name}] unrecognized astream() chunk shape: "
+                        f"[stream:{definition.name}] unrecognized astream() chunk shape: "
                         f"{type(step).__name__} = {step!r}"
                     )
                     continue
@@ -442,7 +434,7 @@ async def pipeline_events(
                     # Anything else (e.g. the multi-root fan-out node's empty
                     # `{}` update) carries no client-visible information — skip.
     except PipelineExecutionError as e:
-        logger.exception(f"Pipeline '{req.pipeline_name}' stream failed")
+        logger.exception(f"Pipeline '{definition.name}' stream failed")
         yield (
             "error",
             build_error_response(
@@ -451,7 +443,7 @@ async def pipeline_events(
         )
         return
     except Exception:
-        logger.exception(f"Pipeline '{req.pipeline_name}' stream failed unexpectedly")
+        logger.exception(f"Pipeline '{definition.name}' stream failed unexpectedly")
         yield (
             "error",
             build_error_response(request, ErrorCode.INTERNAL_ERROR, UNEXPECTED_RUN_FAILURE),
@@ -486,45 +478,78 @@ async def pipeline_events(
 
 async def _stream_pipeline_run(
     request: Request,
-    req: AskRequest,
     definition: PipelineDefinition,
     graph: CompiledStateGraph,
     initial_state: PipelineState,
 ) -> AsyncGenerator[str, None]:
     """pipeline_events as Server-Sent Events."""
-    async for event_type, data in pipeline_events(request, req, definition, graph, initial_state):
+    async for event_type, data in pipeline_events(request, definition, graph, initial_state):
         yield sse_event(event_type, data)
 
 
+def _quality(accept: str, *media_types: str) -> float:
+    """The highest q-value the Accept header gives any of `media_types`
+    (0 when it names none of them)."""
+    best = 0.0
+    for part in accept.split(","):
+        media_type, *params = (piece.strip() for piece in part.split(";"))
+        if media_type.lower() not in media_types:
+            continue
+        quality = 1.0
+        for param in params:
+            key, _, value = param.partition("=")
+            if key.strip().lower() == "q":
+                try:
+                    quality = float(value)
+                except ValueError:
+                    quality = 0.0
+        best = max(best, quality)
+    return best
+
+
+def wants_event_stream(request: Request) -> bool:
+    """Whether the client prefers the run streamed as Server-Sent Events:
+    it accepts `text/event-stream` more than JSON. JSON wins a tie, and
+    `*/*` alone is no request for a stream."""
+    accept = request.headers.get("accept", "")
+    return _quality(accept, "text/event-stream") > _quality(
+        accept, "application/json", "application/*", "*/*"
+    )
+
+
 @router.post(
-    "/ask/stream",
+    "/pipelines/{name}/runs",
+    response_model=RunResponse,
     dependencies=[Depends(require_api_key), Depends(enforce_rate_limit)],
-    # Only PRE-stream errors are documented here (400/401/404/422/429) —
-    # once streaming actually starts the HTTP status is always 200
-    # regardless of what happens next; execution-time failures surface as
-    # an `error` SSE event within that 200 response instead, not as a
-    # different HTTP status. See pipeline_events' docstring.
+    # A streamed run's status is decided before streaming starts: only these
+    # pre-stream errors (and 200) apply to it. Execution failures then
+    # arrive as an `error` event within the 200 — see pipeline_events.
     responses={
-        **{k: ERROR_RESPONSES[k] for k in (400, 401, 404, 422, 429)},
+        **{k: ERROR_RESPONSES[k] for k in (400, 401, 404, 422, 429, 500, 502)},
         200: {
             "content": {"text/event-stream": {}},
             "description": (
-                "SSE stream: node_start / node_token / node_complete / loop_iteration "
-                "events as the pipeline runs, "
-                "then either a done event (success) or an error event (failure)"
+                "The finished run — or, with `Accept: text/event-stream`, the run as "
+                "it happens: node_start / node_token / node_complete / loop_iteration "
+                "events, then a done event (success) or an error event (failure)"
             ),
         },
     },
 )
-async def ask_stream(
-    req: AskRequest,
+async def create_run(
+    name: str,
+    req: RunRequest,
     request: Request,
     cache: PipelineCache = Depends(get_pipeline_cache),
-) -> StreamingResponse:
-    definition, graph, initial_state = await prepare_ask(req, cache)
+) -> RunResponse | StreamingResponse:
+    """Runs pipeline `name` on `prompt` — answered when it finishes, or
+    streamed as it runs when the client prefers `text/event-stream`."""
+    if not wants_event_stream(request):
+        return await run_pipeline(name, req, cache, request)
+    definition, graph, initial_state = await prepare_run(name, req, cache)
     return StreamingResponse(
         until_disconnected(
-            request, _stream_pipeline_run(request, req, definition, graph, initial_state)
+            request, _stream_pipeline_run(request, definition, graph, initial_state)
         ),
         media_type="text/event-stream",
         headers={

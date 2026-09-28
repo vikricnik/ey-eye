@@ -91,7 +91,7 @@ class NodeBuilder(Protocol):
 
 # The `custom` stream-mode payload a node emits the moment it actually
 # starts work (and again, with a higher `attempt`, before each retry) —
-# routers/ask.py turns it into a `node_start` SSE event. This is what lets
+# routers/runs.py turns it into a `node_start` SSE event. This is what lets
 # clients show a node as running from a real server signal rather than
 # guessing from the graph shape.
 NODE_START_EVENT = "node_start"
