@@ -941,9 +941,15 @@ there.
   failures are logged clearly rather than only surfacing on first request.
 - **Path-traversal safety** — a pipeline name is validated against
   `^[a-zA-Z0-9_-]+$` before being used to build a filesystem path.
-- **Read-only, stateless endpoints** — no "upload a pipeline" or "activate a
-  pipeline" mutation endpoint exists. Treat pipeline YAML files as
-  version-controlled, code-reviewed artifacts baked into the deployment.
+- **Read-only unless editing is enabled** — out of the box nothing writes a
+  file: saving and deleting pipelines and presets (`PUT`/`DELETE` on
+  `/pipelines/{name}` and `/presets/{name}`), and the `/drafts/…` previews
+  and test runs that render or run client-supplied templates, answer 403
+  `EDITING_DISABLED` until `PIPELINE_EDITING_ENABLED=true` — and stay
+  refused while CORS allows every origin without `API_KEYS`. There is no
+  "activate a pipeline" endpoint: every run names its pipeline. Where
+  pipeline YAML files should stay version-controlled, code-reviewed
+  artifacts baked into the deployment, leave editing off.
 - **Loop/branch conditions never use `eval()`** — `safe_eval.py`'s small
   sandboxed AST-based evaluator is the only thing that runs YAML-supplied
   expressions.

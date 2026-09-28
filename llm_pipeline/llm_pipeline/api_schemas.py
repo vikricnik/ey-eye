@@ -84,12 +84,17 @@ class RunResponse(BaseModel):
 # Sent Events, one event per line below
 # ---------------------------------------------------------------------------
 #
-# Node-level streaming, not token-level: each event fires when a graph node
-# FINISHES, not as an individual LLM streams its own tokens. This works
-# uniformly across every provider (Ollama/OpenAI/Anthropic/Gemini/Copilot)
-# via LangGraph's own astream() without needing each provider adapter to
-# implement token streaming individually — see dag_builder's module docs
-# for why that's a deliberately separate, larger undertaking left for later.
+# Per node: node_start when it begins calling its model (again, with a
+# higher `attempt`, before each retry), node_token as its model generates
+# text, node_complete when it finishes. Loops add loop_iteration. The run
+# ends with done (success) or error (failure) — see routers/runs.py's
+# pipeline_events for how each comes from LangGraph's astream().
+#
+# Token streaming needs no code in the provider adapters: every bundled
+# provider wraps a LangChain chat model, and those stream on their own when
+# LangGraph's `messages` stream mode is listening. A provider that doesn't
+# (a plain-text fake, say) just sends no node_token events — node_complete
+# always carries the node's full output.
 #
 # Wire format per event:
 #   event: <event_type>

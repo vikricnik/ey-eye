@@ -49,7 +49,7 @@ problems are where the parts meet:
 | [API-004](#api-004-get-pipelinesname-doesnt-return-what-put-accepts) | WARNING | `GET /pipelines/{name}` doesn't return what `PUT` accepts — ✅ fixed |
 | [API-005](#api-005-optimistic-concurrency-is-spelled-three-different-ways) | WARNING | Optimistic concurrency is spelled three different ways — ✅ fixed |
 | [API-006](#api-006-rpc-style-endpoints-with-the-pipeline-named-in-the-body) | WARNING | RPC-style endpoints, with the pipeline named in the body — ✅ fixed |
-| [API-007](#api-007-the-contract-documentation-contradicts-actual-behaviour) | WARNING | The contract documentation contradicts actual behaviour |
+| [API-007](#api-007-the-contract-documentation-contradicts-actual-behaviour) | WARNING | The contract documentation contradicts actual behaviour — ✅ fixed |
 | [API-008](#api-008-pipelineclient-method-signatures-make-incorrect-calls-easy) | WARNING | `PipelineClient` method signatures make incorrect calls easy |
 | [API-009](#api-009-the-draftops-field-setters-use-string-paths-with-unknown-values) | WARNING | The `draftOps` field setters use string paths with `unknown` values |
 | [API-010](#api-010-wire-types-are-untyped-on-the-server-and-hand-copied-under-different-names-in-typescript) | WARNING | Wire types are untyped on the server and hand-copied under different names in TypeScript |
@@ -309,6 +309,16 @@ working around them.
 ### API-007: The contract documentation contradicts actual behaviour
 
 - **Severity**: WARNING
+- **Status**: ✅ Fixed (2026-09-28).
+  - Streaming: API-006 corrected `apiClient.ts` and `types.ts`. The last
+    stale block, in `api_schemas.py`, now describes the real event sequence
+    and how token streaming works with no provider-adapter code. It had also
+    pointed at a `dag_builder` doc that never said what it claimed.
+  - `PipelineNodeInfo.model` went away with API-004.
+  - A repo-wide search finds no other "node-level, not token-level" claim.
+  - Also fixed: the README's security list still called the server
+    "read-only… no upload endpoint". It now describes the editing endpoints
+    and their `PIPELINE_EDITING_ENABLED` / CORS gates.
 - **Principle**: Self-documenting interfaces; misleading documentation
 - **File(s)**:
   - [api_schemas.py:85-90](llm_pipeline/llm_pipeline/api_schemas.py#L85-L90)
