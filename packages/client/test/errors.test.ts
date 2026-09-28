@@ -4,7 +4,7 @@ import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, describe, it } from "node:test";
 
-import { PipelineApiError, PipelineClient } from "../src/apiClient.js";
+import { PipelineApiError, PipelineClient, ServerUnreachableError } from "../src/apiClient.js";
 import type { ApiErrorBody } from "../src/types.js";
 
 function errorBody(status: number, code: ApiErrorBody["code"], message: string, details = {}): ApiErrorBody {
@@ -60,7 +60,7 @@ async function rejection(promise: Promise<unknown>): Promise<PipelineApiError> {
 describe("error codes", () => {
   it("are exposed on a failed request", async () => {
     const client = new PipelineClient(base);
-    const err = await rejection(client.savePipeline({ name: "fresh", nodes: [], output_node: "a" }, null));
+    const err = await rejection(client.createPipeline({ name: "fresh", nodes: [], output_node: "a" }));
     assert.equal(err.code, "ALREADY_EXISTS");
     assert.equal(err.statusCode, 412);
     assert.equal(err.serverMessage, "pipeline 'fresh' already exists");
@@ -72,7 +72,7 @@ describe("error codes", () => {
     const seen: string[] = [];
     const err = await rejection(
       (async () => {
-        for await (const event of client.askStream("q", "p")) seen.push(event.type);
+        for await (const event of client.askStream({ pipeline: "p", prompt: "q" })) seen.push(event.type);
       })()
     );
     assert.deepEqual(seen, []);
@@ -80,5 +80,27 @@ describe("error codes", () => {
     assert.equal(err.statusCode, 502);
     assert.equal(err.serverMessage, "Node 'a' failed");
     assert.deepEqual(err.details, { node_id: "a" });
+  });
+});
+
+describe("an unreachable server", () => {
+  it("is its own error type, not an API error with no status", async () => {
+    // A port that was just free: nothing is listening on it.
+    const probe = createServer();
+    await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
+    const port = (probe.address() as AddressInfo).port;
+    await new Promise<void>((resolve) => probe.close(() => resolve()));
+    const client = new PipelineClient(`http://127.0.0.1:${port}`);
+
+    for (const call of [
+      () => client.listPipelines(),
+      async () => {
+        for await (const _event of client.askStream({ pipeline: "p", prompt: "q" })) void _event;
+      },
+    ]) {
+      const err = await rejection(call());
+      assert.ok(err instanceof ServerUnreachableError);
+      assert.match(err.message, new RegExp(`127\\.0\\.0\\.1:${port}`));
+    }
   });
 });

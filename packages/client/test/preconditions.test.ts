@@ -54,8 +54,8 @@ const preset: NodePreset = { name: "n", model: { provider: "ollama", model: "m" 
 describe("preconditions", () => {
   it("creates a pipeline with If-None-Match: * and updates it with If-Match", async () => {
     const client = new PipelineClient(base);
-    await client.savePipeline(definition, null);
-    await client.savePipeline(definition, "r1");
+    await client.createPipeline(definition);
+    await client.updatePipeline(definition, { baseRevision: "r1" });
     assert.deepEqual(seen, [
       { request: "PUT /pipelines/p", ifMatch: undefined, ifNoneMatch: "*", body: { definition } },
       { request: "PUT /pipelines/p", ifMatch: '"r1"', ifNoneMatch: undefined, body: { definition } },

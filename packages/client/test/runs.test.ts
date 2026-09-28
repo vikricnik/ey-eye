@@ -54,12 +54,20 @@ after(() => {
 describe("runs", () => {
   it("runs a pipeline at its own path, answered or streamed by Accept", async () => {
     const client = new PipelineClient(base);
-    await client.ask("q", "my-pipe", []);
-    for await (const _event of client.askStream("q", "my-pipe", [])) void _event;
+    await client.ask({ pipeline: "my-pipe", prompt: "q" });
+    for await (const _event of client.askStream({ pipeline: "my-pipe", prompt: "q" })) void _event;
     assert.deepEqual(seen, [
       { request: "POST /pipelines/my-pipe/runs", accept: "application/json", body: { prompt: "q", history: [] } },
       { request: "POST /pipelines/my-pipe/runs", accept: "text/event-stream", body: { prompt: "q", history: [] } },
     ]);
+  });
+
+  it("sends only the run's own fields — the pipeline goes in the path", async () => {
+    const client = new PipelineClient(base);
+    // A caller's object may carry more than AskInput declares.
+    const input = { pipeline: "p", prompt: "q", rerun: { from_node: "a", outputs: {} }, stray: 1 };
+    await client.ask(input, { signal: new AbortController().signal });
+    assert.deepEqual(seen[0]!.body, { prompt: "q", history: [], rerun: { from_node: "a", outputs: {} } });
   });
 
   it("works on unsaved definitions under /drafts", async () => {

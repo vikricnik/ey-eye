@@ -46,7 +46,7 @@ describe("stopping a request", () => {
     const count = hangUps;
     await assert.rejects(
       (async () => {
-        for await (const event of client.askStream("q", "p", [], { signal: stop.signal })) {
+        for await (const event of client.askStream({ pipeline: "p", prompt: "q" }, { signal: stop.signal })) {
           seen.push(event.type);
           stop.abort();
         }
@@ -61,7 +61,7 @@ describe("stopping a request", () => {
     const client = new PipelineClient(base);
     const stop = new AbortController();
     setTimeout(() => stop.abort(), 30);
-    await assert.rejects(client.ask("q", "p", [], { signal: stop.signal }), RequestCancelledError);
+    await assert.rejects(client.ask({ pipeline: "p", prompt: "q" }, { signal: stop.signal }), RequestCancelledError);
 
     const stopTests = new AbortController();
     await assert.rejects(
@@ -77,7 +77,7 @@ describe("stopping a request", () => {
   it("hangs up when the caller stops reading early", async () => {
     const client = new PipelineClient(base);
     const count = hangUps;
-    for await (const _ of client.askStream("q", "p")) break;
+    for await (const _ of client.askStream({ pipeline: "p", prompt: "q" })) break;
     await hungUp(count);
   });
 
@@ -92,7 +92,7 @@ describe("stopping a request", () => {
     });
     await new Promise<void>((resolve) => echo.listen(0, "127.0.0.1", resolve));
     const client = new PipelineClient(`http://127.0.0.1:${(echo.address() as AddressInfo).port}`);
-    await client.ask("q", "p", [], { signal: new AbortController().signal });
+    await client.ask({ pipeline: "p", prompt: "q" }, { signal: new AbortController().signal });
     echo.close();
     assert.deepEqual(Object.keys(JSON.parse(body)).sort(), ["history", "prompt"]);
   });

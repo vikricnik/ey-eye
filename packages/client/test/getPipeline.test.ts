@@ -33,6 +33,16 @@ after(() => {
   server.close();
 });
 
+describe("listModels", () => {
+  it("uses the server's short cache unless asked to refresh", async () => {
+    requested.length = 0;
+    const client = new PipelineClient(base);
+    await client.listModels();
+    await client.listModels({ refresh: true });
+    assert.deepEqual(requested, ["GET /models", "GET /models?refresh=true"]);
+  });
+});
+
 describe("getPipeline", () => {
   it("reads the pipeline itself — the definition and revision a save takes back", async () => {
     const loaded = await new PipelineClient(base).getPipeline("my-pipe");
