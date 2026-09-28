@@ -56,7 +56,7 @@ problems are where the parts meet:
 | [API-011](#api-011-health-is-public-but-returns-what-pipelines-requires-a-key-for) | WARNING | `/health` is public but returns what `/pipelines` requires a key for — ✅ fixed |
 | [API-012](#api-012-the-template-variable--input--quietly-includes-the-conversation) | WARNING | The template variable `{{ input }}` quietly includes the conversation — ✅ fixed |
 | [API-013](#api-013-python-signatures-rely-on-positional-tuples-and-long-parameter-lists) | SUGGESTION | Python signatures rely on positional tuples and long parameter lists — ✅ fixed |
-| [API-014](#api-014-one-concept-has-three-names-and-several-cli-commands-differ-by-one-keystroke) | SUGGESTION | One concept has three names, and several CLI commands differ by one keystroke |
+| [API-014](#api-014-one-concept-has-three-names-and-several-cli-commands-differ-by-one-keystroke) | SUGGESTION | One concept has three names, and several CLI commands differ by one keystroke — ✅ fixed |
 | [API-015](#api-015-yaml-schema-naming) | SUGGESTION | YAML schema naming |
 | [API-016](#api-016-validate-takes-two-mutually-exclusive-fields-and-checks-at-runtime) | SUGGESTION | `validate` takes two mutually exclusive fields and checks at runtime |
 | [API-017](#api-017-graphedge-expresses-its-variant-through-nullable-fields) | SUGGESTION | `GraphEdge` expresses its variant through nullable fields |
@@ -623,6 +623,26 @@ working around them.
 ### API-014: One concept has three names, and several CLI commands differ by one keystroke
 
 - **Severity**: SUGGESTION
+- **Status**: ✅ Fixed (2026-09-28).
+  - "Preset", the server's name, is now the only name. The web UI says
+    **Presets** and **Save as preset**. The CLI command is `/preset`. The
+    client doc comments and all READMEs use the same word. The REST API
+    was already consistent and is unchanged.
+  - CLI commands are grouped under one word each:
+
+    | Old | New |
+    |---|---|
+    | `/pipelines` | `/pipeline list` |
+    | `/delete <name>` | `/pipeline rm <name>` |
+    | `/tests` | `/test` |
+    | `/test [case]` | `/test run [case]` |
+    | `/pset <setting> <value>` | `/settings set <setting> <value>` |
+    | `/library …` | `/preset …` |
+    | `/nodes` | `/node` |
+
+  - `rm` is the only verb for removing things.
+  - The old names print where the command moved (`cli/src/renamedCommands.ts`)
+    instead of "unknown command".
 - **Principle**: Consistent domain vocabulary
 - **File(s)**:
   - [api_schemas.py:405-423](llm_pipeline/llm_pipeline/api_schemas.py#L405-L423)

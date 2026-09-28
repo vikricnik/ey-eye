@@ -401,9 +401,9 @@ export interface TestsConfig {
   cases?: EvalCase[];
 }
 
-/** A saved node (stored as a preset): one node's whole configuration,
- * reusable in any pipeline. Adding or applying it COPIES the values into
- * the node — pipelines never reference saved nodes by name. */
+/** A preset: one node's whole configuration, reusable in any pipeline.
+ * Adding or applying it COPIES the values into the node — pipelines never
+ * reference presets by name. */
 export interface NodePreset {
   name: string;
   description?: string;

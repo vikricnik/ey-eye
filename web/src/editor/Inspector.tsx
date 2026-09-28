@@ -66,8 +66,8 @@ export interface InspectorProps {
   onEdit: Edit;
   onSelect: (selection: Selection | null) => void;
   onRefreshModels: () => void;
-  /** Opens the "save to library" dialog for a node. */
-  onSaveToLibrary: (nodeId: string) => void;
+  /** Opens the "save as preset" dialog for a node. */
+  onSaveAsPreset: (nodeId: string) => void;
   onDuplicate: (nodeId: string) => void;
   /** Nodes the latest run can be re-run from (empty while running). */
   rerunnable: Set<string>;
@@ -220,9 +220,9 @@ function NodeInspector(props: InspectorProps & { node: NodeConfig; tab: NodeTab;
                 type="button"
                 className="ghost"
                 title="Save this node's configuration to reuse it in any pipeline"
-                onClick={() => props.onSaveToLibrary(id)}
+                onClick={() => props.onSaveAsPreset(id)}
               >
-                Save to library
+                Save as preset
               </button>
             )}
           </div>
@@ -431,15 +431,15 @@ function NodeInspector(props: InspectorProps & { node: NodeConfig; tab: NodeTab;
       </section>
 
       <section>
-        <h3>Library</h3>
+        <h3>Presets</h3>
         <p className="field-hint">
-          Saved nodes keep a model, its options, prompts and history and reasoning settings. Add them from the sidebar,
-          or give this node one&apos;s configuration (its id and connections stay).
+          A preset keeps a model, its options, prompts and history and reasoning settings. Add one from the sidebar,
+          or give this node its configuration (the node&apos;s id and connections stay).
         </p>
         {editable && presets.length > 0 && (
           <div className="row">
-            <select value={presetChoice} onChange={(e) => setPresetChoice(e.target.value)} aria-label="Saved node">
-              <option value="">use a saved node&apos;s configuration…</option>
+            <select value={presetChoice} onChange={(e) => setPresetChoice(e.target.value)} aria-label="Preset">
+              <option value="">use a preset&apos;s configuration…</option>
               {presets.map((p) => (
                 <option key={p.name} value={p.name}>
                   {p.name} — {p.model.provider}:{p.model.model}
@@ -460,8 +460,8 @@ function NodeInspector(props: InspectorProps & { node: NodeConfig; tab: NodeTab;
           </div>
         )}
         {editable && (
-          <button type="button" className="ghost" onClick={() => props.onSaveToLibrary(id)}>
-            Save to library…
+          <button type="button" className="ghost" onClick={() => props.onSaveAsPreset(id)}>
+            Save as preset…
           </button>
         )}
         {!editable && <p className="dim">Editing is disabled on this server.</p>}

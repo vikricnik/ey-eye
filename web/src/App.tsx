@@ -433,12 +433,12 @@ export function App() {
   };
 
   /** Asks for a name and description, then saves the node — everything it
-   * runs with — to the library. */
-  const saveNodeToLibrary = async (id: string) => {
+   * runs with — as a preset. */
+  const saveNodeAsPreset = async (id: string) => {
     const current = docRef.current;
     if (!current) return;
     const values = await dialogs.form({
-      title: `Save "${id}" to the library`,
+      title: `Save "${id}" as a preset`,
       body: (
         <>
           Saves its model, options, prompts and history and reasoning settings, so you can add it to any pipeline
@@ -452,33 +452,32 @@ export function App() {
           label: "Name",
           initial: id,
           validate: (v) => (PRESET_NAME_PATTERN.test(v) ? null : "letters, digits, - and _ only"),
-          hint: "a saved node with the same name is replaced (you'll be asked)",
+          hint: "a preset with the same name is replaced (you'll be asked)",
         },
         {
           name: "description",
           label: "Description",
           optional: true,
-          placeholder: "what it's for — shown in the library",
+          placeholder: "what it's for — shown in the sidebar",
           initial: presets.find((p) => p.name === id)?.description ?? "",
         },
       ],
     });
     if (!values) return;
     try {
-      await saveToLibrary(
+      await savePreset(
         presetFromNode(current.definition, id, values.name!, { description: values.description ?? "" })
       );
     } catch (err) {
-      notify("error", `not saved to the library: ${errorText(err)}`);
+      notify("error", `preset not saved: ${errorText(err)}`);
     }
   };
 
-  /** Saves a node to the library, asking first before replacing a saved
-   * node of the same name. */
-  const saveToLibrary = async (preset: NodePreset): Promise<boolean> => {
+  /** Saves a preset, asking first before replacing one of the same name. */
+  const savePreset = async (preset: NodePreset): Promise<boolean> => {
     if (presets.some((p) => p.name === preset.name)) {
       const replace = await dialogs.confirm({
-        title: `Replace saved node "${preset.name}"?`,
+        title: `Replace the preset "${preset.name}"?`,
         body: <>Pipelines that already use it keep their copy — only new additions get the new settings.</>,
         confirmLabel: "Replace",
       });
@@ -487,10 +486,10 @@ export function App() {
     try {
       await client.savePreset(preset);
       await refreshPresets();
-      notify("info", `saved "${preset.name}" to the library`);
+      notify("info", `saved the preset "${preset.name}"`);
       return true;
     } catch (err) {
-      notify("error", `not saved to the library: ${errorText(err)}`);
+      notify("error", `preset not saved: ${errorText(err)}`);
       return false;
     }
   };
@@ -568,9 +567,9 @@ export function App() {
                 label: "Start with",
                 options: [
                   { value: "", label: "a blank LLM node" },
-                  ...presets.map((p) => ({ value: p.name, label: `${p.name} — ${p.model.model} (saved node)` })),
+                  ...presets.map((p) => ({ value: p.name, label: `${p.name} — ${p.model.model} (preset)` })),
                 ],
-                hint: "add more from the library in the sidebar",
+                hint: "add more from the presets in the sidebar",
               },
             ]
           : []),
@@ -619,7 +618,7 @@ export function App() {
 
   const deletePreset = async (name: string) => {
     const ok = await dialogs.confirm({
-      title: `Remove "${name}" from the library?`,
+      title: `Remove the preset "${name}"?`,
       body: (
         <>
           Pipelines that use it keep their copy. The file moves to <code>presets/.deleted/</code> on the server.
@@ -632,7 +631,7 @@ export function App() {
     try {
       await client.deletePreset(name);
       await refreshPresets();
-      notify("info", `removed "${name}" from the library`);
+      notify("info", `removed the preset "${name}"`);
     } catch (err) {
       notify("error", `not removed: ${errorText(err)}`);
     }
@@ -1222,7 +1221,7 @@ export function App() {
               onEdit={edit}
               onSelect={setSelection}
               onRefreshModels={() => void refreshModels(true)}
-              onSaveToLibrary={(id) => void saveNodeToLibrary(id)}
+              onSaveAsPreset={(id) => void saveNodeAsPreset(id)}
               onDuplicate={duplicate}
               rerunnable={rerunnable}
               onRerun={(id) => void run("", id)}

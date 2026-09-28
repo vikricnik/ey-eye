@@ -5,7 +5,7 @@ export type PanelTab = "chat" | "settings" | "add" | "messages" | "tests";
 export const PANEL_TABS: { id: PanelTab; label: string; title: string }[] = [
   { id: "chat", label: "Chat", title: "The conversation with this pipeline" },
   { id: "settings", label: "Settings", title: "The selected node — or the pipeline, with nothing selected" },
-  { id: "add", label: "Add", title: "Add a node: blank, or from your library of saved nodes" },
+  { id: "add", label: "Add", title: "Add a node: blank, or from a preset" },
   { id: "messages", label: "Messages", title: "What every node received and replied, per run" },
   { id: "tests", label: "Tests", title: "Test cases and model comparisons" },
 ];

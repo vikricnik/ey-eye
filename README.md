@@ -169,7 +169,7 @@ npm start
 ```
 
 ```
-(simple-local) › /pipelines
+(simple-local) › /pipeline list
 Available pipelines (3)
   simple-local — Single-node, all-Ollama pipeline for quick local testing
   consensus-qa — Multi-provider consensus for factual Q&A

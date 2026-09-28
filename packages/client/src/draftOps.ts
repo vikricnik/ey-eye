@@ -39,7 +39,7 @@ export class DraftError extends Error {
 }
 
 const NODE_ID_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
-/** What the server accepts as a saved node's (preset's) name. */
+/** What the server accepts as a preset's name. */
 export const PRESET_NAME_PATTERN = /^[A-Za-z0-9_-]+$/;
 
 function clone<T>(value: T): T {
@@ -142,7 +142,7 @@ function mapNode(
 // ---------------------------------------------------------------------------
 
 /** A new one-node pipeline — the smallest definition the server accepts.
- * Its node is a blank "answer" node, or a copy of a saved node. */
+ * Its node is a blank "answer" node, or one made from a preset. */
 export function newDefinition(name: string, model: NodeModelConfig, preset?: NodePreset): PipelineDefinition {
   const empty: PipelineDefinition = { name, description: "", version: 1, nodes: [], output_node: "" };
   const { definition, id } = addNode(empty, {
@@ -467,7 +467,7 @@ function withField<T extends object, K extends keyof T>(target: T, key: K, value
 // Presets
 // ---------------------------------------------------------------------------
 
-/** The node takes the saved node's configuration: model, system prompt,
+/** The node takes the preset's configuration: model, system prompt,
  * history and reasoning settings — unset ones back to their defaults — and
  * its prompt, when it saved one. Id, inputs and position stay. */
 function presetApplied(node: NodeConfig, preset: NodePreset): NodeConfig {
@@ -491,7 +491,7 @@ export function templateNodeRefs(template: string): { outputs: Set<string>; guar
 }
 
 /**
- * Fits a saved node's prompt into this pipeline. A saved prompt still
+ * Fits a preset's prompt into this pipeline. A saved prompt still
  * names the nodes it was written for (`{{ draft.output }}`):
  * - when it names exactly one node this pipeline doesn't have, and the
  *   node has exactly one input the prompt doesn't use yet, the reference
@@ -518,15 +518,15 @@ function fitSavedPrompt(def: PipelineDefinition, node: NodeConfig, preset: NodeP
   return { ...node, prompt_template: template, depends_on: [...deps, ...wired] };
 }
 
-/** Gives a node a saved node's configuration (see presetApplied), fitting
- * a saved prompt to the node's inputs. The node keeps no link to the saved
- * node — later edits to it don't affect this pipeline. */
+/** Gives a node a preset's configuration (see presetApplied), fitting
+ * a saved prompt to the node's inputs. The node keeps no link to the
+ * preset — later edits to it don't affect this pipeline. */
 export function applyPreset(def: PipelineDefinition, id: string, preset: NodePreset): PipelineDefinition {
   return mapNode(def, id, (n) => fitSavedPrompt(def, presetApplied(n, preset), preset));
 }
 
 /**
- * A saved node (preset) capturing everything a node runs with, so it
+ * A preset capturing everything a node runs with, so it
  * behaves the same in any pipeline: the model it really uses (a pipeline
  * default it inherits is written out), its system prompt (or the pipeline
  * default's), its prompt, and its history and reasoning settings.

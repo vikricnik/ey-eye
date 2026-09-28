@@ -8,23 +8,28 @@ import type {
   RunTestsRequest,
   TestRunEvent,
 } from "@llm-pipeline/client";
-import { handleEditCommand } from "../src/editCommands.js";
+import { handleEditCommand, removePipeline } from "../src/editCommands.js";
 import type { EditContext } from "../src/editCommands.js";
 
-/** A draft session plus an in-memory stand-in for the server's saved
- * nodes, so the commands run end to end without a server. */
+/** A draft session plus an in-memory stand-in for the server's
+ * presets, so the commands run end to end without a server. */
 function setup(answer = "y") {
-  const library = new Map<string, NodePreset>();
+  const presets = new Map<string, NodePreset>();
+  const deleted: { name: string; baseRevision: string | undefined }[] = [];
   const client = {
-    listPresets: async () => ({ presets: [...library.values()] }),
+    listPresets: async () => ({ presets: [...presets.values()] }),
     getPreset: async (name: string) => {
-      const preset = library.get(name);
-      if (!preset) throw new Error(`no saved node '${name}'`);
+      const preset = presets.get(name);
+      if (!preset) throw new Error(`no preset '${name}'`);
       return { preset, revision: "r" };
     },
     savePreset: async (preset: NodePreset) => {
-      library.set(preset.name, preset);
+      presets.set(preset.name, preset);
       return { preset, revision: "r" };
+    },
+    deletePipeline: async (name: string, baseRevision?: string) => {
+      deleted.push({ name, baseRevision });
+      return { name, recoverable_as: `${name}.yaml` };
     },
   } as unknown as PipelineClient;
   const draft: PipelineDefinition = {
@@ -52,7 +57,7 @@ function setup(answer = "y") {
     session: { draft, baseRevision: "rev", dirty: false },
   };
   const run = (line: string) => handleEditCommand(ctx, line);
-  return { ctx, library, run };
+  return { ctx, presets, deleted, run };
 }
 
 let printed: string[] = [];
@@ -80,47 +85,78 @@ describe("/dup", () => {
   });
 });
 
-describe("/library", () => {
+describe("/preset", () => {
   it("saves a node's whole configuration and adds it to another pipeline", async () => {
-    const { ctx, library, run } = setup();
-    await run("/library save critic strict-critic --description Checks a draft for errors");
-    const saved = library.get("strict-critic")!;
+    const { ctx, presets, run } = setup();
+    await run("/preset save critic strict-critic --description Checks a draft for errors");
+    const saved = presets.get("strict-critic")!;
     assert.equal(saved.description, "Checks a draft for errors");
     assert.deepEqual(saved.model, { provider: "ollama", model: "gemma3:12b", temperature: 0.1, options: { num_ctx: 8192 } });
     assert.equal(saved.prompt_template, "Critique:\n{{ draft.output }}");
     assert.equal(saved.include_history, false);
 
-    // a fresh pipeline, starting from the saved node
+    // a fresh pipeline, starting from the preset
     await run("/new other --from strict-critic");
     assert.equal(ctx.session!.draft.nodes[0]!.id, "strict_critic");
     assert.equal(ctx.session!.draft.output_node, "strict_critic");
 
     // …and a second copy after a node: its {{ draft.output }} now reads that node
-    await run("/library add strict-critic --after strict_critic --id review");
+    await run("/preset add strict-critic --after strict_critic --id review");
     const review = ctx.session!.draft.nodes.find((n) => n.id === "review")!;
     assert.deepEqual(review.depends_on, ["strict_critic"]);
     assert.equal(review.prompt_template, "Critique:\n{{ strict_critic.output }}");
   });
 
-  it("asks before replacing a saved node", async () => {
-    const { library, run } = setup("n");
-    await run("/library save critic");
-    assert.equal(library.get("critic")!.model.model, "gemma3:12b", "saved under the node's id");
+  it("asks before replacing a preset", async () => {
+    const { presets, run } = setup("n");
+    await run("/preset save critic");
+    assert.equal(presets.get("critic")!.model.model, "gemma3:12b", "saved under the node's id");
     await run("/set critic.model ollama:llama3");
-    await run("/library save critic");
-    assert.equal(library.get("critic")!.model.model, "gemma3:12b", "declined: not replaced");
+    await run("/preset save critic");
+    assert.equal(presets.get("critic")!.model.model, "gemma3:12b", "declined: not replaced");
     assert.ok(printed.some((l) => l.includes("not saved")));
   });
 
-  it("lists and shows saved nodes", async () => {
+  it("lists and shows presets", async () => {
     const { run } = setup();
-    await run("/library save critic");
+    await run("/preset save critic");
     printed = [];
-    await run("/library");
+    await run("/preset");
     assert.ok(printed.some((l) => l.includes("critic") && l.includes("no history")));
     printed = [];
-    await run("/library show critic");
+    await run("/preset show critic");
     assert.ok(printed.join("\n").includes("Be strict."));
+  });
+});
+
+describe("grouped commands", () => {
+  it("/test lists the cases, /test run runs them", async () => {
+    const { ctx, run } = setup();
+    ctx.session!.draft.tests = { cases: [{ name: "capital", input: "What is the capital of France?" }] };
+    let sent: RunTestsRequest | undefined;
+    (ctx.client as unknown as { runTests: (r: RunTestsRequest) => AsyncGenerator<TestRunEvent> }).runTests =
+      async function* (request: RunTestsRequest) {
+        sent = request;
+        yield { type: "tests_done", data: { summaries: [] } };
+      };
+    await run("/test");
+    assert.ok(printed.some((l) => l.includes("capital")), "lists the case");
+    assert.equal(sent, undefined, "and runs nothing");
+    await run("/test run capital");
+    assert.deepEqual(sent!.cases, ["capital"]);
+  });
+
+  it("/settings set changes a pipeline-wide setting", async () => {
+    const { ctx, run } = setup();
+    await run("/settings set history.max_chars 4000");
+    assert.equal(ctx.session!.draft.history?.max_chars, 4000);
+  });
+
+  it("/pipeline rm deletes a pipeline, guarded by the draft's revision", async () => {
+    const { ctx, deleted } = setup();
+    await removePipeline(ctx, "p");
+    assert.deepEqual(deleted, [{ name: "p", baseRevision: "rev" }]);
+    assert.equal(ctx.session, undefined, "the deleted pipeline's draft is dropped");
   });
 });
 

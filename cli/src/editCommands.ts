@@ -82,10 +82,10 @@ export interface EditContext {
 export const EDIT_HELP = `
 ${chalk.bold("Editing pipelines:")}
   ${chalk.yellow("/edit [name]")}                   load a pipeline (default: the active one) into a draft
-  ${chalk.yellow("/new <name> [--from <saved>]")}   start a new pipeline draft with one node (blank, or a saved node)
-  ${chalk.yellow("/nodes")}                         list the draft's nodes
+  ${chalk.yellow("/new <name> [--from <preset>]")}  start a new pipeline draft with one node (blank, or from a preset)
+  ${chalk.yellow("/node")}                          list the draft's nodes
   ${chalk.yellow("/node <id>")}                     show one node's full configuration
-  ${chalk.yellow("/node add <id> [--after a,b] [--model m] [--from <saved>]")}
+  ${chalk.yellow("/node add <id> [--after a,b] [--model m] [--from <preset>]")}
   ${chalk.yellow("/node rm <id>")}                  remove a node (and edges/routes to it)
   ${chalk.yellow("/dup <node> [new-id]")}           duplicate a node: same settings and inputs, runs beside it
   ${chalk.yellow("/set <node>.<field> <value>")}    e.g. /set reconcile.temperature 0.3
@@ -96,7 +96,7 @@ ${chalk.bold("Editing pipelines:")}
                                     repeat_penalty|keep_alive|format|mirostat|…>
                                     value "unset" clears a field
   ${chalk.yellow("/settings")}                      show pipeline-wide settings (execution, history, defaults)
-  ${chalk.yellow("/pset <setting> <value>")}        change one, e.g. /pset history.max_chars 4000
+  ${chalk.yellow("/settings set <setting> <value>")}  change one, e.g. /settings set history.max_chars 4000
                                     description, execution.<timeout|retries|max_concurrency|…>,
                                     execution.max_history_turns, history.<intro|turn_template|
                                     max_chars|remember|summarize.model|summarize.prompt>,
@@ -109,15 +109,14 @@ ${chalk.bold("Editing pipelines:")}
   ${chalk.yellow("/validate")}                      check the draft on the server
   ${chalk.yellow("/save [name]")}                   save the draft (a new name saves a copy; comments in the file are kept)
   ${chalk.yellow("/discard")}                       drop the draft
-  ${chalk.yellow("/delete <name>")}                 delete a pipeline (moved to pipelines/.deleted/)
-  ${chalk.yellow("/library")}                       list saved nodes (model, prompts and settings, reusable anywhere)
-  ${chalk.yellow("/library save <node> [name] [--description text…]")}
-  ${chalk.yellow("/library show <name>")}           everything a saved node carries
-  ${chalk.yellow("/library add <name> [--id x] [--after a,b]")}   add one to the draft
-  ${chalk.yellow("/library apply <name> <node>")}   give a node a saved node's configuration
-  ${chalk.yellow("/library rm <name>")}
-  ${chalk.yellow("/tests")}                         list the test cases (the draft's, or the active pipeline's)
-  ${chalk.yellow("/test [case]")}                   run them all, or one — the draft as it is, no save needed
+  ${chalk.yellow("/preset")}                        list presets: a node's model, prompts and settings, reusable anywhere
+  ${chalk.yellow("/preset save <node> [name] [--description text…]")}
+  ${chalk.yellow("/preset show <name>")}            everything a preset carries
+  ${chalk.yellow("/preset add <name> [--id x] [--after a,b]")}   add a node from it to the draft
+  ${chalk.yellow("/preset apply <name> <node>")}    give a node a preset's configuration
+  ${chalk.yellow("/preset rm <name>")}
+  ${chalk.yellow("/test")}                          list the test cases (the draft's, or the active pipeline's)
+  ${chalk.yellow("/test run [case]")}               run them all, or one — the draft as it is, no save needed
   ${chalk.yellow("/test add")}                      add a case: a message, then what its answer must satisfy
   ${chalk.yellow("/test rm <case>")}                remove a case
   ${chalk.yellow("/test judge <model|unset>")}      the model that grades "judge" expectations
@@ -129,10 +128,8 @@ ${chalk.bold("Editing pipelines:")}
 const EDIT_COMMANDS = new Set([
   "/edit",
   "/new",
-  "/nodes",
   "/node",
   "/set",
-  "/pset",
   "/settings",
   "/prompt",
   "/connect",
@@ -142,10 +139,8 @@ const EDIT_COMMANDS = new Set([
   "/validate",
   "/save",
   "/discard",
-  "/delete",
   "/dup",
-  "/library",
-  "/tests",
+  "/preset",
   "/test",
   "/compare",
   "/import",
@@ -558,7 +553,7 @@ async function handleTestCommand(ctx: EditContext, args: string[]): Promise<void
     }
     update(ctx, upsertTestCase(session.draft, { name, input, expect }));
     const needsJudge = expect.some((e) => e.judge !== undefined) && !session.draft.tests?.judge;
-    return note(`added test case "${name}"${needsJudge ? " — set a judge model with /test judge <model>" : ""} — /test ${name} to run it`);
+    return note(`added test case "${name}"${needsJudge ? " — set a judge model with /test judge <model>" : ""} — /test run ${name} to run it`);
   }
 
   if (sub === "rm") {
@@ -578,15 +573,28 @@ async function handleTestCommand(ctx: EditContext, args: string[]): Promise<void
     return note(identity === "unset" ? "judge model removed" : `judge model: ${identity}`);
   }
 
-  const name = args.join(" ");
-  await runTestCases(ctx, name ? [name] : undefined, []);
+  if (sub === "run") {
+    const name = rest.join(" ");
+    return runTestCases(ctx, name ? [name] : undefined, []);
+  }
+
+  if (sub) throw new DraftError("usage: /test [run [case] | add | rm <case> | judge <model|unset>]");
+  const definition = await testedDefinition(ctx);
+  const cases = testCases(definition);
+  if (cases.length === 0) note("no test cases yet — /test add (while editing: /edit)");
+  for (const c of cases) {
+    console.log(`  ${chalk.blue(c.name)}  ${chalk.gray("›")} ${c.input}`);
+    for (const e of c.expect ?? []) console.log(`      ${formatExpectation(e)}`);
+  }
+  if (definition.tests?.judge) console.log(chalk.gray(`  judge: ${modelIdentity(definition.tests.judge.model)}`));
+  if (cases.length > 0) console.log();
 }
 
 function splitList(value: string | undefined): string[] {
   return value ? value.split(",").map((s) => s.trim()).filter(Boolean) : [];
 }
 
-function formatSavedNodeLine(p: NodePreset): string {
+function formatPresetLine(p: NodePreset): string {
   const tags = [
     p.model.temperature !== undefined ? `T ${p.model.temperature}` : null,
     p.prompt_template === undefined ? "no prompt" : null,
@@ -599,7 +607,7 @@ function formatSavedNodeLine(p: NodePreset): string {
   );
 }
 
-function formatSavedNode(p: NodePreset): string {
+function formatPreset(p: NodePreset): string {
   const options = Object.entries(p.model.options ?? {})
     .map(([k, v]) => `${k}=${Array.isArray(v) ? v.join(",") : String(v)}`)
     .join("  ");
@@ -619,17 +627,18 @@ function formatSavedNode(p: NodePreset): string {
   ].join("\n");
 }
 
-const LIBRARY_USAGE =
-  "usage: /library [save <node> [name] [--description text…] | show <name> | add <name> [--id x] [--after a,b] | apply <name> <node> | rm <name>]";
+const PRESET_USAGE =
+  "usage: /preset [save <node> [name] [--description text…] | show <name> | add <name> [--id x] [--after a,b] | apply <name> <node> | rm <name>]";
 
-/** The node library: saved nodes (stored as presets on the server). */
-async function handleLibraryCommand(ctx: EditContext, args: string[]): Promise<void> {
+/** Presets: a node's whole configuration, saved on the server to reuse in
+ * any pipeline. */
+async function handlePresetCommand(ctx: EditContext, args: string[]): Promise<void> {
   const [sub, ...rest] = args;
 
   if (!sub || sub === "list") {
     const { presets } = await ctx.client.listPresets();
-    if (presets.length === 0) return note("the library is empty — /library save <node> [name] to add one");
-    for (const p of presets) console.log(formatSavedNodeLine(p));
+    if (presets.length === 0) return note("no presets yet — /preset save <node> [name] to add one");
+    for (const p of presets) console.log(formatPresetLine(p));
     console.log();
     return;
   }
@@ -639,15 +648,15 @@ async function handleLibraryCommand(ctx: EditContext, args: string[]): Promise<v
     const at = rest.indexOf("--description");
     const description = at >= 0 ? rest.slice(at + 1).join(" ") : "";
     const [nodeId, name = nodeId] = at >= 0 ? rest.slice(0, at) : rest;
-    if (!nodeId || !name) throw new DraftError(LIBRARY_USAGE);
+    if (!nodeId || !name) throw new DraftError(PRESET_USAGE);
     const preset = presetFromNode(session.draft, nodeId, name, { description });
     const { presets } = await ctx.client.listPresets();
-    if (presets.some((p) => p.name === name) && !(await confirm(ctx, `replace the saved node "${name}"?`))) {
+    if (presets.some((p) => p.name === name) && !(await confirm(ctx, `replace the preset "${name}"?`))) {
       return note("not saved");
     }
     try {
       await ctx.client.savePreset(preset);
-      return note(`saved "${nodeId}" to the library as "${name}" — /library add ${name} to use it in any pipeline`);
+      return note(`saved "${nodeId}" as the preset "${name}" — /preset add ${name} to use it in any pipeline`);
     } catch (err) {
       console.log(chalk.red(`✕ not saved: ${describeServerError(err)}`) + "\n");
       return;
@@ -655,7 +664,7 @@ async function handleLibraryCommand(ctx: EditContext, args: string[]): Promise<v
   }
 
   if (sub === "show" && rest[0]) {
-    console.log(formatSavedNode((await ctx.client.getPreset(rest[0])).preset) + "\n");
+    console.log(formatPreset((await ctx.client.getPreset(rest[0])).preset) + "\n");
     return;
   }
 
@@ -671,7 +680,7 @@ async function handleLibraryCommand(ctx: EditContext, args: string[]): Promise<v
     update(ctx, definition);
     const node = findNode(definition, id);
     return note(
-      `added "${id}" from the library` +
+      `added "${id}" from the preset "${positional[0]}"` +
         ((node.depends_on ?? []).length ? ` (inputs: ${node.depends_on!.join(", ")})` : "") +
         ` — /node ${id} to see it`
     );
@@ -681,12 +690,12 @@ async function handleLibraryCommand(ctx: EditContext, args: string[]): Promise<v
     const session = requireSession(ctx);
     const { preset } = await ctx.client.getPreset(rest[0]);
     update(ctx, applyPreset(session.draft, rest[1], preset));
-    return note(`"${rest[1]}" now has the configuration of "${rest[0]}" (a copy — later library edits won't change it)`);
+    return note(`"${rest[1]}" now has the configuration of "${rest[0]}" (a copy — later changes to the preset won't change it)`);
   }
 
   if (sub === "rm" && rest[0]) {
     const name = rest[0];
-    if (!(await confirm(ctx, `remove "${name}" from the library?`))) return note("not removed");
+    if (!(await confirm(ctx, `remove the preset "${name}"?`))) return note("not removed");
     try {
       const deleted = await ctx.client.deletePreset(name);
       return note(`removed "${name}" (pipelines using it keep their copy; recoverable: presets/${deleted.recoverable_as})`);
@@ -696,7 +705,26 @@ async function handleLibraryCommand(ctx: EditContext, args: string[]): Promise<v
     }
   }
 
-  throw new DraftError(LIBRARY_USAGE);
+  throw new DraftError(PRESET_USAGE);
+}
+
+/** /pipeline rm: deletes a pipeline after asking (the server moves it to
+ * pipelines/.deleted/). Errors are printed, never thrown. */
+export async function removePipeline(ctx: EditContext, name: string | undefined): Promise<void> {
+  if (!name) {
+    console.log(chalk.yellow("usage: /pipeline rm <name>") + "\n");
+    return;
+  }
+  if (!(await confirm(ctx, `delete pipeline "${name}"? (it's moved to pipelines/.deleted/)`))) return note("not deleted");
+  const revision = ctx.session?.draft.name === name ? (ctx.session.baseRevision ?? undefined) : undefined;
+  try {
+    const deleted = await ctx.client.deletePipeline(name, revision);
+    if (ctx.session?.draft.name === name) ctx.session = undefined;
+    if (ctx.activePipeline() === name) await ctx.switchPipeline(await ctx.defaultPipeline());
+    note(`deleted "${name}" (recoverable: pipelines/${deleted.recoverable_as})`);
+  } catch (err) {
+    console.log(chalk.red(`✕ not deleted: ${describeServerError(err)}`) + "\n");
+  }
 }
 
 /**
@@ -716,7 +744,7 @@ export async function handleEditCommand(ctx: EditContext, line: string): Promise
       case "/new": {
         const { positional, flags } = parseFlags(args);
         const name = positional[0];
-        if (!name) throw new DraftError("usage: /new <name> [--from <saved node>]");
+        if (!name) throw new DraftError("usage: /new <name> [--from <preset>]");
         const preset = flags.from ? (await ctx.client.getPreset(flags.from)).preset : undefined;
         ctx.session = {
           draft: newDefinition(name, await defaultModel(ctx), preset),
@@ -732,10 +760,6 @@ export async function handleEditCommand(ctx: EditContext, line: string): Promise
         if (ctx.session?.dirty && !(await confirm(ctx, "discard unsaved changes?"))) break;
         ctx.session = undefined;
         note("draft discarded");
-        break;
-
-      case "/nodes":
-        console.log(formatNodesTable(requireSession(ctx).draft) + "\n");
         break;
 
       case "/node":
@@ -759,10 +783,14 @@ export async function handleEditCommand(ctx: EditContext, line: string): Promise
         break;
       }
 
-      case "/pset": {
-        const [path, ...valueParts] = args;
-        if (!path || valueParts.length === 0) {
-          throw new DraftError("usage: /pset <setting> <value>   e.g. /pset history.max_chars 4000 — see /settings");
+      case "/settings": {
+        const [sub, path, ...valueParts] = args;
+        if (!sub) {
+          console.log(formatSettings(requireSession(ctx).draft) + "\n");
+          break;
+        }
+        if (sub !== "set" || !path || valueParts.length === 0) {
+          throw new DraftError("usage: /settings set <setting> <value>   e.g. /settings set history.max_chars 4000");
         }
         const session = requireSession(ctx);
         const raw = line.slice(line.indexOf(path) + path.length).trim();
@@ -771,10 +799,6 @@ export async function handleEditCommand(ctx: EditContext, line: string): Promise
         note(`${path} = ${value === undefined ? "(unset)" : JSON.stringify(value)}`);
         break;
       }
-
-      case "/settings":
-        console.log(formatSettings(requireSession(ctx).draft) + "\n");
-        break;
 
       case "/prompt": {
         const [nodeId, which] = args;
@@ -838,26 +862,6 @@ export async function handleEditCommand(ctx: EditContext, line: string): Promise
         await saveDraft(ctx, args[0]);
         break;
 
-      case "/delete": {
-        const name = args[0];
-        if (!name) throw new DraftError("usage: /delete <pipeline-name>");
-        if (!(await confirm(ctx, `delete pipeline "${name}"? (it's moved to pipelines/.deleted/)`))) {
-          note("not deleted");
-          break;
-        }
-        const revision =
-          ctx.session?.draft.name === name ? (ctx.session.baseRevision ?? undefined) : undefined;
-        try {
-          const deleted = await ctx.client.deletePipeline(name, revision);
-          if (ctx.session?.draft.name === name) ctx.session = undefined;
-          if (ctx.activePipeline() === name) await ctx.switchPipeline(await ctx.defaultPipeline());
-          note(`deleted "${name}" (recoverable: pipelines/${deleted.recoverable_as})`);
-        } catch (err) {
-          console.log(chalk.red(`✕ not deleted: ${describeServerError(err)}`) + "\n");
-        }
-        break;
-      }
-
       case "/dup": {
         const [nodeId, newId] = args;
         if (!nodeId) throw new DraftError("usage: /dup <node> [new-id]");
@@ -867,22 +871,9 @@ export async function handleEditCommand(ctx: EditContext, line: string): Promise
         break;
       }
 
-      case "/library":
-        await handleLibraryCommand(ctx, args);
+      case "/preset":
+        await handlePresetCommand(ctx, args);
         break;
-
-      case "/tests": {
-        const definition = await testedDefinition(ctx);
-        const cases = testCases(definition);
-        if (cases.length === 0) note("no test cases yet — /test add (while editing: /edit)");
-        for (const c of cases) {
-          console.log(`  ${chalk.blue(c.name)}  ${chalk.gray("›")} ${c.input}`);
-          for (const e of c.expect ?? []) console.log(`      ${formatExpectation(e)}`);
-        }
-        if (definition.tests?.judge) console.log(chalk.gray(`  judge: ${modelIdentity(definition.tests.judge.model)}`));
-        if (cases.length > 0) console.log();
-        break;
-      }
 
       case "/test":
         await handleTestCommand(ctx, args);

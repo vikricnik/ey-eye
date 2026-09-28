@@ -23,7 +23,8 @@ import {
   nodeStats,
 } from "./formatter.js";
 import { renderGraphText } from "./graphRenderer.js";
-import { EDIT_HELP, draftDiagram, handleEditCommand } from "./editCommands.js";
+import { EDIT_HELP, draftDiagram, handleEditCommand, removePipeline } from "./editCommands.js";
+import { renamedCommandHint } from "./renamedCommands.js";
 import { LineInput } from "./input.js";
 import type { EditContext } from "./editCommands.js";
 import type {
@@ -44,8 +45,9 @@ function helpText(activePipeline: string): string {
 ${chalk.bold("Commands:")}
   ${chalk.yellow("/help")}              show this help
   ${chalk.yellow("/health")}            show server info and available pipelines
-  ${chalk.yellow("/pipelines")}         list available pipelines
-  ${chalk.yellow("/pipeline")}          show the active pipeline's DAG diagram (nodes + edges)
+  ${chalk.yellow("/pipeline")}          show the active pipeline's DAG diagram (nodes + edges; the draft's while editing)
+  ${chalk.yellow("/pipeline list")}     list available pipelines
+  ${chalk.yellow("/pipeline rm <name>")}  delete a pipeline (moved to pipelines/.deleted/)
   ${chalk.yellow("/use <name>")}         switch pipelines (clears conversation history)
   ${chalk.yellow("/verbose")}           toggle showing every node's output vs. just the final answer
   ${chalk.yellow("/stream")}            toggle live diagram updates as the pipeline runs, instead of waiting
@@ -238,17 +240,6 @@ async function main(): Promise<void> {
       continue;
     }
 
-    if (trimmed === "/pipelines") {
-      try {
-        const { pipelines } = await client.listPipelines();
-        console.log(formatPipelineList(pipelines));
-        console.log();
-      } catch (err) {
-        printError(err);
-      }
-      continue;
-    }
-
     if (trimmed === "/rerun" || trimmed.startsWith("/rerun ")) {
       const node = trimmed.slice("/rerun".length).trim();
       if (!node) {
@@ -296,17 +287,25 @@ async function main(): Promise<void> {
       continue;
     }
 
-    if (trimmed === "/pipeline" && editCtx.session) {
-      console.log(chalk.bold.cyan(`${editCtx.session.draft.name} (draft)`));
-      console.log(draftDiagram(editCtx.session).join("\n"));
-      console.log();
-      continue;
-    }
-
-    if (trimmed === "/pipeline") {
+    if (trimmed === "/pipeline" || trimmed.startsWith("/pipeline ")) {
+      const [sub, name, ...extra] = trimmed.split(/\s+/).slice(1);
       try {
-        console.log(formatPipelineDetail(await fetchDetail(client, activePipeline)));
-        console.log();
+        if (sub === "list" && !name) {
+          const { pipelines } = await client.listPipelines();
+          console.log(formatPipelineList(pipelines));
+          console.log();
+        } else if (sub === "rm" && extra.length === 0) {
+          await removePipeline(editCtx, name);
+        } else if (sub) {
+          console.log(chalk.yellow("usage: /pipeline [list | rm <name>]") + "\n");
+        } else if (editCtx.session) {
+          console.log(chalk.bold.cyan(`${editCtx.session.draft.name} (draft)`));
+          console.log(draftDiagram(editCtx.session).join("\n"));
+          console.log();
+        } else {
+          console.log(formatPipelineDetail(await fetchDetail(client, activePipeline)));
+          console.log();
+        }
       } catch (err) {
         printError(err);
       }
@@ -316,7 +315,7 @@ async function main(): Promise<void> {
     if (trimmed.startsWith("/use ")) {
       const requestedName = trimmed.slice("/use ".length).trim();
       if (!requestedName) {
-        console.log(chalk.yellow('usage: /use <pipeline-name> (see "/pipelines" for options)\n'));
+        console.log(chalk.yellow('usage: /use <pipeline-name> (see "/pipeline list" for options)\n'));
         continue;
       }
       if (editCtx.session?.dirty) {
@@ -339,6 +338,12 @@ async function main(): Promise<void> {
         activeGraph = undefined;
         printError(err);
       }
+      continue;
+    }
+
+    const renamed = renamedCommandHint(trimmed);
+    if (renamed) {
+      console.log(chalk.yellow(renamed) + "\n");
       continue;
     }
 

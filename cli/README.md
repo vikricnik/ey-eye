@@ -57,15 +57,16 @@ automatically.
 |---|---|
 | `/help` | show available commands |
 | `/health` | show server info: default pipeline, whether editing is on (and if not, why), all available pipelines |
-| `/pipelines` | list every pipeline the server can run |
-| `/pipeline` | show the **active** pipeline's DAG as a box-drawing diagram — every node with its model, plain `depends_on` edges, and branch/loop edges each rendered visually distinct and labeled (condition/"default" for branches, max iterations for loops) |
+| `/pipeline` | show the **active** pipeline's DAG (the draft's, while editing) as a box-drawing diagram — every node with its model, plain `depends_on` edges, and branch/loop edges each rendered visually distinct and labeled (condition/"default" for branches, max iterations for loops) |
+| `/pipeline list` | list every pipeline the server can run |
+| `/pipeline rm <name>` | delete a pipeline — the file moves to `pipelines/.deleted/` (recoverable); the server's default pipeline can't be deleted |
 | `/use <name>` | switch to a different pipeline (confirms it exists first; clears conversation history since a different DAG likely has different context semantics) |
 | `/verbose` | toggle showing every node's output vs. just the final answer |
 | `/stream` | toggle streaming node-by-node progress as the pipeline runs, instead of waiting for the whole thing to finish (off by default). When on, the pipeline's diagram (same one `/pipeline` shows) redraws in place with live per-node status — ◐ marks a node the server reports as running right now — plus the branch route actually taken and loop iteration counts |
 | `/reset` | clear conversation history without switching pipelines |
 | `/rerun <node>` | run the last message again from `<node>`: it and every node after it call their models, the ones before reuse their outputs; the new answer replaces the last one in the conversation |
 | `/preview <node> [message]` | what `<node>` would receive — for `[message]`, or else the last message with the last run's outputs (your draft while editing; needs editing enabled on the server) |
-| `/exit` | quit (also: Ctrl+D, or Ctrl+C at the prompt). **During a run, Ctrl+C stops the run** (and `/test`, `/compare`) instead: the server stops the model calls, and after a stopped streamed run `/rerun <node>` continues from a node that finished |
+| `/exit` | quit (also: Ctrl+D, or Ctrl+C at the prompt). **During a run, Ctrl+C stops the run** (and `/test run`, `/compare`) instead: the server stops the model calls, and after a stopped streamed run `/rerun <node>` continues from a node that finished |
 
 ### Editing pipelines
 
@@ -77,31 +78,30 @@ validates it on `/validate` and `/save`. Runs always use the saved version.
 | Command | Description |
 |---|---|
 | `/edit [name]` | load a pipeline (default: the active one) into a draft |
-| `/new <name> [--from <saved>]` | start a new one-node pipeline draft — a blank node, or a copy of a saved node |
-| `/nodes` | table of the draft's nodes: model, temperature, dependencies, ★ output |
+| `/new <name> [--from <preset>]` | start a new one-node pipeline draft — a blank node, or one made from a preset |
+| `/node` | table of the draft's nodes: model, temperature, dependencies, ★ output |
 | `/node <id>` | one node's full configuration, including options, prompts, and the model's limits (max context, size) |
-| `/node add <id> [--after a,b] [--model provider:model] [--from <saved>]` | add a node (blank, or from the library) |
+| `/node add <id> [--after a,b] [--model provider:model] [--from <preset>]` | add a node (blank, or from a preset) |
 | `/dup <node> [new-id]` | duplicate a node: same settings and inputs, runs beside the original |
 | `/node rm <id>` | remove a node and every edge/route/loop touching it |
 | `/set <node>.<field> <value>` | change a node setting — see below |
 | `/settings` | show the pipeline-wide settings: execution, history, defaults |
-| `/pset <setting> <value>` | change one — `description`, `execution.<…>` (incl. `max_history_turns`, `max_concurrency`), `history.<intro\|turn_template\|max_chars\|remember\|summarize.model\|summarize.prompt>`, `defaults.<model\|temperature\|system_prompt\|strip_reasoning\|options.*>`; `unset` clears |
+| `/settings set <setting> <value>` | change one — `description`, `execution.<…>` (incl. `max_history_turns`, `max_concurrency`), `history.<intro\|turn_template\|max_chars\|remember\|summarize.model\|summarize.prompt>`, `defaults.<model\|temperature\|system_prompt\|strip_reasoning\|options.*>`; `unset` clears |
 | `/prompt <node> [system]` | edit the prompt template (or system prompt) in `$EDITOR`; without one, type lines and finish with a single `.` |
 | `/connect <from> <to>` / `/disconnect <from> <to>` | add/remove a dependency edge |
 | `/output <node>[,<node>…]` | set the output node(s) |
 | `/models` | the models this server lets you select |
 | `/validate` | check the draft on the server (also lists models a save would reject, and settings beyond a model's limits) |
 | `/save [name]` | save; a new name saves a copy. Comments and layout in the file are kept |
-| `/delete <name>` | delete a pipeline — the file moves to `pipelines/.deleted/` (recoverable); the server's default pipeline can't be deleted |
 | `/discard` | drop the draft |
-| `/library` | list saved nodes — the node library, reusable in any pipeline |
-| `/library save <node> [name] [--description text…]` | save everything a node runs with (model, options, prompts, history and reasoning settings); asks before replacing |
-| `/library show <name>` | a saved node's full configuration |
-| `/library add <name> [--id x] [--after a,b]` | add a copy to the draft; its prompt's node references are fitted to its inputs |
-| `/library apply <name> <node>` | give an existing node a saved node's configuration (id and inputs stay) |
-| `/library rm <name>` | remove from the library (recoverable; pipelines keep their copies) |
-| `/tests` | the test cases of the draft (or the active pipeline) |
-| `/test [case]` | run all cases, or one — the draft as it is, no save needed — and print pass/fail per case with time and tokens, then totals |
+| `/preset` | list presets — a node's whole configuration, saved on the server and reusable in any pipeline |
+| `/preset save <node> [name] [--description text…]` | save everything a node runs with (model, options, prompts, history and reasoning settings) as a preset; asks before replacing |
+| `/preset show <name>` | a preset's full configuration |
+| `/preset add <name> [--id x] [--after a,b]` | add a node made from it to the draft; its prompt's node references are fitted to its inputs |
+| `/preset apply <name> <node>` | give an existing node a preset's configuration (id and inputs stay) |
+| `/preset rm <name>` | remove a preset (recoverable; pipelines keep their copies) |
+| `/test` | the test cases of the draft (or the active pipeline) |
+| `/test run [case]` | run all cases, or one — the draft as it is, no save needed — and print pass/fail per case with time and tokens, then totals |
 | `/test add` | add a case: its name, the message, then what the answer must satisfy, one per line: `contains: …`, `not: …`, `check: <condition on output>`, `judge: …` |
 | `/test rm <case>` / `/test judge <model\|unset>` | remove a case / set the model that grades `judge` expectations |
 | `/compare <node> <model> [<model>…]` | run every case as the pipeline is, and again with each model for `<node>`; shows each answer and per-model totals |
@@ -296,7 +296,7 @@ searchable directly in server logs.
 
 Earlier turns (with any remembered node outputs) are sent with every message;
 how many are kept, the character budget and whether older turns are
-summarized are per-pipeline settings (`/settings`, `/pset history.…`). Use
+summarized are per-pipeline settings (`/settings`, `/settings set history.…`). Use
 `/reset` to clear it, or switch pipelines with `/use` (which clears it
 automatically).
 

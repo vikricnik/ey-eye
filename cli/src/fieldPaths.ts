@@ -1,5 +1,5 @@
 /**
- * `/set <node>.<field> <value>` and `/pset <setting> <value>`: typed-in paths
+ * `/set <node>.<field> <value>` and `/settings set <setting> <value>`: typed-in paths
  * and values, turned into the shared client's typed edits (setNodeProperty,
  * setNodeModel, setPipelineSetting, …). The shorthands (`temperature`,
  * `system`, `deps`, …), the words that clear a field (`unset`) or inherit
@@ -85,7 +85,7 @@ export function setNodeFieldByPath(
   return setNodeProperty(def, id, key, next as NodeConfig[NodeProperty]);
 }
 
-/** `/pset <setting> <value>` — `description`, `execution.*`, `defaults.*`
+/** `/settings set <setting> <value>` — `description`, `execution.*`, `defaults.*`
  * or `history.*`; `defaults.temperature` and `defaults.options.*` are the
  * default model's. */
 export function setPipelineSettingByPath(def: PipelineDefinition, path: string, value: unknown): PipelineDefinition {

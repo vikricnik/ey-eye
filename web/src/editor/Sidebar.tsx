@@ -7,7 +7,7 @@ function excerpt(text: string, max = 160): string {
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 }
 
-/** Everything a saved node carries, for its tooltip. */
+/** Everything a preset carries, for its tooltip. */
 function summary(p: NodePreset): string {
   return [
     `${p.model.provider}:${p.model.model}${p.model.temperature !== undefined ? ` · temperature ${p.model.temperature}` : ""}`,
@@ -25,9 +25,9 @@ function summary(p: NodePreset): string {
     .join("\n");
 }
 
-/** Things to put on the canvas: a blank LLM node, or a saved node from
- * the library. Drag onto the canvas, or click to add (below the selected
- * node, connected to it). */
+/** Things to put on the canvas: a blank LLM node, or a node from a
+ * preset. Drag onto the canvas, or click to add (below the selected node,
+ * connected to it). */
 export function Sidebar(props: {
   editable: boolean;
   presets: NodePreset[];
@@ -81,10 +81,10 @@ export function Sidebar(props: {
     <nav className="sidebar" aria-label="Node palette">
       <h3>Add</h3>
       {item("LLM node", "a model call with a prompt", undefined)}
-      <h3>Library</h3>
+      <h3>Presets</h3>
       {presets.length === 0 ? (
         <p className="dim">
-          Select a node and use <strong>Save to library</strong> to keep its model, prompts and settings — then add it
+          Select a node and use <strong>Save as preset</strong> to keep its model, prompts and settings — then add it
           to any pipeline from here.
         </p>
       ) : (
@@ -93,13 +93,13 @@ export function Sidebar(props: {
             <input
               type="search"
               className="palette-filter"
-              placeholder="filter saved nodes…"
-              aria-label="Filter saved nodes"
+              placeholder="filter presets…"
+              aria-label="Filter presets"
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
             />
           )}
-          {shown.length === 0 && <p className="dim">No saved node matches “{filter.trim()}”.</p>}
+          {shown.length === 0 && <p className="dim">No preset matches “{filter.trim()}”.</p>}
           {shown.map((p) => (
             <div className="palette-row" key={p.name}>
               {item(
@@ -117,8 +117,8 @@ export function Sidebar(props: {
                 <button
                   type="button"
                   className="ghost icon palette-remove"
-                  aria-label={`Remove ${p.name} from the library`}
-                  title="Remove from the library"
+                  aria-label={`Remove the preset ${p.name}`}
+                  title="Remove this preset"
                   onClick={() => onDeletePreset(p.name)}
                 >
                   ✕

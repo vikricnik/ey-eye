@@ -22,7 +22,7 @@ web/
     │   ├── Inspector.tsx       # node / pipeline / edge / branch / loop settings
     │   ├── fields.tsx          # model picker, Ollama options form, inputs
     │   ├── PromptPreview.tsx   # what a node would receive, rendered by the server
-    │   ├── Sidebar.tsx         # the Add tab: blank node, library of saved nodes, legend
+    │   ├── Sidebar.tsx         # the Add tab: blank node, presets, legend
     │   ├── conversion.ts       # pipeline definition -> React Flow nodes/edges
     │   └── editorState.ts      # the edited document and validation state
     ├── run/
@@ -154,7 +154,7 @@ already configured server-side via `CORS_ALLOWED_ORIGINS` in `.env`.
 **Layout**: the canvas fills the window, and **one panel** beside it holds
 everything else as tabs — **Chat** (the conversation), **Settings** (the
 selected node, or the pipeline when nothing is selected), **Add** (a blank
-node or one from your library), **Messages** (what every node received and
+node or one from a preset), **Messages** (what every node received and
 replied) and **Tests**. The message box sits at the bottom of the panel on
 every tab, so you can send a message while editing. Selecting a node opens
 its Settings. Drag the panel's edge to resize it (double-click resets; the
@@ -180,7 +180,7 @@ it everything below is read-only and a banner says so):
   "unsaved". Inside a text field, ⌘Z undoes that field's typing instead.
 - Names, confirmations and deletes use in-app dialogs with inline
   validation (no browser popups).
-- **Add nodes** by dragging "LLM node" (or a saved node from the library)
+- **Add nodes** by dragging "LLM node" (or a preset)
   from the **Add** tab onto the canvas, or by clicking it — with a node
   selected, the new node is added *after* it (below it; further clicks place
   siblings side by side).
@@ -196,20 +196,20 @@ it everything below is read-only and a banner says so):
   Ollama options (`num_ctx`, `num_predict`, `top_p`, `top_k`,
   `repeat_penalty`, `seed`, `stop`, `mirostat`, `keep_alive`, `format`, …),
   output-node flag, and its branch or loop.
-- **Library of saved nodes**: **Save to library** (in a node's settings)
+- **Presets**: **Save as preset** (in a node's settings)
   keeps everything the node runs with — model, temperature, Ollama options,
   system prompt, prompt template, history and reasoning settings (a model or
   system prompt it inherits from the pipeline defaults is written out) —
-  under a name and optional description. Saved nodes are listed in the
+  under a name and optional description. Presets are listed in the
   **Add** tab (hover for the details, filter when there are many): drag or
   click one to add it to any pipeline, pick one under **Start with** when
   creating a pipeline, or give an existing node its configuration from the
-  node's **Library** section. It's always a copy — changing a saved node
+  node's **Presets** section. It's always a copy — changing a preset
   later doesn't change pipelines that use it. A saved prompt is fitted to
   where it lands: references to nodes the pipeline has become inputs, and
   when it names one node the pipeline lacks and the new node has one unused
   input (e.g. added below a selected node), the reference points at that
-  input. ✕ removes a saved node (recoverable on the server).
+  input. ✕ removes a preset (recoverable on the server).
 - **Live validation**: the header shows valid / invalid / warnings; an
   invalid node is outlined on the canvas and its Settings show the
   server's message. Save and Run are disabled while it's invalid. Warnings
