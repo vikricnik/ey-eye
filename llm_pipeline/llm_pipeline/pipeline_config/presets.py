@@ -1,8 +1,7 @@
 """
-Reusable node presets — the "node library" editor clients show as saved
-nodes: one node's whole configuration (model, generation options, prompts,
-history and reasoning settings) saved under a name, ready to add to any
-pipeline.
+Presets: one node's whole configuration (model, generation options,
+prompts, history and reasoning settings) saved under a name, ready to add
+to any pipeline.
 
 Adding or applying a preset COPIES its values into the node; the pipeline
 never references a preset by name. Editing or removing a preset therefore

@@ -13,22 +13,21 @@ def _definition(history: dict[str, Any] | None = None, max_turns: int = 6) -> Pi
     return PipelineDefinition.model_validate(
         {
             "name": "p",
-            "execution": {"max_history_turns": max_turns},
-            **({"history": history} if history is not None else {}),
+            "history": {"max_turns": max_turns, **(history or {})},
             "nodes": [
                 {
                     "id": "classify",
-                    "model": {"provider": "ollama", "model": "m"},
+                    "model": {"provider": "ollama", "name": "m"},
                     "prompt_template": "{{ question }}",
                 },
                 {
                     "id": "answer",
                     "depends_on": ["classify"],
-                    "model": {"provider": "ollama", "model": "m"},
+                    "model": {"provider": "ollama", "name": "m"},
                     "prompt_template": "{{ input }}",
                 },
             ],
-            "output_node": "answer",
+            "output_nodes": ["answer"],
         }
     )
 
@@ -67,10 +66,13 @@ async def test_max_turns_keeps_the_most_recent_and_zero_turns_history_off() -> N
 @pytest.mark.asyncio
 async def test_custom_turn_template_and_intro() -> None:
     definition = _definition(
-        {"intro": "Earlier:", "turn_template": "Q: {{ prompt }} / A: {{ answer }}"}
+        {"intro": "Earlier:", "turn_template": "Q: {{ prompt }} / A: {{ final_answer }}"}
     )
     prepared = await prepare_input("next", _turns(2), definition)
     assert prepared.contextual == "Earlier:\nQ: q1 / A: a1\n\nQ: q2 / A: a2\n\nNew request: next"
+    # {{ answer }} is the older name of {{ final_answer }}.
+    older = _definition({"turn_template": "Q: {{ prompt }} / A: {{ answer }}"})
+    assert (await prepare_input("next", _turns(1), older)).history == "Q: q1 / A: a1"
 
 
 @pytest.mark.asyncio
@@ -93,7 +95,7 @@ async def test_remembered_outputs_are_written_with_their_turn() -> None:
 @pytest.mark.asyncio
 async def test_turns_that_dont_fit_are_summarized() -> None:
     definition = _definition(
-        {"summarize": {"model": {"provider": "ollama", "model": "small"}}}, max_turns=2
+        {"summarize": {"model": {"provider": "ollama", "name": "small"}}}, max_turns=2
     )
     seen: list[str] = []
 
@@ -112,7 +114,7 @@ async def test_turns_that_dont_fit_are_summarized() -> None:
 @pytest.mark.asyncio
 async def test_a_failing_summary_falls_back_to_dropping_old_turns() -> None:
     definition = _definition(
-        {"summarize": {"model": {"provider": "ollama", "model": "small"}}}, max_turns=1
+        {"summarize": {"model": {"provider": "ollama", "name": "small"}}}, max_turns=1
     )
 
     async def broken(text: str) -> str:
@@ -130,6 +132,6 @@ def test_history_settings_are_validated() -> None:
     with pytest.raises(ValidationError, match="unknown variable"):
         _definition({"turn_template": "{{ promptt }}"})
     with pytest.raises(ValidationError, match="must include"):
-        _definition({"summarize": {"model": {"provider": "ollama", "model": "m"}, "prompt": "hi"}})
+        _definition({"summarize": {"model": {"provider": "ollama", "name": "m"}, "prompt": "hi"}})
     with pytest.raises(ValidationError):
         _definition({"max_chars": 10})

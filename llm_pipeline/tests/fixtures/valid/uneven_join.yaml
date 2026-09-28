@@ -1,27 +1,27 @@
 name: uneven-join
-version: 1
+version: 2
 
 # A reaches the join in one step, B2 in two: the join must still run once,
 # after both.
 nodes:
   - id: A
     depends_on: []
-    model: { provider: ollama, model: test-model }
+    model: { provider: ollama, name: test-model }
     prompt_template: "a"
 
   - id: B1
     depends_on: [A]
-    model: { provider: ollama, model: test-model }
+    model: { provider: ollama, name: test-model }
     prompt_template: "b1"
 
   - id: B2
     depends_on: [B1]
-    model: { provider: ollama, model: test-model }
+    model: { provider: ollama, name: test-model }
     prompt_template: "b2"
 
   - id: J
     depends_on: [A, B2]
-    model: { provider: ollama, model: test-model }
+    model: { provider: ollama, name: test-model }
     prompt_template: "join {{ A.output }} + {{ B2.output }}"
 
-output_node: J
+output_nodes: [J]

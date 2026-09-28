@@ -1,16 +1,17 @@
 name: my-pipeline1
-version: 1
+version: 2
 execution:
   model_timeout_seconds: 60.0
-  max_history_turns: 0
   max_retries: 1
   retry_backoff_seconds: 1.0
+history:
+  max_turns: 0
 nodes:
   - id: answer
     depends_on: []
     model:
       provider: ollama
-      model: codegemma:2b
+      name: codegemma:2b
       temperature: 0.3
     prompt_template: '{{ input }}'
     layout:
@@ -20,7 +21,7 @@ nodes:
     depends_on: []
     model:
       provider: ollama
-      model: gpt-oss:20b
+      name: gpt-oss:20b
       temperature: 0.3
     prompt_template: '{{ input }}'
     include_history: false
@@ -31,7 +32,7 @@ nodes:
     depends_on: []
     model:
       provider: ollama
-      model: starcoder2:7b
+      name: starcoder2:7b
       temperature: 0.3
     prompt_template: |+
       {{ input }}
@@ -46,7 +47,7 @@ nodes:
       - answer
     model:
       provider: ollama
-      model: qwen3:14b
+      name: qwen3:14b
       temperature: 0.3
     prompt_template: |-
       {{ node_2.output }}
@@ -57,4 +58,4 @@ nodes:
     layout:
       x: 0.0
       y: 170.0
-output_node: node_3
+output_nodes: [node_3]

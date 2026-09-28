@@ -66,7 +66,7 @@ describe("stopping a request", () => {
     const stopTests = new AbortController();
     await assert.rejects(
       (async () => {
-        for await (const _ of client.runTests({ definition: { name: "p", nodes: [], output_node: "a" } }, { signal: stopTests.signal })) {
+        for await (const _ of client.runTests({ definition: { name: "p", nodes: [], output_nodes: ["a"] } }, { signal: stopTests.signal })) {
           stopTests.abort();
         }
       })(),

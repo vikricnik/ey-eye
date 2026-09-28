@@ -14,12 +14,12 @@ import { effectiveModel } from "./draftOps.js";
 import { conditionalSources, effectiveRoots } from "./topology.js";
 import { routeTargets } from "./types.js";
 
-/** "provider:model" a node runs with; "(default)" when it inherits the
+/** "provider:name" a node runs with; "(default)" when it inherits the
  * pipeline's default model. */
 export function displayModel(definition: PipelineDefinition, node: PipelineDefinition["nodes"][number]): string {
   const model = effectiveModel(definition, node);
   if (!model) return "(no model)";
-  return `${model.provider}:${model.model}${node.model ? "" : " (default)"}`;
+  return `${model.provider}:${model.name}${node.model ? "" : " (default)"}`;
 }
 
 /**
@@ -28,11 +28,10 @@ export function displayModel(definition: PipelineDefinition, node: PipelineDefin
  * buildGraphModel() and layout levels and live run status work identically.
  */
 export function detailFromDefinition(definition: PipelineDefinition): PipelineDetail {
-  const outputs = definition.output_node;
   return {
     name: definition.name,
     description: definition.description ?? "",
-    output_node_candidates: Array.isArray(outputs) ? outputs : [outputs],
+    output_nodes: definition.output_nodes,
     nodes: definition.nodes.map((n) => ({
       id: n.id,
       type: n.type ?? "llm_call",
@@ -121,7 +120,7 @@ export function buildGraphModel(detail: PipelineDetail): GraphModel {
     return level;
   }
 
-  const outputCandidates = new Set(detail.output_node_candidates);
+  const outputCandidates = new Set(detail.output_nodes);
 
   const nodes: GraphNode[] = detail.nodes.map((n) => ({
     id: n.id,

@@ -388,7 +388,7 @@ async function handlePrompt(
     console.log();
     console.log(formatRunResponse(response, verbose, elapsedMs));
     console.log();
-    // Only the final answer (the output_node's result) is kept as context
+    // Only the final answer (the output node's result) is kept as context
     // for the next turn — intermediate node outputs aren't carried forward.
     // Remembered node outputs travel with the turn (the pipeline's history.remember).
     return {

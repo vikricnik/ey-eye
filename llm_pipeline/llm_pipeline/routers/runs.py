@@ -91,7 +91,7 @@ def _summarizer(definition: PipelineDefinition, cache: PipelineCache) -> Summari
     assert model is not None
     spec = ModelSpec(
         model.provider,
-        model.model,
+        model.name,
         model.temperature if model.temperature is not None else DEFAULT_TEMPERATURE,
         model.options,
     )
@@ -212,10 +212,10 @@ def node_dtos(node_outputs: dict[str, NodeResult]) -> dict[str, NodeOutput]:
 def _resolve_output_node(
     definition: PipelineDefinition, node_outputs: dict[str, NodeResult]
 ) -> str | None:
-    """output_node is one or more CANDIDATES, not a single fixed id — once a
-    branch means only one of several possible "final" nodes actually runs
-    per request, whichever candidate is actually present wins."""
-    for candidate in definition.output_node_candidates:
+    """output_nodes are CANDIDATES, not a single fixed id — once a branch
+    means only one of several possible "final" nodes actually runs per
+    request, the first candidate that ran wins."""
+    for candidate in definition.output_nodes:
         if candidate in node_outputs:
             return candidate
     return None
@@ -256,8 +256,8 @@ async def run_pipeline(
     if resolved_output_node is None:
         raise ApiError(
             ErrorCode.PIPELINE_RUN_FAILED,
-            f"Pipeline completed but none of its output_node candidates "
-            f"({', '.join(definition.output_node_candidates)}) produced a result",
+            f"Pipeline completed but none of its output_nodes "
+            f"({', '.join(definition.output_nodes)}) produced a result",
         )
 
     return RunResponse(
@@ -461,8 +461,8 @@ async def pipeline_events(
             build_error_response(
                 request,
                 ErrorCode.PIPELINE_RUN_FAILED,
-                f"Pipeline completed but none of its output_node candidates "
-                f"({', '.join(definition.output_node_candidates)}) produced a result",
+                f"Pipeline completed but none of its output_nodes "
+                f"({', '.join(definition.output_nodes)}) produced a result",
             ),
         )
         return

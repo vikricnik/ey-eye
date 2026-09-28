@@ -207,7 +207,7 @@ def build_llm_call_node(
     model = effective.model
     spec = ModelSpec(
         model.provider,
-        model.model,
+        model.name,
         model.temperature if model.temperature is not None else DEFAULT_TEMPERATURE,
         model.options,
     )

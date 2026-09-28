@@ -57,7 +57,7 @@ problems are where the parts meet:
 | [API-012](#api-012-the-template-variable--input--quietly-includes-the-conversation) | WARNING | The template variable `{{ input }}` quietly includes the conversation — ✅ fixed |
 | [API-013](#api-013-python-signatures-rely-on-positional-tuples-and-long-parameter-lists) | SUGGESTION | Python signatures rely on positional tuples and long parameter lists — ✅ fixed |
 | [API-014](#api-014-one-concept-has-three-names-and-several-cli-commands-differ-by-one-keystroke) | SUGGESTION | One concept has three names, and several CLI commands differ by one keystroke — ✅ fixed |
-| [API-015](#api-015-yaml-schema-naming) | SUGGESTION | YAML schema naming |
+| [API-015](#api-015-yaml-schema-naming) | SUGGESTION | YAML schema naming — ✅ fixed |
 | [API-016](#api-016-validate-takes-two-mutually-exclusive-fields-and-checks-at-runtime) | SUGGESTION | `validate` takes two mutually exclusive fields and checks at runtime |
 | [API-017](#api-017-graphedge-expresses-its-variant-through-nullable-fields) | SUGGESTION | `GraphEdge` expresses its variant through nullable fields |
 | [API-018](#api-018-smaller-naming-items) | SUGGESTION | Smaller naming items |
@@ -663,6 +663,31 @@ working around them.
 ### API-015: YAML schema naming
 
 - **Severity**: SUGGESTION
+- **Status**: ✅ Fixed (2026-09-28).
+  - The schema is now `version: 2`:
+
+    | Version 1 | Version 2 |
+    |---|---|
+    | `model: { provider, model }` | `model: { provider, name }` |
+    | `output_node: a` or `[a, b]` | `output_nodes: [a, b]` (always a list) |
+    | `execution.max_history_turns` | `history.max_turns` |
+
+  - Version-1 keys are still accepted, in files and in request bodies.
+    `pipeline_config/upgrade.py` upgrades them before validation. Setting
+    both a key and its old name is refused, and so is an unknown `version`.
+  - Saving an old file upgrades it in place and keeps its comments, blank
+    lines and key positions.
+  - The shipped pipelines, presets and test fixtures are upgraded, and so
+    is `contracts/topology-cases.json`.
+  - The client uses the same names: `NodeModelConfig.name` and
+    `PipelineDefinition.output_nodes`. `PipelineDetail.output_node_candidates`
+    is now `output_nodes`, and `outputCandidates()` is gone.
+  - Judge prompts use `{{ requirement }}`, matching the Python name and the
+    default prompt's wording. `{{ criterion }}` still works.
+  - Turn templates use `{{ final_answer }}`, the `ConversationTurn` field.
+    `{{ answer }}` still works.
+  - `RunResponse.output_node` is unchanged: it names the one node that
+    answered.
 - **Principle**: Naming clarity (configuration interface)
 - **File(s)**:
   - [schema.py:81-89](llm_pipeline/llm_pipeline/pipeline_config/schema.py#L81-L89)

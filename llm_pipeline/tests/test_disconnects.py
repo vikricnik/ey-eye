@@ -111,11 +111,11 @@ async def test_leaving_mid_run_cancels_the_model_call(monkeypatch: pytest.Monkey
             "nodes": [
                 {
                     "id": "answer",
-                    "model": {"provider": "ollama", "model": "m"},
+                    "model": {"provider": "ollama", "name": "m"},
                     "prompt_template": "{{ input }}",
                 }
             ],
-            "output_node": "answer",
+            "output_nodes": ["answer"],
         }
     )
     state: PipelineState = {

@@ -11,7 +11,7 @@ import {
   parseDependencyEdgeId,
 } from "../src/editor/conversion";
 
-const model = { provider: "ollama" as const, model: "m" };
+const model = { provider: "ollama" as const, name: "m" };
 const diamond: PipelineDefinition = {
   name: "d",
   nodes: [
@@ -21,7 +21,7 @@ const diamond: PipelineDefinition = {
     { id: "d", depends_on: ["b", "c"], model, prompt_template: "{{ b.output }} {{ c.output }}" },
   ],
   loops: [{ id: "again", from: "d", back_to: "b", exit_to: "END", exit_when: 'output.startswith("OK")', max_iterations: 2 }],
-  output_node: "d",
+  output_nodes: ["d"],
 };
 
 describe("autoLayout", () => {
@@ -91,7 +91,7 @@ describe("branch routes with several targets", () => {
         ],
       },
     ],
-    output_node: ["tech", "gen"],
+    output_nodes: ["tech", "gen"],
   };
 
   it("draws one edge per target, with ids unique even when two routes share a target", () => {

@@ -27,7 +27,6 @@ import {
   modelIdentity,
   modelWithIdentity,
   newDefinition,
-  outputCandidates,
   parseModelIdentity,
   presetFromNode,
   removeNode,
@@ -98,8 +97,8 @@ ${chalk.bold("Editing pipelines:")}
   ${chalk.yellow("/settings")}                      show pipeline-wide settings (execution, history, defaults)
   ${chalk.yellow("/settings set <setting> <value>")}  change one, e.g. /settings set history.max_chars 4000
                                     description, execution.<timeout|retries|max_concurrency|…>,
-                                    execution.max_history_turns, history.<intro|turn_template|
-                                    max_chars|remember|summarize.model|summarize.prompt>,
+                                    history.<max_turns|intro|turn_template|max_chars|remember|
+                                    summarize.model|summarize.prompt>,
                                     defaults.<model|temperature|system_prompt|strip_reasoning|options.*>
   ${chalk.yellow("/prompt <node> [system]")}        edit a prompt in $EDITOR (or type lines, end with ".")
   ${chalk.yellow("/connect <from> <to>")}           make <to> depend on <from>
@@ -190,7 +189,7 @@ function update(ctx: EditContext, draft: PipelineDefinition): void {
 }
 
 function formatNodesTable(def: PipelineDefinition): string {
-  const outputs = new Set(outputCandidates(def));
+  const outputs = new Set(def.output_nodes);
   const rows = def.nodes.map((n) => [
     (outputs.has(n.id) ? "★ " : "  ") + n.id,
     displayModel(def, n),
@@ -219,7 +218,7 @@ function formatSettings(def: PipelineDefinition): string {
     row("retry_backoff_seconds", exec.retry_backoff_seconds),
     row("max_concurrency", exec.max_concurrency ?? "no limit"),
     chalk.bold.cyan("history"),
-    row("execution.max_history_turns", exec.max_history_turns),
+    row("max_turns", history.max_turns ?? 6),
     row("max_chars", history.max_chars ?? "no limit"),
     row("intro", history.intro),
     row("turn_template", history.turn_template?.replace(/\n/g, "\\n")),
@@ -240,7 +239,7 @@ function formatBlock(label: string, text: string | undefined): string[] {
 }
 
 function formatNode(def: PipelineDefinition, node: NodeConfig): string {
-  const isOutput = outputCandidates(def).includes(node.id);
+  const isOutput = def.output_nodes.includes(node.id);
   const model = effectiveModel(def, node);
   const options = model?.options ?? {};
   const optionText = Object.entries(options)
@@ -310,18 +309,18 @@ async function defaultModel(ctx: EditContext): Promise<NodeModelConfig> {
   try {
     const active = await ctx.client.getPipeline(ctx.activePipeline());
     const model = active.definition.nodes.find((n) => n.model)?.model;
-    if (model) return { provider: model.provider, model: model.model, temperature: model.temperature ?? 0.2 };
+    if (model) return { provider: model.provider, name: model.name, temperature: model.temperature ?? 0.2 };
   } catch {
     // fall through to the server's model list
   }
   try {
     const { providers } = await ctx.client.listModels();
     const first = providers.find((p) => p.provider === "ollama" && p.models.length > 0)?.models[0];
-    if (first) return { provider: "ollama", model: first.name, temperature: 0.2 };
+    if (first) return { provider: "ollama", name: first.name, temperature: 0.2 };
   } catch {
     // fall through to a placeholder the user can change with /set
   }
-  return { provider: "ollama", model: "llama3", temperature: 0.2 };
+  return { provider: "ollama", name: "llama3", temperature: 0.2 };
 }
 
 async function confirm(ctx: EditContext, question: string): Promise<boolean> {
@@ -435,7 +434,7 @@ async function handleNodeCommand(ctx: EditContext, args: string[]): Promise<void
   const running = effectiveModel(session.draft, node);
   if (running?.provider === "ollama") {
     try {
-      const limits = await ctx.client.getModelLimits(running.model);
+      const limits = await ctx.client.getModelLimits(running.name);
       const parts = [
         limits.context_length ? `max context ${limits.context_length.toLocaleString("en-US")}` : null,
         limits.parameter_size,
@@ -887,7 +886,7 @@ export async function handleEditCommand(ctx: EditContext, line: string): Promise
         await runTestCases(
           ctx,
           undefined,
-          models.map((identity) => ({ label: parseModelIdentity(identity).model, models: { [node]: parseModelIdentity(identity) } }))
+          models.map((identity) => ({ label: parseModelIdentity(identity).name, models: { [node]: parseModelIdentity(identity) } }))
         );
         break;
       }

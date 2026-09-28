@@ -67,7 +67,6 @@
     ],
     "ExecutionConfig": [
       "max_concurrency",
-      "max_history_turns",
       "max_retries",
       "model_timeout_seconds",
       "retry_backoff_seconds"
@@ -84,6 +83,7 @@
     "HistoryConfig": [
       "intro",
       "max_chars",
+      "max_turns",
       "remember",
       "summarize",
       "turn_template"
@@ -147,7 +147,7 @@
       "y"
     ],
     "NodeModelConfig": [
-      "model",
+      "name",
       "options",
       "provider",
       "temperature"
@@ -215,7 +215,7 @@
       "loops",
       "name",
       "nodes",
-      "output_node",
+      "output_nodes",
       "tests",
       "version"
     ],

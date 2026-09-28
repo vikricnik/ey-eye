@@ -163,7 +163,7 @@ const NUMERIC_FIELDS = new Set([
   "x",
   "y",
   "model_timeout_seconds",
-  "max_history_turns",
+  "max_turns",
   "max_retries",
   "retry_backoff_seconds",
   "max_iterations",

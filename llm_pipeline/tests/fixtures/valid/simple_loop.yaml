@@ -1,17 +1,17 @@
 name: simple-loop
-version: 1
+version: 2
 
 nodes:
   - id: generate
     depends_on: []
-    model: { provider: ollama, model: gen-model }
+    model: { provider: ollama, name: gen-model }
     prompt_template: |
       {{ input }}
       {% if critique is defined %}{{ critique.output }}{% endif %}
 
   - id: critique
     depends_on: [generate]
-    model: { provider: ollama, model: critique-model }
+    model: { provider: ollama, name: critique-model }
     prompt_template: "{{ generate.output }}"
 
 loops:
@@ -23,4 +23,4 @@ loops:
     max_iterations: 3
     on_max_iterations: proceed
 
-output_node: generate
+output_nodes: [generate]

@@ -1,15 +1,16 @@
 name: iterative-refinement
 description: Generate a draft, critique it, and loop back to revise up to 3 times before finalizing
-version: 1
+version: 2
 
 execution:
   model_timeout_seconds: 60
-  max_history_turns: 4
+history:
+  max_turns: 4
 
 nodes:
   - id: generate
     depends_on: []
-    model: { provider: ollama, model: llama3, temperature: 0.4 }
+    model: { provider: ollama, name: llama3, temperature: 0.4 }
     prompt_template: |
       {{ input }}
       {% if critique is defined %}
@@ -19,7 +20,7 @@ nodes:
 
   - id: critique
     depends_on: [generate]
-    model: { provider: ollama, model: llama3.2:3b, temperature: 0.0 }
+    model: { provider: ollama, name: llama3.2:3b, temperature: 0.0 }
     prompt_template: |
       Review this answer: {{ generate.output }}
 
@@ -35,9 +36,9 @@ loops:
     max_iterations: 3
     on_max_iterations: proceed
 
-# output_node is `generate`, not `critique` — critique's own text is just
+# output_nodes is `generate`, not `critique` — critique's own text is just
 # "APPROVE" or "REVISE: ...", the actual answer lives in generate's latest
 # output. Since node_outputs holds only the LATEST result per node id,
 # generate's entry is automatically its most-revised version by the time
 # the loop exits, regardless of how many iterations happened.
-output_node: generate
+output_nodes: [generate]

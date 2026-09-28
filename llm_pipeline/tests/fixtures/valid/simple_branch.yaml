@@ -1,20 +1,20 @@
 name: simple-branch
-version: 1
+version: 2
 
 nodes:
   - id: classify
     depends_on: []
-    model: { provider: ollama, model: test-model }
+    model: { provider: ollama, name: test-model }
     prompt_template: "{{ input }}"
 
   - id: path_a
     depends_on: []
-    model: { provider: ollama, model: test-model }
+    model: { provider: ollama, name: test-model }
     prompt_template: "A: {{ input }}"
 
   - id: path_b
     depends_on: []
-    model: { provider: ollama, model: test-model }
+    model: { provider: ollama, name: test-model }
     prompt_template: "B: {{ input }}"
 
 branches:
@@ -26,4 +26,4 @@ branches:
       - default: true
         to: path_b
 
-output_node: [path_a, path_b]
+output_nodes: [path_a, path_b]

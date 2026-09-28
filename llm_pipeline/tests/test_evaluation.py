@@ -31,17 +31,17 @@ def _definition(tests: dict[str, Any] | None = None) -> dict[str, Any]:
         "nodes": [
             {
                 "id": "answer",
-                "model": {"provider": "ollama", "model": "llama3"},
+                "model": {"provider": "ollama", "name": "llama3"},
                 "prompt_template": "{{ input }}",
             }
         ],
-        "output_node": "answer",
+        "output_nodes": ["answer"],
         **({"tests": tests} if tests is not None else {}),
     }
 
 
 TESTS: dict[str, Any] = {
-    "judge": {"model": {"provider": "ollama", "model": "judge"}},
+    "judge": {"model": {"provider": "ollama", "name": "judge"}},
     "cases": [
         {
             "name": "capital",
@@ -127,15 +127,21 @@ def test_the_tests_block_is_validated() -> None:
     unsafe = {"cases": [{"name": "a", "input": "x", "expect": [{"check": "__import__('os')"}]}]}
     with pytest.raises(ValidationError, match="invalid check"):
         PipelineDefinition.model_validate(_definition(unsafe))
-    blind = {**TESTS, "judge": {"model": {"provider": "ollama", "model": "j"}, "prompt": "{{ q }}"}}
+    blind = {**TESTS, "judge": {"model": {"provider": "ollama", "name": "j"}, "prompt": "{{ q }}"}}
     with pytest.raises(ValidationError, match="unknown variable"):
         PipelineDefinition.model_validate(_definition(blind))
     # {{ message }} works wherever {{ question }} does.
     judge = {
-        "model": {"provider": "ollama", "model": "j"},
-        "prompt": "{{ message }} {{ answer }} {{ criterion }}",
+        "model": {"provider": "ollama", "name": "j"},
+        "prompt": "{{ message }} {{ answer }} {{ requirement }}",
     }
     PipelineDefinition.model_validate(_definition({**TESTS, "judge": judge}))
+    # …and {{ criterion }} is the older name of {{ requirement }}.
+    older = {**judge, "prompt": "{{ answer }} {{ criterion }}"}
+    PipelineDefinition.model_validate(_definition({**TESTS, "judge": older}))
+    ungraded = {**judge, "prompt": "{{ answer }}"}
+    with pytest.raises(ValidationError, match=r"must include \{\{ requirement \}\}"):
+        PipelineDefinition.model_validate(_definition({**TESTS, "judge": ungraded}))
 
 
 def test_tests_are_saved_only_when_there_are_some(client: TestClient) -> None:
@@ -180,7 +186,7 @@ def test_variants_compare_models_on_the_same_cases(client: TestClient) -> None:
             "cases": ["capital"],
             "inputs": ["one more question"],
             "variants": [
-                {"label": "small", "models": {"answer": {"provider": "ollama", "model": "small"}}}
+                {"label": "small", "models": {"answer": {"provider": "ollama", "name": "small"}}}
             ],
         },
     )
@@ -207,7 +213,7 @@ def test_a_variant_may_only_use_allowed_models(client: TestClient) -> None:
             "variants": [
                 {
                     "label": "x",
-                    "models": {"answer": {"provider": "ollama", "model": "not-installed"}},
+                    "models": {"answer": {"provider": "ollama", "name": "not-installed"}},
                 }
             ],
         },
@@ -231,7 +237,7 @@ def test_test_run_problems(client: TestClient, monkeypatch: pytest.MonkeyPatch) 
         json={
             "definition": _definition(TESTS),
             "variants": [
-                {"label": "current", "models": {"answer": {"provider": "ollama", "model": "small"}}}
+                {"label": "current", "models": {"answer": {"provider": "ollama", "name": "small"}}}
             ],
         },
     )
@@ -242,7 +248,7 @@ def test_test_run_problems(client: TestClient, monkeypatch: pytest.MonkeyPatch) 
         json={
             "definition": _definition(TESTS),
             "variants": [
-                {"label": "v", "models": {"ghost": {"provider": "ollama", "model": "small"}}}
+                {"label": "v", "models": {"ghost": {"provider": "ollama", "name": "small"}}}
             ],
         },
     )

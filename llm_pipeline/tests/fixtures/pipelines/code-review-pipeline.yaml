@@ -1,10 +1,11 @@
 name: code-review-pipeline
 description: Plan, then implement + test in parallel, then review and merge
-version: 1
+version: 2
 
 execution:
   model_timeout_seconds: 90
-  max_history_turns: 4
+history:
+  max_turns: 4
 
 # Runs entirely on Ollama by default — no cloud API keys needed. See the
 # commented-out alternatives below for swapping in a cloud provider on
@@ -13,7 +14,7 @@ execution:
 nodes:
   - id: plan
     depends_on: []
-    model: { provider: ollama, model: llama3.2:3b, temperature: 0.0 }
+    model: { provider: ollama, name: llama3.2:3b, temperature: 0.0 }
     prompt_template: |
       Break this coding request into a short plan: what needs to be built,
       key edge cases, and what should be tested.
@@ -22,7 +23,7 @@ nodes:
 
   - id: implement
     depends_on: [plan]
-    model: { provider: ollama, model: qwen3-coder:30b, temperature: 0.2 }
+    model: { provider: ollama, name: qwen3-coder:30b, temperature: 0.2 }
     # Optional: requires `uv sync --extra openai` and
     # OPENAI_API_KEY set — see llm_pipeline/README.md.
     # model: { provider: openai, model: gpt-4o, temperature: 0.2 }
@@ -35,7 +36,7 @@ nodes:
 
   - id: write_tests
     depends_on: [plan]
-    model: { provider: ollama, model: qwen3-coder:30b, temperature: 0.2 }
+    model: { provider: ollama, name: qwen3-coder:30b, temperature: 0.2 }
     prompt_template: |
       Plan: {{ plan.output }}
 
@@ -46,7 +47,7 @@ nodes:
 
   - id: review
     depends_on: [implement, write_tests]
-    model: { provider: ollama, model: gemma3:12b, temperature: 0.0 }
+    model: { provider: ollama, name: gemma3:12b, temperature: 0.0 }
     # Optional: requires `uv sync --extra anthropic` and
     # ANTHROPIC_API_KEY set.
     # model: { provider: anthropic, model: claude-sonnet-4-5, temperature: 0.0 }
@@ -61,4 +62,4 @@ nodes:
       behavior, flag any bugs or mismatches, and produce the final combined
       output: implementation + tests + a one-paragraph review summary.
 
-output_node: review
+output_nodes: [review]

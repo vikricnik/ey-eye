@@ -35,17 +35,17 @@ function setup(answer = "y") {
   const draft: PipelineDefinition = {
     name: "p",
     nodes: [
-      { id: "draft", depends_on: [], model: { provider: "ollama", model: "llama3" }, prompt_template: "{{ input }}" },
+      { id: "draft", depends_on: [], model: { provider: "ollama", name: "llama3" }, prompt_template: "{{ input }}" },
       {
         id: "critic",
         depends_on: ["draft"],
-        model: { provider: "ollama", model: "gemma3:12b", temperature: 0.1, options: { num_ctx: 8192 } },
+        model: { provider: "ollama", name: "gemma3:12b", temperature: 0.1, options: { num_ctx: 8192 } },
         system_prompt: "Be strict.",
         prompt_template: "Critique:\n{{ draft.output }}",
         include_history: false,
       },
     ],
-    output_node: "critic",
+    output_nodes: ["critic"],
   };
   const ctx: EditContext = {
     client,
@@ -91,14 +91,14 @@ describe("/preset", () => {
     await run("/preset save critic strict-critic --description Checks a draft for errors");
     const saved = presets.get("strict-critic")!;
     assert.equal(saved.description, "Checks a draft for errors");
-    assert.deepEqual(saved.model, { provider: "ollama", model: "gemma3:12b", temperature: 0.1, options: { num_ctx: 8192 } });
+    assert.deepEqual(saved.model, { provider: "ollama", name: "gemma3:12b", temperature: 0.1, options: { num_ctx: 8192 } });
     assert.equal(saved.prompt_template, "Critique:\n{{ draft.output }}");
     assert.equal(saved.include_history, false);
 
     // a fresh pipeline, starting from the preset
     await run("/new other --from strict-critic");
     assert.equal(ctx.session!.draft.nodes[0]!.id, "strict_critic");
-    assert.equal(ctx.session!.draft.output_node, "strict_critic");
+    assert.deepEqual(ctx.session!.draft.output_nodes, ["strict_critic"]);
 
     // …and a second copy after a node: its {{ draft.output }} now reads that node
     await run("/preset add strict-critic --after strict_critic --id review");
@@ -110,10 +110,10 @@ describe("/preset", () => {
   it("asks before replacing a preset", async () => {
     const { presets, run } = setup("n");
     await run("/preset save critic");
-    assert.equal(presets.get("critic")!.model.model, "gemma3:12b", "saved under the node's id");
+    assert.equal(presets.get("critic")!.model.name, "gemma3:12b", "saved under the node's id");
     await run("/set critic.model ollama:llama3");
     await run("/preset save critic");
-    assert.equal(presets.get("critic")!.model.model, "gemma3:12b", "declined: not replaced");
+    assert.equal(presets.get("critic")!.model.name, "gemma3:12b", "declined: not replaced");
     assert.ok(printed.some((l) => l.includes("not saved")));
   });
 
@@ -150,6 +150,8 @@ describe("grouped commands", () => {
     const { ctx, run } = setup();
     await run("/settings set history.max_chars 4000");
     assert.equal(ctx.session!.draft.history?.max_chars, 4000);
+    await run("/settings set history.max_turns 3");
+    assert.equal(ctx.session!.draft.history?.max_turns, 3);
   });
 
   it("/pipeline rm deletes a pipeline, guarded by the draft's revision", async () => {
@@ -179,7 +181,7 @@ describe("/test and /compare", () => {
     await run("/test judge ollama:llama3.2:3b");
     // (deepEqual above narrowed the draft's type; read it afresh)
     const draft = (): PipelineDefinition => ctx.session!.draft;
-    assert.equal(draft().tests?.judge?.model.model, "llama3.2:3b");
+    assert.equal(draft().tests?.judge?.model.name, "llama3.2:3b");
     await run("/test rm capital");
     assert.equal(draft().tests?.cases, undefined);
   });
@@ -206,7 +208,7 @@ describe("/test and /compare", () => {
     await run("/compare critic ollama:llama3.2:3b");
     assert.equal(sent!.definition, ctx.session!.draft, "runs the draft, unsaved");
     assert.deepEqual(sent!.variants, [
-      { label: "llama3.2:3b", models: { critic: { provider: "ollama", model: "llama3.2:3b" } } },
+      { label: "llama3.2:3b", models: { critic: { provider: "ollama", name: "llama3.2:3b" } } },
     ]);
     assert.ok(printed.some((l) => l.includes("1/1 passed")));
     await run("/compare nope ollama:x");

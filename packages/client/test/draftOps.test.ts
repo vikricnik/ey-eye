@@ -38,19 +38,19 @@ function diamond(): PipelineDefinition {
   return {
     name: "d",
     nodes: [
-      { id: "a", depends_on: [], model: { provider: "ollama", model: "llama3" }, prompt_template: "{{ input }}" },
-      { id: "b", depends_on: ["a"], model: { provider: "ollama", model: "llama3" }, prompt_template: "B {{ a.output }}" },
-      { id: "c", depends_on: ["a"], model: { provider: "ollama", model: "llama3" }, prompt_template: "C {{a.output}}" },
+      { id: "a", depends_on: [], model: { provider: "ollama", name: "llama3" }, prompt_template: "{{ input }}" },
+      { id: "b", depends_on: ["a"], model: { provider: "ollama", name: "llama3" }, prompt_template: "B {{ a.output }}" },
+      { id: "c", depends_on: ["a"], model: { provider: "ollama", name: "llama3" }, prompt_template: "C {{a.output}}" },
       {
         id: "d",
         depends_on: ["b", "c"],
-        model: { provider: "ollama", model: "llama3", options: { num_ctx: 4096 } },
+        model: { provider: "ollama", name: "llama3", options: { num_ctx: 4096 } },
         prompt_template: "{{ b.output }} / {{ c.output }} {% if b is defined %}x{% endif %}",
       },
     ],
     loops: [{ id: "l", from: "d", back_to: "b", exit_to: "END", exit_when: "True" }],
     branches: [{ id: "br", from: "a", routes: [{ when: "'x' in output", to: "b" }, { default: true, to: "c" }] }],
-    output_node: "d",
+    output_nodes: ["d"],
   };
 }
 
@@ -87,11 +87,11 @@ describe("removeNode", () => {
 
   it("falls back to a sink when the output node is removed", () => {
     const def = removeNode(diamond(), "d");
-    assert.equal(def.output_node, "c");
+    assert.deepEqual(def.output_nodes, ["c"]);
   });
 
   it("refuses to remove the last node", () => {
-    assert.throws(() => removeNode(newDefinition("x", { provider: "ollama", model: "m" }), "answer"), DraftError);
+    assert.throws(() => removeNode(newDefinition("x", { provider: "ollama", name: "m" }), "answer"), DraftError);
   });
 });
 
@@ -123,7 +123,7 @@ describe("renameNode", () => {
     assert.equal(d.prompt_template, "{{ critic.output }} / {{ c.output }} {% if critic is defined %}x{% endif %}");
     assert.equal(def.loops![0]!.back_to, "critic");
     assert.equal(def.branches![0]!.routes[0]!.to, "critic");
-    assert.equal(renameNode(diamond(), "d", "final").output_node, "final");
+    assert.deepEqual(renameNode(diamond(), "d", "final").output_nodes, ["final"]);
   });
 
   it("only rewrites real references, not look-alike words", () => {
@@ -170,14 +170,14 @@ describe("typed node edits", () => {
   it("switching model provider drops Ollama-only options", () => {
     const current = diamond().nodes[3]!.model;
     // No temperature was set, so none is invented: it stays "inherit".
-    assert.deepEqual(modelWithIdentity(current, "openai:gpt-4o"), { provider: "openai", model: "gpt-4o" });
+    assert.deepEqual(modelWithIdentity(current, "openai:gpt-4o"), { provider: "openai", name: "gpt-4o" });
     assert.deepEqual(modelWithIdentity(current, "gemma3:12b").options, { num_ctx: 4096 });
   });
 
   it("only a node with its own model can be tuned", () => {
     const inherits: PipelineDefinition = {
       ...diamond(),
-      defaults: { model: { provider: "ollama", model: "base" } },
+      defaults: { model: { provider: "ollama", name: "base" } },
     };
     const def = setNodeModel(inherits, "a", undefined);
     assert.throws(() => updateNodeModel(def, "a", (m) => ({ ...m, temperature: 1 })), DraftError);
@@ -203,9 +203,9 @@ describe("typed node edits", () => {
 
 describe("models and presets", () => {
   it("parses model identities", () => {
-    assert.deepEqual(parseModelIdentity("ollama:gemma3:12b"), { provider: "ollama", model: "gemma3:12b" });
-    assert.deepEqual(parseModelIdentity("gemma3:12b"), { provider: "ollama", model: "gemma3:12b" });
-    assert.deepEqual(parseModelIdentity("anthropic:claude-x"), { provider: "anthropic", model: "claude-x" });
+    assert.deepEqual(parseModelIdentity("ollama:gemma3:12b"), { provider: "ollama", name: "gemma3:12b" });
+    assert.deepEqual(parseModelIdentity("gemma3:12b"), { provider: "ollama", name: "gemma3:12b" });
+    assert.deepEqual(parseModelIdentity("anthropic:claude-x"), { provider: "anthropic", name: "claude-x" });
   });
 
   it("applying a preset copies values, not a reference", () => {
@@ -221,8 +221,8 @@ describe("models and presets", () => {
   });
 
   it("setOutput validates ids", () => {
-    assert.deepEqual(setOutput(diamond(), ["b", "c"]).output_node, ["b", "c"]);
-    assert.equal(setOutput(diamond(), ["c"]).output_node, "c");
+    assert.deepEqual(setOutput(diamond(), ["b", "c"]).output_nodes, ["b", "c"]);
+    assert.deepEqual(setOutput(diamond(), ["c"]).output_nodes, ["c"]);
     assert.throws(() => setOutput(diamond(), "zzz"), DraftError);
   });
 });
@@ -240,10 +240,10 @@ describe("duplicating nodes", () => {
     assert.deepEqual(definition.nodes.map((n) => n.id), ["a", "b", "b_2", "c", "d"], "listed after the original");
     // nothing depends on the copy, and branches/loops/output stay put
     assert.deepEqual(definition.nodes.find((n) => n.id === "d")!.depends_on, ["b", "c"]);
-    assert.equal(definition.output_node, "d");
+    assert.deepEqual(definition.output_nodes, ["d"]);
     assert.equal(definition.loops!.length, 1);
-    copy.model!.model = "changed";
-    assert.equal(definition.nodes.find((n) => n.id === "b")!.model!.model, "llama3", "a copy, not shared objects");
+    copy.model!.name = "changed";
+    assert.equal(definition.nodes.find((n) => n.id === "b")!.model!.name, "llama3", "a copy, not shared objects");
   });
 
   it("numbers copies of copies from the same base and accepts an explicit id", () => {
@@ -261,7 +261,7 @@ describe("saved nodes (presets)", () => {
     const def: PipelineDefinition = {
       ...diamond(),
       defaults: {
-        model: { provider: "ollama", model: "base", temperature: 0.6, options: { keep_alive: "10m" } },
+        model: { provider: "ollama", name: "base", temperature: 0.6, options: { keep_alive: "10m" } },
         system_prompt: "Be brief.",
         strip_reasoning: true,
       },
@@ -272,7 +272,7 @@ describe("saved nodes (presets)", () => {
     assert.deepEqual(presetFromNode(def, "b", "critic", { description: "  checks drafts " }), {
       name: "critic",
       description: "checks drafts",
-      model: { provider: "ollama", model: "base", temperature: 0.6, options: { keep_alive: "10m" } },
+      model: { provider: "ollama", name: "base", temperature: 0.6, options: { keep_alive: "10m" } },
       system_prompt: "Be brief.",
       prompt_template: "B {{ a.output }}",
       include_history: false,
@@ -287,11 +287,11 @@ describe("saved nodes (presets)", () => {
     def = setNodeProperty(def, "c", "strip_reasoning", true);
     def = applyPreset(def, "c", {
       name: "p",
-      model: { provider: "ollama", model: "gemma3:12b" },
+      model: { provider: "ollama", name: "gemma3:12b" },
       include_history: false,
     });
     const c = def.nodes.find((n) => n.id === "c")!;
-    assert.deepEqual(c.model, { provider: "ollama", model: "gemma3:12b" });
+    assert.deepEqual(c.model, { provider: "ollama", name: "gemma3:12b" });
     assert.equal(c.system_prompt, undefined, "the saved node had no system prompt");
     assert.equal(c.strip_reasoning, undefined);
     assert.equal(c.include_history, false);
@@ -302,7 +302,7 @@ describe("saved nodes (presets)", () => {
   it("a saved prompt is fitted to where the node lands", () => {
     const critic = {
       name: "critic",
-      model: { provider: "ollama" as const, model: "llama3" },
+      model: { provider: "ollama" as const, name: "llama3" },
       prompt_template: "Critique:\n{{ draft.output }}\n\nQuestion: {{ question }}",
     };
     // added after one node: the one unknown reference points at that input
@@ -330,26 +330,26 @@ describe("saved nodes (presets)", () => {
   });
 
   it("a new pipeline can start from a saved node", () => {
-    const model = { provider: "ollama" as const, model: "llama3", temperature: 0.2 };
+    const model = { provider: "ollama" as const, name: "llama3", temperature: 0.2 };
     const blank = newDefinition("p", model);
-    assert.equal(blank.output_node, "answer");
+    assert.deepEqual(blank.output_nodes, ["answer"]);
     assert.equal(blank.nodes[0]!.prompt_template, "{{ conversation }}");
     const saved = newDefinition("p", model, {
       name: "polite-answer",
-      model: { provider: "ollama", model: "gemma3:12b" },
+      model: { provider: "ollama", name: "gemma3:12b" },
       system_prompt: "Be polite.",
       prompt_template: "{{ input }}",
     });
-    assert.equal(saved.output_node, "polite_answer");
+    assert.deepEqual(saved.output_nodes, ["polite_answer"]);
     assert.equal(saved.nodes[0]!.system_prompt, "Be polite.");
-    assert.equal(saved.nodes[0]!.model!.model, "gemma3:12b");
+    assert.equal(saved.nodes[0]!.model!.name, "gemma3:12b");
   });
 });
 
 describe("pipeline defaults and history settings", () => {
   const withDefaults = (): PipelineDefinition => ({
     ...diamond(),
-    defaults: { model: { provider: "ollama", model: "base", temperature: 0.6, options: { num_ctx: 4096, keep_alive: "10m" } } },
+    defaults: { model: { provider: "ollama", name: "base", temperature: 0.6, options: { num_ctx: 4096, keep_alive: "10m" } } },
     history: { remember: ["b", "c"] },
   });
 
@@ -357,13 +357,13 @@ describe("pipeline defaults and history settings", () => {
     const { definition } = addNode(withDefaults(), { id: "e" });
     assert.equal(definition.nodes.at(-1)!.model, undefined);
     const plain = addNode(diamond(), { id: "e" }).definition;
-    assert.equal(plain.nodes.at(-1)!.model!.model, "llama3");
+    assert.equal(plain.nodes.at(-1)!.model!.name, "llama3");
   });
 
   it("effectiveModel applies the server's inheritance rules", () => {
     let def = addNode(withDefaults(), { id: "e" }).definition;
     assert.deepEqual(effectiveModel(def, def.nodes.at(-1)!), {
-      provider: "ollama", model: "base", temperature: 0.6, options: { num_ctx: 4096, keep_alive: "10m" },
+      provider: "ollama", name: "base", temperature: 0.6, options: { num_ctx: 4096, keep_alive: "10m" },
     });
     // node d has its own model with num_ctx 4096 and no temperature
     def = updateNodeModel(def, "d", (m) => modelWithOption(m, "num_ctx", 8192));
@@ -383,8 +383,8 @@ describe("pipeline defaults and history settings", () => {
     def = setPipelineSetting(def, "history", "max_chars", 5000);
     def = setPipelineSetting(def, "history", "summarize", { model: modelWithIdentity(undefined, "llama3.2:3b") });
     def = setPipelineSetting(def, "execution", "max_concurrency", 2);
-    assert.deepEqual(def.defaults, { model: { provider: "ollama", model: "gemma3:12b", temperature: 0.3, options: { num_ctx: 2048 } } });
-    assert.deepEqual(def.history, { max_chars: 5000, summarize: { model: { provider: "ollama", model: "llama3.2:3b" } } });
+    assert.deepEqual(def.defaults, { model: { provider: "ollama", name: "gemma3:12b", temperature: 0.3, options: { num_ctx: 2048 } } });
+    assert.deepEqual(def.history, { max_chars: 5000, summarize: { model: { provider: "ollama", name: "llama3.2:3b" } } });
     assert.equal(def.execution!.max_concurrency, 2);
     def = setPipelineSetting(def, "history", "summarize", undefined);
     assert.deepEqual(def.history, { max_chars: 5000 });
@@ -415,7 +415,7 @@ describe("test cases", () => {
 
   it("sets and clears the judge model", () => {
     let def = setTestJudge(diamond(), modelWithIdentity(undefined, "ollama:llama3.2:3b"));
-    assert.deepEqual(def.tests, { judge: { model: { provider: "ollama", model: "llama3.2:3b" } } });
+    assert.deepEqual(def.tests, { judge: { model: { provider: "ollama", name: "llama3.2:3b" } } });
     def = setTestJudge(def, undefined);
     assert.equal(def.tests, undefined);
   });

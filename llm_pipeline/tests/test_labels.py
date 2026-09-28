@@ -49,7 +49,7 @@ def _router(labels: list[str], routes: list[dict[str, Any]] | None = None) -> di
 
     return {
         "name": "router",
-        "defaults": {"model": {"provider": "ollama", "model": "m"}},
+        "defaults": {"model": {"provider": "ollama", "name": "m"}},
         "nodes": [
             {**node("classify"), "labels": labels},
             node("refund_flow"),
@@ -66,7 +66,7 @@ def _router(labels: list[str], routes: list[dict[str, Any]] | None = None) -> di
                 ],
             }
         ],
-        "output_node": ["refund_flow", "general_flow"],
+        "output_nodes": ["refund_flow", "general_flow"],
     }
 
 

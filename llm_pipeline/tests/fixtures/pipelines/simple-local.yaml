@@ -1,15 +1,16 @@
 name: simple-local
 description: Single-node, all-Ollama pipeline for quick local testing — no cloud API keys needed
-version: 1
+version: 2
 
 execution:
   model_timeout_seconds: 60
-  max_history_turns: 6
+history:
+  max_turns: 6
 
 nodes:
   - id: answer
     depends_on: []
-    model: { provider: ollama, model: llama3, temperature: 0.3 }
+    model: { provider: ollama, name: llama3, temperature: 0.3 }
     prompt_template: "{{ input }}"
 
-output_node: answer
+output_nodes: [answer]

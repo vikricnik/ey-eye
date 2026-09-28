@@ -48,8 +48,8 @@ after(() => {
   server.close();
 });
 
-const definition: PipelineDefinition = { name: "p", nodes: [], output_node: "a" };
-const preset: NodePreset = { name: "n", model: { provider: "ollama", model: "m" } };
+const definition: PipelineDefinition = { name: "p", nodes: [], output_nodes: ["a"] };
+const preset: NodePreset = { name: "n", model: { provider: "ollama", name: "m" } };
 
 describe("preconditions", () => {
   it("creates a pipeline with If-None-Match: * and updates it with If-Match", async () => {

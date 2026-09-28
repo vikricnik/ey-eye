@@ -8,7 +8,6 @@ import {
   modelWithIdentity,
   modelWithOption,
   nodeIds,
-  outputCandidates,
   removeBranch,
   removeLoop,
   removeNode,
@@ -46,7 +45,7 @@ import type { Turn } from "../run/Chat";
 // The server's built-in history defaults (pipeline_config/schema.py), shown
 // as the starting text of the format fields.
 const DEFAULT_TURN_TEMPLATE =
-  "User: {{ prompt }}\n{% for node, text in outputs.items() %}{{ node }}: {{ text }}\n{% endfor %}Assistant: {{ answer }}";
+  "User: {{ prompt }}\n{% for node, text in outputs.items() %}{{ node }}: {{ text }}\n{% endfor %}Assistant: {{ final_answer }}";
 const DEFAULT_SUMMARY_PROMPT =
   "Summarize this conversation briefly. Keep names, facts, decisions and open questions; drop small talk.\n\n{{ history }}";
 
@@ -170,7 +169,7 @@ function NodeInspector(props: InspectorProps & { node: NodeConfig; tab: NodeTab;
     onEdit((d) => updateNodeModel(d, id, change), `node:${id}:${key}`);
   const limits = useModelLimits(node.model);
   const deps = node.depends_on ?? [];
-  const isOutput = outputCandidates(def).includes(id);
+  const isOutput = def.output_nodes.includes(id);
   const [presetChoice, setPresetChoice] = useState("");
 
   const branch = (def.branches ?? []).find((b) => b.from === id);
@@ -338,9 +337,9 @@ function NodeInspector(props: InspectorProps & { node: NodeConfig; tab: NodeTab;
           <input
             type="checkbox"
             checked={isOutput}
-            disabled={!editable || (isOutput && outputCandidates(def).length === 1)}
+            disabled={!editable || (isOutput && def.output_nodes.length === 1)}
             onChange={(e) => {
-              const current = outputCandidates(def);
+              const current = def.output_nodes;
               onEdit((d) => setOutput(d, e.target.checked ? [...current, id] : current.filter((o) => o !== id)));
             }}
           />
@@ -442,7 +441,7 @@ function NodeInspector(props: InspectorProps & { node: NodeConfig; tab: NodeTab;
               <option value="">use a preset&apos;s configuration…</option>
               {presets.map((p) => (
                 <option key={p.name} value={p.name}>
-                  {p.name} — {p.model.provider}:{p.model.model}
+                  {p.name} — {p.model.provider}:{p.model.name}
                 </option>
               ))}
             </select>
@@ -810,7 +809,7 @@ function PipelineInspector(props: InspectorProps) {
       },
       `pipeline:execution:${key}`
     );
-  const outputs = outputCandidates(def);
+  const outputs = def.output_nodes;
 
   return (
     <div className="inspector-body">
@@ -958,7 +957,6 @@ function HistorySettings(props: InspectorProps) {
   const set = usePipelineSetter(onEdit);
   const remember = history.remember ?? [];
   const summaryLimits = useModelLimits(history.summarize?.model);
-  const turns = def.execution?.max_history_turns;
 
   return (
     <section>
@@ -971,10 +969,10 @@ function HistorySettings(props: InspectorProps) {
       <div className="field-stack">
         <Field label="turns kept" hint="most recent turns sent verbatim; 0 turns history off">
           <NumberField
-            value={turns}
+            value={history.max_turns}
             placeholder="6"
             disabled={!editable}
-            onChange={(v) => set("execution", "max_history_turns", v)}
+            onChange={(v) => set("history", "max_turns", v)}
           />
         </Field>
         <Field label="character budget" hint="oldest turns go first (empty: no limit)">
@@ -996,7 +994,7 @@ function HistorySettings(props: InspectorProps) {
       </Field>
       <Field
         label="Turn format"
-        hint="how each earlier turn is written — {{ prompt }}, {{ answer }}, and remembered outputs as {{ outputs.<node> }}"
+        hint="how each earlier turn is written — {{ prompt }}, {{ final_answer }}, and remembered outputs as {{ outputs.<node> }}"
       >
         <textarea
           className="prompt"

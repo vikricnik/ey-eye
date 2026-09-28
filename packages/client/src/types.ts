@@ -67,7 +67,7 @@ export interface NodeOutput {
 
 export interface RunResponse {
   pipeline_name: string;
-  output_node: string; // whichever output_node candidate actually resolved
+  output_node: string; // whichever of the output_nodes actually answered
   final_answer: string;
   node_outputs: Record<string, NodeOutput>;
   loop_iterations: Record<string, number>;
@@ -188,9 +188,9 @@ export interface PipelineLoopInfo {
 export interface PipelineDetail {
   name: string;
   description: string;
-  // One or more candidates — only ONE actually resolves per request once
-  // branches mean mutually exclusive terminal nodes.
-  output_node_candidates: string[];
+  /** As in the definition: one or more candidates — only ONE actually
+   * answers per request once branches mean mutually exclusive terminal nodes. */
+  output_nodes: string[];
   nodes: PipelineNodeInfo[];
   branches: PipelineBranchInfo[];
   loops: PipelineLoopInfo[];
@@ -254,7 +254,8 @@ export interface OllamaOptions {
 
 export interface NodeModelConfig {
   provider: ProviderType;
-  model: string;
+  /** The model's name at the provider, e.g. "llama3.2:3b". */
+  name: string;
   /** Unset: the pipeline default's temperature, else 0.2. */
   temperature?: number;
   /** Only valid when provider is "ollama" — the server rejects it otherwise. */
@@ -302,11 +303,13 @@ export interface HistorySummaryConfig {
   prompt?: string;
 }
 
-/** How earlier turns reach the nodes (how many: execution.max_history_turns). */
+/** How earlier turns reach the nodes. */
 export interface HistoryConfig {
+  /** How many of the latest turns are kept verbatim (0: history off). Unset: 6. */
+  max_turns?: number;
   /** First line of the history inside {{ conversation }}. */
   intro?: string;
-  /** Template for one earlier turn; variables: prompt, answer, outputs. */
+  /** Template for one earlier turn; variables: prompt, final_answer, outputs. */
   turn_template?: string;
   /** Character budget for verbatim turns; oldest dropped (or summarized) first. */
   max_chars?: number;
@@ -318,7 +321,6 @@ export interface HistoryConfig {
 
 export interface ExecutionConfig {
   model_timeout_seconds?: number;
-  max_history_turns?: number;
   max_retries?: number;
   retry_backoff_seconds?: number;
   /** At most this many nodes call models at once (unset: no limit). */
@@ -364,7 +366,9 @@ export interface PipelineDefinition {
   nodes: NodeConfig[];
   branches?: BranchConfig[];
   loops?: LoopConfig[];
-  output_node: string | string[];
+  /** The node whose output is the answer — or, when branches mean only one
+   * of several runs, candidates in priority order: the first that ran answers. */
+  output_nodes: string[];
   /** Test cases — the engine ignores them; see runTests(). */
   tests?: TestsConfig;
 }
@@ -392,7 +396,7 @@ export interface EvalCase {
 
 export interface EvalJudge {
   model: NodeModelConfig;
-  /** Variables: question, answer, criterion. Unset: the server's default. */
+  /** Variables: question, answer, requirement. Unset: the server's default. */
   prompt?: string;
 }
 

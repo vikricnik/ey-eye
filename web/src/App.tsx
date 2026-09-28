@@ -18,7 +18,6 @@ import {
   liveTextOf,
   moveNode,
   newDefinition,
-  outputCandidates,
   testCases,
   presetFromNode,
   removeNode,
@@ -365,9 +364,9 @@ export function App() {
    * known-good choice), else the first model the server lists. */
   const defaultModel = (): NodeModelConfig => {
     const inUse = docRef.current?.definition.nodes.find((n) => n.model)?.model;
-    if (inUse) return { provider: inUse.provider, model: inUse.model, temperature: inUse.temperature ?? 0.2 };
+    if (inUse) return { provider: inUse.provider, name: inUse.name, temperature: inUse.temperature ?? 0.2 };
     const first = models?.providers.find((p) => p.provider === "ollama" && p.models.length > 0)?.models[0];
-    return { provider: "ollama", model: first?.name ?? "llama3", temperature: 0.2 };
+    return { provider: "ollama", name: first?.name ?? "llama3", temperature: 0.2 };
   };
 
   /** Where each node is drawn (its saved layout, else the auto layout),
@@ -567,7 +566,7 @@ export function App() {
                 label: "Start with",
                 options: [
                   { value: "", label: "a blank LLM node" },
-                  ...presets.map((p) => ({ value: p.name, label: `${p.name} — ${p.model.model} (preset)` })),
+                  ...presets.map((p) => ({ value: p.name, label: `${p.name} — ${p.model.name} (preset)` })),
                 ],
                 hint: "add more from the presets in the sidebar",
               },
@@ -901,7 +900,7 @@ export function App() {
   // Text the running nodes' models are writing right now, from the current run's log.
   const currentLog = running ? turns.at(-1)?.log : undefined;
   const liveText = useMemo(() => (currentLog ? liveTextOf(currentLog) : {}), [currentLog]);
-  const outputIds = useMemo(() => new Set(doc ? outputCandidates(doc.definition) : []), [doc]);
+  const outputIds = useMemo(() => new Set(doc?.definition.output_nodes ?? []), [doc]);
   const flow = useMemo(
     () =>
       doc && graph
@@ -921,7 +920,7 @@ export function App() {
   // While a run is in flight, the output node's text streams into the
   // transcript as it's written (the first candidate with any text yet).
   const pendingAnswer = running && doc
-    ? outputCandidates(doc.definition).map((id) => liveText[id]).find((t) => t)
+    ? doc.definition.output_nodes.map((id) => liveText[id]).find((t) => t)
     : undefined;
 
   const isNew = doc?.baseRevision === null;

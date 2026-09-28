@@ -10,7 +10,7 @@ function excerpt(text: string, max = 160): string {
 /** Everything a preset carries, for its tooltip. */
 function summary(p: NodePreset): string {
   return [
-    `${p.model.provider}:${p.model.model}${p.model.temperature !== undefined ? ` · temperature ${p.model.temperature}` : ""}`,
+    `${p.model.provider}:${p.model.name}${p.model.temperature !== undefined ? ` · temperature ${p.model.temperature}` : ""}`,
     p.model.options && Object.keys(p.model.options).length > 0
       ? `options: ${Object.entries(p.model.options)
           .map(([k, v]) => `${k}=${Array.isArray(v) ? v.join(",") : String(v)}`)
@@ -39,7 +39,7 @@ export function Sidebar(props: {
   const query = filter.trim().toLowerCase();
   const shown = query
     ? presets.filter((p) =>
-        [p.name, p.description, p.model.model, p.system_prompt, p.prompt_template].some((t) =>
+        [p.name, p.description, p.model.name, p.system_prompt, p.prompt_template].some((t) =>
           t?.toLowerCase().includes(query)
         )
       )
@@ -104,10 +104,10 @@ export function Sidebar(props: {
             <div className="palette-row" key={p.name}>
               {item(
                 p.name,
-                p.description || `${p.model.provider}:${p.model.model}`,
+                p.description || `${p.model.provider}:${p.model.name}`,
                 p,
                 [
-                  p.description ? p.model.model : null,
+                  p.description ? p.model.name : null,
                   p.model.temperature !== undefined ? `T ${p.model.temperature}` : null,
                   p.include_history === false ? "no history" : null,
                   p.strip_reasoning ? "strips reasoning" : null,

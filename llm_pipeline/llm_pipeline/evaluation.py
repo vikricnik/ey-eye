@@ -63,7 +63,7 @@ def make_judge(
     assert model is not None
     spec = ModelSpec(
         model.provider,
-        model.model,
+        model.name,
         model.temperature if model.temperature is not None else DEFAULT_TEMPERATURE,
         model.options,
     )
@@ -72,7 +72,13 @@ def make_judge(
     async def judge(question: str, answer: str, requirement: str) -> str:
         prompt = render(
             config.prompt,
-            {"question": question, "message": question, "answer": answer, "criterion": requirement},
+            {
+                "question": question,
+                "message": question,
+                "answer": answer,
+                "requirement": requirement,
+                "criterion": requirement,
+            },
         )
         generation = await generate_with_retry(
             get_provider(spec),
@@ -130,7 +136,7 @@ async def check_expectation(
 
 
 def _answer_of(definition: PipelineDefinition, outputs: dict[str, NodeResult]) -> str | None:
-    return next((c for c in definition.output_node_candidates if c in outputs), None)
+    return next((c for c in definition.output_nodes if c in outputs), None)
 
 
 async def run_case(variant: Variant, case: EvalCase, judge: Judge | None) -> CaseResult:

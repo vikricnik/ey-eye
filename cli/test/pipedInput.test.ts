@@ -35,8 +35,8 @@ before(async () => {
         return json({
           definition: {
             name: "p",
-            nodes: [{ id: "a", prompt_template: "{{ input }}", model: { provider: "ollama", model: "m" } }],
-            output_node: "a",
+            nodes: [{ id: "a", prompt_template: "{{ input }}", model: { provider: "ollama", name: "m" } }],
+            output_nodes: ["a"],
           },
           revision: "0000000000000000",
           has_comments: false,

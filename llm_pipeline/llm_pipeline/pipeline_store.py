@@ -42,6 +42,7 @@ from pydantic import BaseModel, ValidationError
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
 from ruamel.yaml.scalarstring import LiteralScalarString
+from ruamel.yaml.tokens import CommentToken
 
 from llm_pipeline.errors import (
     AlreadyExistsError,
@@ -55,6 +56,7 @@ from llm_pipeline.errors import (
 from llm_pipeline.model_catalog import ModelCatalog, ModelNotAllowedError, ModelUse, model_identity
 from llm_pipeline.pipeline_config import NodePreset, PipelineDefinition, is_safe_name
 from llm_pipeline.pipeline_config.effective import effective_node
+from llm_pipeline.pipeline_config.upgrade import Document, upgrade_pipeline, upgrade_preset
 
 # Top-level key order for written pipeline files — matches the hand-written
 # files in pipelines/ (name first), rather than the model's field order.
@@ -68,7 +70,7 @@ _PIPELINE_KEY_ORDER = (
     "nodes",
     "branches",
     "loops",
-    "output_node",
+    "output_nodes",
     "tests",
 )
 
@@ -197,6 +199,52 @@ def _to_round_trip(value: object) -> object:
     return value
 
 
+class _RoundTripEdits:
+    """Key edits for upgrade.py on a round-trip document: a renamed key
+    keeps its place and its comment, so an older file's layout survives
+    being upgraded."""
+
+    def replace_key(self, mapping: Document, old: str, new: str, value: object) -> None:
+        document = cast(CommentedMap, mapping)
+        index = list(document).index(old)
+        comment = document.ca.items.pop(old, None)
+        was_scalar = not isinstance(document[old], dict | list)
+        del document[old]
+        written = _round_trip_value(value)
+        widened = len(new) - len(old)
+        if was_scalar and isinstance(written, CommentedSeq):
+            written.fa.set_flow_style()  # `output_node: a` → `output_nodes: [a]`, one line still
+            widened += 2
+        document.insert(index, new, written)
+        if comment is not None:
+            document.ca.items[new] = _shifted(comment, widened)
+
+    def insert_key(self, mapping: Document, index: int, key: str, value: object) -> None:
+        cast(CommentedMap, mapping).insert(index, key, _round_trip_value(value))
+
+    def move_key(self, source: Document, old: str, target: Document, index: int, new: str) -> None:
+        source_map, target_map = cast(CommentedMap, source), cast(CommentedMap, target)
+        comment = source_map.ca.items.pop(old, None)
+        target_map.insert(index, new, source_map.pop(old))
+        if comment is not None:
+            target_map.ca.items[new] = _shifted(comment, len(new) - len(old))
+
+
+def _shifted(comment: list[Any], widened: int) -> list[Any]:
+    """A key's comments, with its end-of-line comment moved along when its
+    line got `widened` characters longer — ruamel keeps comment columns."""
+    end_of_line = comment[2] if len(comment) > 2 else None
+    if isinstance(end_of_line, CommentToken) and end_of_line.value.startswith("#"):
+        end_of_line.column = max(0, end_of_line.column + widened)
+    return comment
+
+
+def _round_trip_value(value: object) -> object:
+    """`value` as the round-trip document holds it — as is, if it came from
+    the document (keeping its style)."""
+    return value if isinstance(value, CommentedMap | CommentedSeq) else _to_round_trip(value)
+
+
 def _is_id_list(value: object) -> bool:
     return isinstance(value, list) and all(
         isinstance(item, dict) and "id" in item for item in cast(list[object], value)
@@ -274,6 +322,14 @@ def _merge(old: object, new: object, old_full: object, canon: object) -> object:
     return _to_round_trip(new)
 
 
+def _pad_flow_map(match: re.Match[str]) -> str:
+    # ruamel kept a trailing comment's column for the tighter braces; the
+    # padding takes those two columns back, leaving at least one space.
+    comment = match[3] or ""
+    gap = len(comment) - len(comment.lstrip(" "))
+    return f"{match[1]}{{ {match[2]} }}{comment[min(2, max(gap - 1, 0)) :]}"
+
+
 def _restore_flow_padding(original: str, text: str) -> str:
     """ruamel writes flow mappings as `{a: 1}`; if the file used the padded
     `{ a: 1 }` style, keep it — padding inside flow braces is insignificant
@@ -293,20 +349,26 @@ def _restore_flow_padding(original: str, text: str) -> str:
             block_key_indent = len(start[1]) + (2 if start[2] else 0)
             lines.append(line)
             continue
-        lines.append(_TIGHT_FLOW_MAP.sub(lambda m: f"{m[1]}{{ {m[2]} }}{m[3] or ''}", line))
+        lines.append(_TIGHT_FLOW_MAP.sub(_pad_flow_map, line))
     return "\n".join(lines) + ("\n" if text.endswith("\n") else "")
 
 
 def _preserving_yaml(
-    original: str, old_full: dict[str, Any], full: dict[str, Any], canon: dict[str, Any]
+    original: str,
+    upgrade: Callable[[Document, _RoundTripEdits], None],
+    old_full: dict[str, Any],
+    full: dict[str, Any],
+    canon: dict[str, Any],
 ) -> str:
     """`original` (the file's current text) with the new content merged in:
     comments, key order, quoting and flow/block style of everything that
-    didn't change are kept."""
+    didn't change are kept. `upgrade` first brings a file written for an
+    older schema version up to date (upgrade.py)."""
     rt = _round_trip_yaml()
     document = rt.load(original)
     if not isinstance(document, CommentedMap):
         raise ValueError("not a YAML mapping")
+    upgrade(cast(Document, document), _RoundTripEdits())
     merged = _merge(document, full, old_full, canon)
     buffer = io.StringIO()
     rt.dump(merged, buffer)
@@ -359,7 +421,7 @@ def parse_definition_yaml(text: str) -> PipelineDefinition:
     except yaml.YAMLError as e:
         raise DefinitionInvalidError(f"not valid YAML: {e}") from e
     if not isinstance(raw, dict):
-        raise DefinitionInvalidError("YAML must be a mapping with name, nodes and output_node")
+        raise DefinitionInvalidError("YAML must be a mapping with name, nodes and output_nodes")
     return parse_definition(raw)
 
 
@@ -557,6 +619,7 @@ class PipelineStore:
                 old_full = definition_to_json(parse_definition_yaml(original))
                 text = _preserving_yaml(
                     original,
+                    upgrade_pipeline,
                     old_full,
                     definition_to_json(definition),
                     _canonical_pipeline(definition),
@@ -654,7 +717,9 @@ class PipelineStore:
                 original = path.read_text(encoding="utf-8")
                 try:
                     old = NodePreset.model_validate(yaml.safe_load(original))
-                    merged = _preserving_yaml(original, _to_json(old), _to_json(preset), data)
+                    merged = _preserving_yaml(
+                        original, upgrade_preset, _to_json(old), _to_json(preset), data
+                    )
                     if NodePreset.model_validate(yaml.safe_load(merged)) == preset:
                         text = merged
                 except Exception:

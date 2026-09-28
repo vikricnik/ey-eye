@@ -7,8 +7,8 @@ import type { EditorDoc } from "../src/editor/editorState";
 
 const base: PipelineDefinition = {
   name: "p",
-  nodes: [{ id: "a", model: { provider: "ollama", model: "m" }, prompt_template: "{{ input }}" }],
-  output_node: "a",
+  nodes: [{ id: "a", model: { provider: "ollama", name: "m" }, prompt_template: "{{ input }}" }],
+  output_nodes: ["a"],
 };
 const withPrompt = (prompt: string): PipelineDefinition => ({
   ...base,

@@ -18,7 +18,11 @@ into this module from inside a method).
 from typing import TYPE_CHECKING
 
 from llm_pipeline.pipeline_config.activation import inputs_that_may_never_arrive
-from llm_pipeline.pipeline_config.schema import JUDGE_VARIABLES, TEMPLATE_INPUT_VARIABLES
+from llm_pipeline.pipeline_config.schema import (
+    JUDGE_VARIABLES,
+    TEMPLATE_INPUT_VARIABLES,
+    TURN_TEMPLATE_VARIABLES,
+)
 from llm_pipeline.pipeline_config.templates import undeclared_variables, unguarded_references
 from llm_pipeline.pipeline_config.topology import Topology
 from llm_pipeline.safe_eval import MESSAGE_NAMES, evaluate_condition, expression_names
@@ -72,9 +76,9 @@ def validate_pipeline_dag(definition: "PipelineDefinition") -> None:
             if dep == node.id:
                 raise PipelineValidationError(f"node '{node.id}' cannot depend on itself", node.id)
 
-    for candidate in definition.output_node_candidates:
+    for candidate in definition.output_nodes:
         if candidate not in id_set:
-            raise ValueError(f"output_node '{candidate}' is not a defined node id")
+            raise ValueError(f"output_nodes: '{candidate}' is not a defined node id")
 
     _check_for_cycles(definition, ids)
     _validate_branches(definition, id_set)
@@ -319,7 +323,7 @@ def _validate_history(definition: "PipelineDefinition", id_set: set[str]) -> Non
         if node_id not in id_set:
             raise ValueError(f"history.remember names unknown node '{node_id}'")
     _check_template_variables(
-        history.turn_template, {"prompt", "answer", "outputs"}, "history.turn_template"
+        history.turn_template, set(TURN_TEMPLATE_VARIABLES), "history.turn_template"
     )
     if history.summarize is not None:
         used = _check_template_variables(
@@ -348,6 +352,7 @@ def _validate_tests(definition: "PipelineDefinition") -> None:
         used = _check_template_variables(
             tests.judge.prompt, set(JUDGE_VARIABLES), "tests.judge.prompt"
         )
-        for needed in ("answer", "criterion"):
-            if needed not in used:
-                raise ValueError(f"tests.judge.prompt must include {{{{ {needed} }}}}")
+        if "answer" not in used:
+            raise ValueError("tests.judge.prompt must include {{ answer }}")
+        if not used & {"requirement", "criterion"}:
+            raise ValueError("tests.judge.prompt must include {{ requirement }}")

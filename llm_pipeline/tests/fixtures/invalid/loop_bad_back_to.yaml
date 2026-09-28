@@ -1,15 +1,15 @@
 name: loop-bad-back-to
-version: 1
+version: 2
 
 nodes:
   - id: generate
     depends_on: []
-    model: { provider: ollama, model: test-model }
+    model: { provider: ollama, name: test-model }
     prompt_template: "{{ input }}"
 
   - id: critique
     depends_on: [generate]
-    model: { provider: ollama, model: test-model }
+    model: { provider: ollama, name: test-model }
     prompt_template: "{{ generate.output }}"
 
 loops:
@@ -19,4 +19,4 @@ loops:
     exit_to: END
     exit_when: 'output.startswith("APPROVE")'
 
-output_node: generate
+output_nodes: [generate]

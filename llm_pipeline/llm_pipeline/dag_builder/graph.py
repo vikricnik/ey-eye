@@ -26,8 +26,8 @@ the base DAG wiring above:
   - Because of that, the base depends_on wiring loop below explicitly skips
     any edge whose SOURCE is a branch/loop source; those edges are instead
     added by wire_branch/wire_loop (branches.py / loops.py).
-  - The automatic "wire output_node to END" step is likewise conditional:
-    it only fires for output_node candidates that don't already have some
+  - The automatic "wire output_nodes to END" step is likewise conditional:
+    it only fires for output_nodes candidates that don't already have some
     other way of reaching forward (a normal edge, or being a conditional
     source) — a loop's `back_to` target has a normal forward edge already
     and reaches END via the loop's own `exit_to`, not through here.
@@ -96,10 +96,10 @@ def build_graph(
     for loop in definition.loops:
         wire_loop(graph, loop, topology.inner_loops(loop.id))
 
-    # output_node(s) -> END, only for candidates with no other outgoing edge
+    # output_nodes -> END, only for candidates with no other outgoing edge
     # already defined (plain or conditional) — see module docstring for why
     # this can't be unconditional once loops/branches exist.
-    for candidate in definition.output_node_candidates:
+    for candidate in definition.output_nodes:
         if not topology.has_outgoing_edges(candidate):
             graph.add_edge(candidate, END)
 

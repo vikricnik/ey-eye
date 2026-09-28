@@ -60,7 +60,7 @@ async function rejection(promise: Promise<unknown>): Promise<PipelineApiError> {
 describe("error codes", () => {
   it("are exposed on a failed request", async () => {
     const client = new PipelineClient(base);
-    const err = await rejection(client.createPipeline({ name: "fresh", nodes: [], output_node: "a" }));
+    const err = await rejection(client.createPipeline({ name: "fresh", nodes: [], output_nodes: ["a"] }));
     assert.equal(err.code, "ALREADY_EXISTS");
     assert.equal(err.statusCode, 412);
     assert.equal(err.serverMessage, "pipeline 'fresh' already exists");

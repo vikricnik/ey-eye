@@ -1,6 +1,6 @@
 name: support-router
 description: Classify a support request, then route to exactly one specialized responder
-version: 1
+version: 2
 
 execution:
   model_timeout_seconds: 60
@@ -8,7 +8,7 @@ execution:
 nodes:
   - id: classify
     depends_on: []
-    model: { provider: ollama, model: llama3.2:3b, temperature: 0.0 }
+    model: { provider: ollama, name: llama3.2:3b, temperature: 0.0 }
     prompt_template: |
       Classify this support request into exactly one word: REFUND, TECHNICAL, or GENERAL.
 
@@ -16,19 +16,19 @@ nodes:
 
   - id: refund_flow
     depends_on: []
-    model: { provider: ollama, model: llama3, temperature: 0.2 }
+    model: { provider: ollama, name: llama3, temperature: 0.2 }
     prompt_template: |
       Handle this refund request professionally and specify next steps: {{ input }}
 
   - id: tech_support_flow
     depends_on: []
-    model: { provider: ollama, model: qwen3-coder:30b, temperature: 0.2 }
+    model: { provider: ollama, name: qwen3-coder:30b, temperature: 0.2 }
     prompt_template: |
       Provide technical troubleshooting steps for: {{ input }}
 
   - id: general_flow
     depends_on: []
-    model: { provider: ollama, model: llama3, temperature: 0.3 }
+    model: { provider: ollama, name: llama3, temperature: 0.3 }
     prompt_template: |
       Provide a helpful general response to: {{ input }}
 
@@ -43,7 +43,7 @@ branches:
       - default: true
         to: general_flow
 
-# Only ONE of these three ever actually runs per request — output_node as a
-# list lets the server pick whichever candidate is actually present in the
+# Only ONE of these three ever actually runs per request — listing all three
+# lets the server pick whichever candidate is actually present in the
 # result, since which one that is depends on the branch decision.
-output_node: [refund_flow, tech_support_flow, general_flow]
+output_nodes: [refund_flow, tech_support_flow, general_flow]

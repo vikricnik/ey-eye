@@ -253,7 +253,7 @@ def total_usage(nodes: Iterable[NodeOutput]) -> ChatCompletionUsage:
 def live_output_node(definition: PipelineDefinition) -> str | None:
     """The node whose tokens can be streamed as the answer, if any — see the
     module docstring for why the others arrive in one piece."""
-    candidates = definition.output_node_candidates
+    candidates = definition.output_nodes
     if len(candidates) != 1 or definition.loops:
         return None
     node = next(n for n in definition.nodes if n.id == candidates[0])

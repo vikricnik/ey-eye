@@ -10,7 +10,7 @@ const limitsCache = new Map<string, Promise<ModelLimitsResponse | null>>();
 /** An Ollama model's limits (max context, size) for hints; null while
  * loading, for other providers, or when the server can't tell. */
 export function useModelLimits(model: NodeModelConfig | undefined): ModelLimitsResponse | null {
-  const name = model?.provider === "ollama" ? model.model : null;
+  const name = model?.provider === "ollama" ? model.name : null;
   const [limits, setLimits] = useState<ModelLimitsResponse | null>(null);
   useEffect(() => {
     setLimits(null);
@@ -121,14 +121,14 @@ function normalizeOllama(name: string): string {
   return name.includes(":") ? name : `${name}:latest`;
 }
 
-/** Picks "provider:model" from what the server says may be selected. A
+/** Picks "provider:name" from what the server says may be selected. A
  * model the node already uses but the server doesn't list stays visible
  * (marked) instead of silently disappearing. */
 export function ModelPicker(props: {
   model: NodeModelConfig | undefined;
   models: ModelsResponse | null;
   limits: ModelLimitsResponse | null;
-  /** Called with "provider:model", or "" for the empty choice. */
+  /** Called with "provider:name", or "" for the empty choice. */
   onChange: (identity: string) => void;
   onRefresh: () => void;
   disabled?: boolean;
@@ -137,7 +137,7 @@ export function ModelPicker(props: {
   emptyOption?: string;
 }) {
   const { model, models } = props;
-  const current = model ? `${model.provider}:${model.model}` : "";
+  const current = model ? `${model.provider}:${model.name}` : "";
   const providers = models?.providers ?? [];
 
   let selected = "";
@@ -149,7 +149,7 @@ export function ModelPicker(props: {
       if (
         model &&
         p.provider === model.provider &&
-        (p.provider === "ollama" ? normalizeOllama(m.name) === normalizeOllama(model.model) : m.name === model.model)
+        (p.provider === "ollama" ? normalizeOllama(m.name) === normalizeOllama(model.name) : m.name === model.name)
       ) {
         selected = identity;
       }

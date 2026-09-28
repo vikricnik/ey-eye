@@ -8,7 +8,7 @@
         "defaults": {
           "model": {
             "provider": "ollama",
-            "model": "m"
+            "name": "m"
           }
         },
         "nodes": [
@@ -39,7 +39,7 @@
             ]
           }
         ],
-        "output_node": "d"
+        "output_nodes": ["d"]
       },
       "expected": {
         "effective_roots": [
@@ -56,7 +56,7 @@
         "defaults": {
           "model": {
             "provider": "ollama",
-            "model": "m"
+            "name": "m"
           }
         },
         "nodes": [
@@ -73,7 +73,7 @@
             "prompt_template": "{{ input }}"
           }
         ],
-        "output_node": [
+        "output_nodes": [
           "a",
           "b"
         ],
@@ -114,7 +114,7 @@
         "defaults": {
           "model": {
             "provider": "ollama",
-            "model": "m"
+            "name": "m"
           }
         },
         "nodes": [
@@ -135,7 +135,7 @@
             "prompt_template": "{{ input }}"
           }
         ],
-        "output_node": [
+        "output_nodes": [
           "a",
           "c"
         ],
@@ -180,7 +180,7 @@
         "defaults": {
           "model": {
             "provider": "ollama",
-            "model": "m"
+            "name": "m"
           }
         },
         "nodes": [
@@ -196,7 +196,7 @@
             ]
           }
         ],
-        "output_node": "generate",
+        "output_nodes": ["generate"],
         "loops": [
           {
             "id": "revise",
@@ -224,7 +224,7 @@
         "defaults": {
           "model": {
             "provider": "ollama",
-            "model": "m"
+            "name": "m"
           }
         },
         "nodes": [
@@ -254,7 +254,7 @@
             ]
           }
         ],
-        "output_node": "review",
+        "output_nodes": ["review"],
         "loops": [
           {
             "id": "inner",
@@ -290,7 +290,7 @@
         "defaults": {
           "model": {
             "provider": "ollama",
-            "model": "m"
+            "name": "m"
           }
         },
         "nodes": [
@@ -310,7 +310,7 @@
             "prompt_template": "{{ input }}"
           }
         ],
-        "output_node": [
+        "output_nodes": [
           "a",
           "b"
         ],
@@ -351,7 +351,7 @@
         "defaults": {
           "model": {
             "provider": "ollama",
-            "model": "m"
+            "name": "m"
           }
         },
         "nodes": [
@@ -372,7 +372,7 @@
             "prompt_template": "{{ input }}"
           }
         ],
-        "output_node": [
+        "output_nodes": [
           "t",
           "u"
         ],
@@ -429,7 +429,7 @@
         "defaults": {
           "model": {
             "provider": "ollama",
-            "model": "m"
+            "name": "m"
           }
         },
         "nodes": [
@@ -452,7 +452,7 @@
             ]
           }
         ],
-        "output_node": "publish",
+        "output_nodes": ["publish"],
         "loops": [
           {
             "id": "revise",

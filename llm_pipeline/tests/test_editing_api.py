@@ -87,7 +87,7 @@ def _pipeline(name: str = "fresh", model: str = "llama3", **node: Any) -> dict[s
     first: dict[str, Any] = {
         "id": "draft",
         "depends_on": [],
-        "model": {"provider": "ollama", "model": model, "temperature": 0.4},
+        "model": {"provider": "ollama", "name": model, "temperature": 0.4},
         "prompt_template": "Draft an answer to: {{ input }}",
     }
     first.update(node)
@@ -98,13 +98,13 @@ def _pipeline(name: str = "fresh", model: str = "llama3", **node: Any) -> dict[s
             {
                 "id": "polish",
                 "depends_on": ["draft"],
-                "model": {"provider": "ollama", "model": "gemma3:12b"},
+                "model": {"provider": "ollama", "name": "gemma3:12b"},
                 "system_prompt": "You are an editor.",
                 "prompt_template": "Polish this:\n{{ draft.output }}\n",
                 "layout": {"x": 300, "y": 40},
             },
         ],
-        "output_node": "polish",
+        "output_nodes": ["polish"],
     }
 
 
@@ -197,7 +197,7 @@ def test_full_definition_includes_prompts_revision_and_comment_flag(client: Test
     assert "{{ input }}" in nodes["answer_local"]["prompt_template"]
     assert nodes["reconcile"]["model"] == {
         "provider": "ollama",
-        "model": "llama3",
+        "name": "llama3",
         "temperature": 0.0,
     }
 
@@ -366,13 +366,13 @@ def test_disallowed_models_are_rejected_and_nothing_is_written(
     assert response.json()["details"] == {"node_id": "draft"}
 
     cloud = _pipeline()
-    cloud["nodes"][0]["model"] = {"provider": "anthropic", "model": "claude-x"}
+    cloud["nodes"][0]["model"] = {"provider": "anthropic", "name": "claude-x"}
     response = client.put("/pipelines/fresh", json={"definition": cloud}, headers=CREATE)
     assert response.status_code == 422
     assert "EDITOR_CLOUD_MODELS" in response.json()["message"]
 
     allowed_cloud = _pipeline()
-    allowed_cloud["nodes"][0]["model"] = {"provider": "openai", "model": "gpt-4o"}
+    allowed_cloud["nodes"][0]["model"] = {"provider": "openai", "name": "gpt-4o"}
     assert (
         client.put(
             "/pipelines/fresh", json={"definition": allowed_cloud}, headers=CREATE
@@ -537,7 +537,7 @@ def _preset(name: str = "terse-llama", model: str = "llama3") -> dict[str, Any]:
         "description": "Short factual answers",
         "model": {
             "provider": "ollama",
-            "model": model,
+            "name": model,
             "temperature": 0.1,
             "options": {"num_ctx": 4096, "top_p": 0.8},
         },
@@ -781,7 +781,7 @@ def test_structural_edits_keep_every_other_comment(
         {
             "id": "audit",
             "depends_on": ["reconcile"],
-            "model": {"provider": "ollama", "model": "llama3"},
+            "model": {"provider": "ollama", "name": "llama3"},
             "prompt_template": "Check this:\n{{ reconcile.output }}\n",
         }
     )
@@ -815,13 +815,32 @@ def test_structural_edits_keep_every_other_comment(
     assert _comment_lines(path.read_text()) == _comment_lines(before)
 
 
+def test_a_comment_after_braces_keeps_its_place(
+    client: TestClient, dirs: tuple[Path, Path]
+) -> None:
+    path = dirs[0] / "braces.yaml"
+    model_line = "    model: { provider: ollama, name: llama3 }  # fast\n"
+    path.write_text(
+        "name: braces\nnodes:\n  - id: a\n"
+        + model_line
+        + '    prompt_template: "{{ input }}"\noutput_nodes: [a]\n'
+    )
+    loaded = client.get("/pipelines/braces").json()
+    definition = loaded["definition"]
+    definition["nodes"][0]["prompt_template"] = "Hi {{ input }}"
+    client.put(
+        "/pipelines/braces", json={"definition": definition}, headers=_if_match(loaded["revision"])
+    )
+    assert model_line in path.read_text()
+
+
 def test_falls_back_to_canonical_when_the_merge_would_change_meaning(
     client: TestClient, dirs: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import llm_pipeline.pipeline_store as store_module
 
     monkeypatch.setattr(
-        store_module, "_preserving_yaml", lambda original, old_full, full, canon: original
+        store_module, "_preserving_yaml", lambda original, upgrade, old_full, full, canon: original
     )
     path = dirs[0] / "consensus-qa.yaml"
     loaded = client.get("/pipelines/consensus-qa").json()

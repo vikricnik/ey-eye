@@ -9,16 +9,16 @@ function diamond(): PipelineDefinition {
   return {
     name: "d",
     nodes: [
-      { id: "a", depends_on: [], model: { provider: "ollama", model: "llama3" }, prompt_template: "{{ input }}" },
-      { id: "b", depends_on: ["a"], model: { provider: "ollama", model: "llama3" }, prompt_template: "B {{ a.output }}" },
+      { id: "a", depends_on: [], model: { provider: "ollama", name: "llama3" }, prompt_template: "{{ input }}" },
+      { id: "b", depends_on: ["a"], model: { provider: "ollama", name: "llama3" }, prompt_template: "B {{ a.output }}" },
       {
         id: "d",
         depends_on: ["b"],
-        model: { provider: "ollama", model: "llama3", options: { num_ctx: 4096 } },
+        model: { provider: "ollama", name: "llama3", options: { num_ctx: 4096 } },
         prompt_template: "{{ b.output }}",
       },
     ],
-    output_node: "d",
+    output_nodes: ["d"],
   };
 }
 
@@ -39,8 +39,8 @@ describe("/set <node>.<field>", () => {
 
   it("takes a 'provider:model' identity for the model, and 'default' to inherit", () => {
     const def = setNodeFieldByPath(diamond(), "d", "model", "openai:gpt-4o");
-    assert.deepEqual(def.nodes[2]!.model, { provider: "openai", model: "gpt-4o" });
-    const withDefault: PipelineDefinition = { ...diamond(), defaults: { model: { provider: "ollama", model: "base" } } };
+    assert.deepEqual(def.nodes[2]!.model, { provider: "openai", name: "gpt-4o" });
+    const withDefault: PipelineDefinition = { ...diamond(), defaults: { model: { provider: "ollama", name: "base" } } };
     assert.equal(setNodeFieldByPath(withDefault, "a", "model", "default").nodes[0]!.model, undefined);
     assert.throws(() => setNodeFieldByPath(diamond(), "a", "model", "default"), DraftError);
   });
@@ -63,8 +63,8 @@ describe("/pset <setting>", () => {
     def = setPipelineSettingByPath(def, "history.max_chars", 5000);
     def = setPipelineSettingByPath(def, "history.summarize.model", "llama3.2:3b");
     def = setPipelineSettingByPath(def, "execution.max_concurrency", 2);
-    assert.deepEqual(def.defaults, { model: { provider: "ollama", model: "gemma3:12b", temperature: 0.3, options: { num_ctx: 2048 } } });
-    assert.deepEqual(def.history, { max_chars: 5000, summarize: { model: { provider: "ollama", model: "llama3.2:3b" } } });
+    assert.deepEqual(def.defaults, { model: { provider: "ollama", name: "gemma3:12b", temperature: 0.3, options: { num_ctx: 2048 } } });
+    assert.deepEqual(def.history, { max_chars: 5000, summarize: { model: { provider: "ollama", name: "llama3.2:3b" } } });
     assert.equal(def.execution!.max_concurrency, 2);
     def = setPipelineSettingByPath(def, "history.summarize.model", "unset");
     assert.deepEqual(def.history, { max_chars: 5000 });

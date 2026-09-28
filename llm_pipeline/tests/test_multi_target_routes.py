@@ -21,7 +21,7 @@ def _definition(
 
     return {
         "name": "fan-out-router",
-        "defaults": {"model": {"provider": "ollama", "model": "m"}},
+        "defaults": {"model": {"provider": "ollama", "name": "m"}},
         "nodes": [
             node("classify"),
             node("tech_answer"),
@@ -39,7 +39,7 @@ def _definition(
                 ],
             }
         ],
-        "output_node": ["tech_answer", "general_flow"],
+        "output_nodes": ["tech_answer", "general_flow"],
     }
 
 
@@ -102,7 +102,7 @@ async def test_node_joining_the_targets_of_one_route_runs_once_after_both() -> N
         "prompt_template": "combine {{ tech_answer.output }} | {{ security_check.output }}",
     }
     raw = _definition(["tech_answer", "security_check"], [combine])
-    raw["output_node"] = ["combine", "general_flow"]
+    raw["output_nodes"] = ["combine", "general_flow"]
     definition = PipelineDefinition.model_validate(raw)
     provider = _Answers("TECHNICAL")
 

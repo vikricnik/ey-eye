@@ -6,7 +6,6 @@ import {
   detailFromDefinition,
   displayModel,
   effectiveModel,
-  outputCandidates,
 } from "@llm-pipeline/client";
 import type {
   GraphModel,
@@ -85,7 +84,7 @@ export interface FlowInputs {
 export function definitionToFlow(inputs: FlowInputs): { nodes: LlmFlowNode[]; edges: Edge[] } {
   const { definition, graph, status, outputs, liveText, validation, editable } = inputs;
   const fallback = autoLayout(graph);
-  const outputIds = new Set(outputCandidates(definition));
+  const outputIds = new Set(definition.output_nodes);
 
   const warnings = new Set(
     validation.status === "valid"

@@ -235,7 +235,7 @@ export function TestsView(props: {
   const variants: VariantRequest[] = compareModels
     .filter(Boolean)
     .map((identity) => ({
-      label: parseModelIdentity(identity).model,
+      label: parseModelIdentity(identity).name,
       models: { [compareNode]: parseModelIdentity(identity) },
     }));
   const selectedResult = detail ? run?.results[detail] : undefined;

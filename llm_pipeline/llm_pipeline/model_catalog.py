@@ -102,7 +102,7 @@ def _normalize_ollama_name(name: str) -> str:
 
 
 def model_identity(model: NodeModelConfig) -> str:
-    return f"{model.provider.value}:{model.model}"
+    return f"{model.provider.value}:{model.name}"
 
 
 class ModelCatalog:
@@ -216,12 +216,12 @@ class ModelCatalog:
             num_ctx = model.options.num_ctx if model.options else None
             if model.provider != ProviderType.OLLAMA or num_ctx is None:
                 continue
-            found = await self.limits(model.model)
+            found = await self.limits(model.name)
             if found and found.context_length and num_ctx > found.context_length:
                 warnings.append(
                     LimitWarning(
                         node_id,
-                        f"{where}: num_ctx {num_ctx:,} exceeds {model.model}'s maximum context "
+                        f"{where}: num_ctx {num_ctx:,} exceeds {model.name}'s maximum context "
                         f"of {found.context_length:,} tokens",
                     )
                 )
@@ -282,18 +282,18 @@ class ModelCatalog:
                 if not ollama.reachable:
                     found.append(
                         ModelNotAllowedError(
-                            f"{where}: can't verify Ollama model '{model.model}' — "
+                            f"{where}: can't verify Ollama model '{model.name}' — "
                             f"{ollama.error}. Only installed models can be selected.",
                             node_id,
                         )
                     )
                     continue
                 installed = {_normalize_ollama_name(m.name) for m in ollama.models}
-                if _normalize_ollama_name(model.model) not in installed:
+                if _normalize_ollama_name(model.name) not in installed:
                     found.append(
                         ModelNotAllowedError(
-                            f"{where}: Ollama model '{model.model}' is not installed on "
-                            f"{self.ollama_base_url} (run `ollama pull {model.model}` first)",
+                            f"{where}: Ollama model '{model.name}' is not installed on "
+                            f"{self.ollama_base_url} (run `ollama pull {model.name}` first)",
                             node_id,
                         )
                     )

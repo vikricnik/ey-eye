@@ -447,18 +447,18 @@ async def test_system_prompt_reaches_the_provider(monkeypatch: pytest.MonkeyPatc
             "nodes": [
                 {
                     "id": "a",
-                    "model": {"provider": "ollama", "model": "m"},
+                    "model": {"provider": "ollama", "name": "m"},
                     "system_prompt": "You are terse.",
                     "prompt_template": "{{ input }}",
                 },
                 {
                     "id": "b",
                     "depends_on": ["a"],
-                    "model": {"provider": "ollama", "model": "m"},
+                    "model": {"provider": "ollama", "name": "m"},
                     "prompt_template": "{{ a.output }}",
                 },
             ],
-            "output_node": "b",
+            "output_nodes": ["b"],
         }
     )
     recorder = _SystemRecordingProvider()
@@ -547,11 +547,11 @@ async def test_retry_is_announced_as_a_new_start(monkeypatch: pytest.MonkeyPatch
             "nodes": [
                 {
                     "id": "a",
-                    "model": {"provider": "ollama", "model": "m"},
+                    "model": {"provider": "ollama", "name": "m"},
                     "prompt_template": "{{ input }}",
                 }
             ],
-            "output_node": "a",
+            "output_nodes": ["a"],
         }
     )
     starts: list[object] = []

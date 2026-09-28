@@ -4,7 +4,7 @@ text nodes see — `{{ history }}` (just the earlier turns), and
 `{{ conversation }}` (the new message with the history folded in, the
 historical format; also called `{{ input }}`).
 
-Per pipeline (HistoryConfig + execution.max_history_turns):
+Per pipeline (HistoryConfig):
   - how many recent turns are kept verbatim, and a character budget for
     them (oldest dropped first);
   - how each turn is written (a template; remembered node outputs of that
@@ -41,7 +41,12 @@ class PreparedInput:
 def render_turn(template: str, turn: ConversationTurn) -> str:
     return render(
         template,
-        {"prompt": turn.prompt, "answer": turn.final_answer, "outputs": dict(turn.outputs)},
+        {
+            "prompt": turn.prompt,
+            "final_answer": turn.final_answer,
+            "answer": turn.final_answer,
+            "outputs": dict(turn.outputs),
+        },
     ).strip()
 
 
@@ -61,7 +66,7 @@ async def prepare_input(
     summarize: Summarizer | None = None,
 ) -> PreparedInput:
     config = definition.history
-    max_turns = definition.execution.max_history_turns
+    max_turns = definition.history.max_turns
     if max_turns <= 0 or not turns:
         return PreparedInput(question=question, history="", contextual=question)
 

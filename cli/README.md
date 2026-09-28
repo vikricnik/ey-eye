@@ -86,7 +86,7 @@ validates it on `/validate` and `/save`. Runs always use the saved version.
 | `/node rm <id>` | remove a node and every edge/route/loop touching it |
 | `/set <node>.<field> <value>` | change a node setting — see below |
 | `/settings` | show the pipeline-wide settings: execution, history, defaults |
-| `/settings set <setting> <value>` | change one — `description`, `execution.<…>` (incl. `max_history_turns`, `max_concurrency`), `history.<intro\|turn_template\|max_chars\|remember\|summarize.model\|summarize.prompt>`, `defaults.<model\|temperature\|system_prompt\|strip_reasoning\|options.*>`; `unset` clears |
+| `/settings set <setting> <value>` | change one — `description`, `execution.<…>` (incl. `max_concurrency`), `history.<max_turns\|intro\|turn_template\|max_chars\|remember\|summarize.model\|summarize.prompt>`, `defaults.<model\|temperature\|system_prompt\|strip_reasoning\|options.*>`; `unset` clears |
 | `/prompt <node> [system]` | edit the prompt template (or system prompt) in `$EDITOR`; without one, type lines and finish with a single `.` |
 | `/connect <from> <to>` / `/disconnect <from> <to>` | add/remove a dependency edge |
 | `/output <node>[,<node>…]` | set the output node(s) |
@@ -269,7 +269,7 @@ Every answer now reports:
 - `pipeline_name` — which pipeline actually served this request
 - `output_node` — which node's output became the final answer (for pipelines
   with branches, this is whichever candidate actually resolved — see the
-  server README's notes on `output_node` as a list of candidates)
+  server README's notes on `output_nodes` as a list of candidates)
 - `node_outputs` — every node that ran, keyed by node id, each with `model_name`
   (`provider:model`, e.g. `ollama:qwen3-coder:30b`), `output`, `duration_ms`,
   and `usage` — shown in `/verbose` output as "3,900 in · 120 out · 42 tok/s ·

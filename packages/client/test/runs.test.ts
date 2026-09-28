@@ -72,7 +72,7 @@ describe("runs", () => {
 
   it("works on unsaved definitions under /drafts", async () => {
     const client = new PipelineClient(base);
-    const definition: PipelineDefinition = { name: "d", nodes: [], output_node: "a" };
+    const definition: PipelineDefinition = { name: "d", nodes: [], output_nodes: ["a"] };
     await client.validatePipeline({ definition });
     await client.previewPrompt({ definition, node_id: "a" });
     for await (const _event of client.runTests({ definition })) void _event;

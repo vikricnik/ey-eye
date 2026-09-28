@@ -11,7 +11,7 @@ const visible = (s: string): number => s.replace(/\x1b\[[0-9;]*m/g, "").length;
 const detail: PipelineDetail = {
   name: "p",
   description: "",
-  output_node_candidates: ["summarize_everything"],
+  output_nodes: ["summarize_everything"],
   nodes: [
     { id: "a", type: "llm_call", depends_on: [], model: "ollama:llama3.2:3b" },
     { id: "b", type: "llm_call", depends_on: ["a"], model: "ollama:qwen3-coder:30b" },
@@ -67,7 +67,7 @@ describe("multi-target branch routes", () => {
   const routed: PipelineDetail = {
     name: "r",
     description: "",
-    output_node_candidates: ["tech", "gen"],
+    output_nodes: ["tech", "gen"],
     nodes: ["cls", "tech", "sec", "gen"].map((id) => ({ id, type: "llm_call", depends_on: [], model: "ollama:m" })),
     branches: [
       {

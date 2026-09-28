@@ -14,11 +14,11 @@ from llm_pipeline.providers.ollama import OllamaProvider
 def _definition(node_overrides: dict[str, Any]) -> dict[str, Any]:
     node: dict[str, Any] = {
         "id": "a",
-        "model": {"provider": "ollama", "model": "llama3"},
+        "model": {"provider": "ollama", "name": "llama3"},
         "prompt_template": "{{ input }}",
     }
     node.update(node_overrides)
-    return {"name": "p", "nodes": [node], "output_node": "a"}
+    return {"name": "p", "nodes": [node], "output_nodes": ["a"]}
 
 
 def test_ollama_options_system_prompt_and_layout_are_accepted() -> None:
@@ -27,7 +27,7 @@ def test_ollama_options_system_prompt_and_layout_are_accepted() -> None:
             {
                 "model": {
                     "provider": "ollama",
-                    "model": "llama3",
+                    "name": "llama3",
                     "temperature": 0.7,
                     "options": {
                         "top_p": 0.9,
@@ -59,7 +59,7 @@ def test_options_are_rejected_for_non_ollama_providers() -> None:
     with pytest.raises(ValidationError, match="only supported for provider 'ollama'"):
         PipelineDefinition.model_validate(
             _definition(
-                {"model": {"provider": "openai", "model": "gpt-4o", "options": {"top_k": 5}}}
+                {"model": {"provider": "openai", "name": "gpt-4o", "options": {"top_k": 5}}}
             )
         )
 
@@ -68,8 +68,8 @@ def test_options_are_rejected_for_non_ollama_providers() -> None:
     "overrides",
     [
         {"temprature": 0.3},  # typo'd node field
-        {"model": {"provider": "ollama", "model": "llama3", "temprature": 0.3}},
-        {"model": {"provider": "ollama", "model": "llama3", "options": {"num_ctxx": 1}}},
+        {"model": {"provider": "ollama", "name": "llama3", "temprature": 0.3}},
+        {"model": {"provider": "ollama", "name": "llama3", "options": {"num_ctxx": 1}}},
         {"layout": {"x": 1, "y": 2, "z": 3}},
     ],
 )
@@ -81,12 +81,12 @@ def test_unknown_fields_are_rejected_not_ignored(overrides: dict[str, Any]) -> N
 @pytest.mark.parametrize(
     "model_block",
     [
-        {"provider": "ollama", "model": "llama3", "temperature": 2.5},
-        {"provider": "ollama", "model": "llama3", "temperature": -0.1},
-        {"provider": "ollama", "model": "llama3", "options": {"top_p": 1.5}},
-        {"provider": "ollama", "model": "llama3", "options": {"num_ctx": 0}},
-        {"provider": "ollama", "model": "llama3", "options": {"mirostat": 3}},
-        {"provider": "ollama", "model": ""},
+        {"provider": "ollama", "name": "llama3", "temperature": 2.5},
+        {"provider": "ollama", "name": "llama3", "temperature": -0.1},
+        {"provider": "ollama", "name": "llama3", "options": {"top_p": 1.5}},
+        {"provider": "ollama", "name": "llama3", "options": {"num_ctx": 0}},
+        {"provider": "ollama", "name": "llama3", "options": {"mirostat": 3}},
+        {"provider": "ollama", "name": ""},
     ],
 )
 def test_out_of_range_values_are_rejected(model_block: dict[str, Any]) -> None:

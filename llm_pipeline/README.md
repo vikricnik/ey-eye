@@ -113,23 +113,24 @@ at all (there isn't, by design).
 ```yaml
 name: my-pipeline
 description: What this pipeline does
-version: 1
+version: 2
 
 execution:
   model_timeout_seconds: 60   # hard timeout per node's model call
-  max_history_turns: 6         # prior conversation turns folded into {{ conversation }}
+history:
+  max_turns: 6                # prior conversation turns folded into {{ conversation }}
 
 nodes:
   - id: analyze
     depends_on: []              # no dependencies = a root node, runs first
-    model: { provider: ollama, model: llama3.2:3b, temperature: 0.0 }
+    model: { provider: ollama, name: llama3.2:3b, temperature: 0.0 }
     prompt_template: "Analyze this request: {{ conversation }}"
 
   - id: draft
     depends_on: [analyze]        # runs after `analyze` completes
-    model: { provider: ollama, model: llama3, temperature: 0.3 }
+    model: { provider: ollama, name: llama3, temperature: 0.3 }
     # Any node can use a different provider — e.g.
-    # { provider: openai, model: gpt-4o, temperature: 0.3 } — see
+    # { provider: openai, name: gpt-4o, temperature: 0.3 } — see
     # pipelines/consensus-qa.yaml for a worked example with commented-out
     # cloud alternatives. Requires the matching `uv sync --extra`
     # and API key; see "Requirements" below.
@@ -138,8 +139,21 @@ nodes:
       Original request: {{ conversation }}
       Write a draft response.
 
-output_node: draft   # which node's output becomes final_answer
+output_nodes: [draft]   # the node whose output becomes final_answer
 ```
+
+Files written for version 1 of this schema still load. It named three
+things differently:
+
+| Version 1 | Version 2 |
+|---|---|
+| `model: { provider, model }` | `model: { provider, name }` |
+| `output_node: a` or `[a, b]` | `output_nodes: [a, b]` |
+| `execution.max_history_turns` | `history.max_turns` |
+
+The server reads the version-1 keys, in files and in request bodies, and
+writes version 2. Saving an older file from an editor upgrades it in place
+and keeps its comments.
 
 ### Per-node model settings
 
@@ -151,7 +165,7 @@ Every field below is optional. Unknown keys are rejected (a typo like
     depends_on: [answer_a, answer_b]
     model:
       provider: ollama
-      model: llama3
+      name: llama3              # the model's name at the provider
       temperature: 0.2          # 0–2
       options:                  # Ollama only — rejected for other providers
         num_ctx: 8192           # context window (tokens)
@@ -209,7 +223,7 @@ execution:
   max_concurrency: 2        # at most 2 nodes call models at once (default: no limit)
 
 defaults:                   # every node inherits these unless it sets its own
-  model: { provider: ollama, model: llama3, temperature: 0.4, options: { keep_alive: 10m } }
+  model: { provider: ollama, name: llama3, temperature: 0.4, options: { keep_alive: 10m } }
   system_prompt: "Answer in English."
   strip_reasoning: true     # drop <think>…</think> from outputs (qwen3, deepseek-r1, …)
 
@@ -219,7 +233,7 @@ nodes:
     prompt_template: "Classify: {{ message }}"    # no model: uses defaults.model
   - id: answer
     depends_on: [classify]
-    model: { provider: ollama, model: gemma3:12b }  # own model; temperature 0.4 and
+    model: { provider: ollama, name: gemma3:12b }  # own model; temperature 0.4 and
                                                     # keep_alive inherited from defaults
     strip_reasoning: false  # overrides the pipeline default
     prompt_template: "{{ conversation }}"
@@ -241,8 +255,8 @@ compare models on them.
 ```yaml
 tests:
   judge:                     # grades `judge` expectations; needs the allowlist like any model
-    model: { provider: ollama, model: llama3.2:3b }
-    # prompt: …              # optional; variables: question, answer, criterion
+    model: { provider: ollama, name: llama3.2:3b }
+    # prompt: …              # optional; variables: question, answer, requirement
   cases:
     - name: capital
       input: What is the capital of France?
@@ -273,9 +287,9 @@ branches:
       - default: true
         to: general_flow
 
-# Only ONE of these three actually runs per request — output_node as a LIST
-# lets the server pick whichever candidate is actually present in the result.
-output_node: [refund_flow, tech_support_flow, general_flow]
+# Only ONE of these three actually runs per request — listing all three lets
+# the server pick whichever candidate is actually present in the result.
+output_nodes: [refund_flow, tech_support_flow, general_flow]
 ```
 
 - `from` is the node whose output decides the route. `when` conditions are
@@ -293,9 +307,9 @@ output_node: [refund_flow, tech_support_flow, general_flow]
   all start, in parallel, when that route is taken.
 - A branch's route targets (`refund_flow`, etc.) have `depends_on: []` but are
   **not** automatic entry points — they only run when actually routed to.
-  `output_node` must be a **list** of candidates once a branch means only one
-  of several possible "final" nodes runs per request; the server picks
-  whichever one actually has a result.
+  `output_nodes` must list every candidate once a branch means only one of
+  several possible "final" nodes runs per request; the server picks the
+  first one that actually has a result.
 
 ### Classifier nodes — `labels`
 
@@ -333,7 +347,7 @@ See `pipeline_config/activation.py`.
 nodes:
   - id: generate
     depends_on: []
-    model: { provider: ollama, model: llama3, temperature: 0.4 }
+    model: { provider: ollama, name: llama3, temperature: 0.4 }
     prompt_template: |
       {{ conversation }}
       {% if critique is defined %}
@@ -342,7 +356,7 @@ nodes:
 
   - id: critique
     depends_on: [generate]
-    model: { provider: ollama, model: llama3.2:3b, temperature: 0.0 }
+    model: { provider: ollama, name: llama3.2:3b, temperature: 0.0 }
     prompt_template: |
       Review this answer: {{ generate.output }}
       Reply "APPROVE" if good, or "REVISE: <feedback>" otherwise.
@@ -356,8 +370,8 @@ loops:
     max_iterations: 3
     on_max_iterations: proceed   # proceed | fail
 
-output_node: generate   # NOT critique — critique's text is just APPROVE/REVISE;
-                         # the actual answer lives in generate's latest output
+output_nodes: [generate]   # NOT critique — critique's text is just APPROVE/REVISE;
+                           # the actual answer lives in generate's latest output
 ```
 
 - `from` is the node whose output decides whether to loop or exit. `back_to`
@@ -549,12 +563,12 @@ what you save:
     "name": "support-router",
     "description": "...",
     "nodes": [
-      { "id": "classify", "depends_on": [], "model": { "provider": "ollama", "model": "llama3.2:3b", "temperature": 0.0 }, "prompt_template": "..." }
+      { "id": "classify", "depends_on": [], "model": { "provider": "ollama", "name": "llama3.2:3b", "temperature": 0.0 }, "prompt_template": "..." }
     ],
     "branches": [
       { "id": "route_by_intent", "from": "classify", "routes": [{ "when": "\"REFUND\" in output", "to": "refund_flow" }, { "default": true, "to": "general_flow" }] }
     ],
-    "output_node": ["refund_flow", "tech_support_flow", "general_flow"]
+    "output_nodes": ["refund_flow", "tech_support_flow", "general_flow"]
   },
   "revision": "3f2a9c01b7de4e55",
   "has_comments": true
@@ -863,7 +877,7 @@ be added, so a client should handle a code it doesn't know by its `status`.
 | `NODE_NOT_FOUND` | `404` | `rerun.from_node`, a prompt preview's `node_id`, or a test variant's node isn't in the pipeline |
 | `TEST_CASE_NOT_FOUND` | `404` | A test run names a case the definition doesn't have |
 | `TEMPLATE_RENDER_FAILED` | `422` | A prompt preview's template can't be rendered |
-| `PIPELINE_RUN_FAILED` | `502` | A node fails — its model call after retries are exhausted, or its prompt can't be rendered — or a loop hits `max_iterations` with `on_max_iterations: fail` (`details` names the node or loop), or no `output_node` candidate produced a result |
+| `PIPELINE_RUN_FAILED` | `502` | A node fails — its model call after retries are exhausted, or its prompt can't be rendered — or a loop hits `max_iterations` with `on_max_iterations: fail` (`details` names the node or loop), or none of `output_nodes` produced a result |
 | `REQUEST_CANCELLED` | `499` | The client disconnected mid-run — logged only, nobody receives it |
 
 A pipeline name is validated against a strict filename-safe pattern
@@ -1008,21 +1022,22 @@ Clients send the earlier turns with every request (the server keeps no
 conversation state). Per pipeline:
 
 ```yaml
-execution:
-  max_history_turns: 6      # most recent turns kept verbatim (0: history off)
 history:
+  max_turns: 6              # most recent turns kept verbatim (0: history off)
   intro: "Conversation so far:"                           # first line of the history in {{ conversation }}
-  turn_template: "User: {{ prompt }}\nAssistant: {{ answer }}"   # how each turn is written
+  turn_template: "User: {{ prompt }}\nAssistant: {{ final_answer }}"   # how each turn is written
   max_chars: 4000           # budget for the verbatim turns; oldest dropped first
   remember: [classify]      # also remember these nodes' outputs with each turn
   summarize:                # condense turns that don't fit instead of dropping them
-    model: { provider: ollama, model: llama3.2:3b }
+    model: { provider: ollama, name: llama3.2:3b }
     prompt: "Summarize briefly:\n\n{{ history }}"      # must include {{ history }}
 ```
 
 - The defaults reproduce the original fixed format exactly.
-- `turn_template` variables: `prompt`, `answer`, and `outputs` (the remembered
-  node outputs of that turn, e.g. `{{ outputs.classify }}`). The default
+- `turn_template` variables: a turn's `prompt` and `final_answer` — the
+  names a client sends them under — and `outputs` (the remembered node
+  outputs of that turn, e.g. `{{ outputs.classify }}`). `answer` is the
+  older name of `final_answer`. The default
   template lists remembered outputs between the prompt and the answer.
 - **Remembered outputs**: a run's response and the stream's `done` event return
   `remembered: {node: output}`; clients store it with the turn and send it

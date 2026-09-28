@@ -18,6 +18,11 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from llm_pipeline.pipeline_config.upgrade import (
+    SCHEMA_VERSION,
+    upgraded_model_block,
+    upgraded_pipeline,
+)
 from llm_pipeline.providers.base import OllamaOptions, ProviderType
 from llm_pipeline.safe_eval import UnsafeExpressionError, validate_expression_syntax
 
@@ -39,8 +44,11 @@ DEFAULT_TEMPERATURE = 0.2
 DEFAULT_TURN_TEMPLATE = (
     "User: {{ prompt }}\n"
     "{% for node, text in outputs.items() %}{{ node }}: {{ text }}\n{% endfor %}"
-    "Assistant: {{ answer }}"
+    "Assistant: {{ final_answer }}"
 )
+# Variables of a turn template: the names of a ConversationTurn's fields.
+# `answer` is the older name of `final_answer`.
+TURN_TEMPLATE_VARIABLES = frozenset({"prompt", "final_answer", "answer", "outputs"})
 DEFAULT_HISTORY_INTRO = "Conversation so far:"
 DEFAULT_SUMMARY_PROMPT = (
     "Summarize this conversation briefly. Keep names, facts, decisions and open "
@@ -55,22 +63,21 @@ DEFAULT_SUMMARY_PROMPT = (
 TEMPLATE_INPUT_VARIABLES = frozenset({"message", "conversation", "history", "question", "input"})
 
 # How a judge model is asked whether a test case's answer meets one
-# requirement. Variables: question (or message) — the case's message —,
-# answer, criterion.
+# requirement (a `judge:` expectation). Variables: question (or message) —
+# the case's message —, answer, requirement (`criterion` is its older name).
 DEFAULT_JUDGE_PROMPT = (
     "You are checking an answer against one requirement.\n\n"
     "Question: {{ question }}\n\n"
     "Answer: {{ answer }}\n\n"
-    "Requirement: {{ criterion }}\n\n"
+    "Requirement: {{ requirement }}\n\n"
     "Reply with PASS or FAIL on the first line, then one sentence saying why."
 )
-JUDGE_VARIABLES = frozenset({"question", "message", "answer", "criterion"})
+JUDGE_VARIABLES = frozenset({"question", "message", "answer", "requirement", "criterion"})
 
 
 class ExecutionConfig(BaseModel):
     model_config = _STRICT
     model_timeout_seconds: float = Field(default=60.0, gt=0)
-    max_history_turns: int = Field(default=6, ge=0)
     # Total attempts per model call = max_retries + 1 (the initial try).
     # Only transient failures (ProviderError — timeouts, connection errors,
     # API errors) are retried; retries compose with the circuit breaker in
@@ -86,12 +93,19 @@ class ExecutionConfig(BaseModel):
 class NodeModelConfig(BaseModel):
     model_config = _STRICT
     provider: ProviderType
-    model: str = Field(min_length=1)
+    # The model's name at the provider, e.g. "llama3.2:3b" (version 1 of
+    # the schema called it `model` — see upgrade.py).
+    name: str = Field(min_length=1)
     # None: inherit the pipeline default's temperature, else DEFAULT_TEMPERATURE.
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     # Provider-specific generation options. Only Ollama has any today; see
     # OllamaOptions (providers/base.py) for the full list.
     options: OllamaOptions | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_version_1(cls, data: object) -> object:
+        return upgraded_model_block(data)
 
     @model_validator(mode="after")
     def options_only_for_ollama(self) -> "NodeModelConfig":
@@ -172,8 +186,8 @@ class NodeDefaults(BaseModel):
 
 
 class HistorySummaryConfig(BaseModel):
-    """Condense earlier turns that no longer fit (beyond `max_history_turns`
-    or the character budget) into a short recap, with this model."""
+    """Condense earlier turns that no longer fit (beyond `max_turns` or the
+    character budget) into a short recap, with this model."""
 
     model_config = _STRICT
     model: NodeModelConfig
@@ -182,14 +196,15 @@ class HistorySummaryConfig(BaseModel):
 
 
 class HistoryConfig(BaseModel):
-    """How earlier conversation turns reach the nodes. How many turns are
-    kept verbatim is `execution.max_history_turns`."""
+    """How earlier conversation turns reach the nodes."""
 
     model_config = _STRICT
+    # How many of the latest turns are kept verbatim.
+    max_turns: int = Field(default=6, ge=0)
     # First line of the history block inside {{ conversation }}.
     intro: str = DEFAULT_HISTORY_INTRO
-    # Template for one earlier turn; variables: prompt, answer, outputs
-    # (the remembered node outputs of that turn, by node id).
+    # Template for one earlier turn; variables: prompt, final_answer,
+    # outputs (the remembered node outputs of that turn, by node id).
     turn_template: str = DEFAULT_TURN_TEMPLATE
     # Character budget for the verbatim turns; the oldest go first.
     max_chars: int | None = Field(default=None, ge=200)
@@ -315,7 +330,7 @@ class LoopConfig(BaseModel):
     back_to: str
     # A real node id, or END_SENTINEL to end the run once the loop exits
     # (see dag_builder/loops.py for how this composes with the pipeline's
-    # output_node resolution).
+    # output_nodes resolution).
     exit_to: str
     exit_when: str
     max_iterations: int = Field(default=3, ge=1)
@@ -338,8 +353,9 @@ class LoopConfig(BaseModel):
 
 class PipelineDefinition(BaseModel):
     model_config = _STRICT
-    # Bump when the YAML shape changes in a way that isn't backward compatible.
-    version: int = 1
+    # Bump when the YAML shape changes in a way that isn't backward
+    # compatible — and teach upgrade.py to read the previous version.
+    version: int = SCHEMA_VERSION
     name: str
     description: str = ""
     execution: ExecutionConfig = ExecutionConfig()
@@ -348,16 +364,16 @@ class PipelineDefinition(BaseModel):
     nodes: list[NodeConfig] = Field(min_length=1)
     branches: list[BranchConfig] = Field(default_factory=list[BranchConfig])
     loops: list[LoopConfig] = Field(default_factory=list[LoopConfig])
-    # A single node id, or a list of candidate node ids in priority order —
-    # a list is required once `branches` means only ONE of several possible
-    # "final" nodes actually runs for a given request (the others in that
-    # branch never execute, so a single fixed output_node can't work).
-    output_node: str | list[str]
+    # The node whose output is the answer — or, when `branches` mean only
+    # ONE of several possible "final" nodes runs for a given request,
+    # candidates in priority order: the first one that ran answers.
+    output_nodes: list[str] = Field(min_length=1)
     tests: TestsConfig = TestsConfig()
 
-    @property
-    def output_node_candidates(self) -> list[str]:
-        return [self.output_node] if isinstance(self.output_node, str) else self.output_node
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_version_1(cls, data: object) -> object:
+        return upgraded_pipeline(data)
 
     @property
     def root_node_ids(self) -> list[str]:

@@ -3,7 +3,7 @@ from typing import NamedTuple
 
 class PipelineExecutionError(Exception):
     """Raised when a pipeline run can't produce a usable result — e.g. the
-    output_node's dependencies all failed. Distinct from ProviderError (one
+    output node's dependencies all failed. Distinct from ProviderError (one
     model call failing), this represents the run as a whole having nothing
     left to return.
 

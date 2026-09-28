@@ -100,7 +100,7 @@ class NodeOutput(BaseModel):
 
 class RunResponse(BaseModel):
     pipeline_name: str
-    output_node: str  # whichever output_node candidate actually resolved
+    output_node: str  # whichever of the output_nodes actually answered
     final_answer: str
     node_outputs: dict[str, NodeOutput]
     loop_iterations: dict[str, int] = {}

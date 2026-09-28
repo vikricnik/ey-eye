@@ -21,7 +21,7 @@ YAML file (nodes + depends_on)
             |
             v
   pipeline_config.py    validates: no cycles, no dangling deps,
-                          no unresolved template refs, valid output_node
+                          no unresolved template refs, valid output_nodes
             |
             v
   dag_builder.py          one graph node per YAML node, one edge per
@@ -51,7 +51,7 @@ nodes:
   - id: D
     depends_on: [B, C]    # D waits for BOTH B and C — automatic join
     ...
-output_node: D
+output_nodes: [D]
 ```
 
 Want B to run before C instead? Add `depends_on: [A, B]` to C — that's the
@@ -268,15 +268,15 @@ reference: [`llm_pipeline/README.md`](llm_pipeline/README.md#branches--condition
 
 See [`llm_pipeline/README.md`](llm_pipeline/README.md#writing-a-pipeline-yaml)
 for the full schema reference. The short version: define `nodes`, give each
-one an `id`, a `model` (provider + model + temperature), a `prompt_template`,
-and a `depends_on` list; pick which node is `output_node`. Validation catches
+one an `id`, a `model` (provider + name + temperature), a `prompt_template`,
+and a `depends_on` list; list the node that answers in `output_nodes`. Validation catches
 cycles, dangling references, and unresolved template placeholders at load
 time, before the pipeline ever runs.
 
 ## Conversation history
 
 Both clients maintain session-local history and send it with every request;
-the server folds up to `execution.max_history_turns` (set per-pipeline in its
+the server folds up to `history.max_turns` (set per-pipeline in its
 YAML) prior turns into context. This is **raw replay** — simple, but token
 cost grows with conversation length. Switching pipelines (CLI's `/use`, the
 web client's dropdown) clears history automatically, since a different DAG

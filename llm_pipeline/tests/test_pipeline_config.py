@@ -20,7 +20,7 @@ def test_diamond_dag_loads_and_resolves_roots() -> None:
     assert definition.name == "diamond"
     assert definition.root_node_ids == ["A"]
     assert Topology(definition).effective_roots == ("A",)
-    assert definition.output_node_candidates == ["D"]
+    assert definition.output_nodes == ["D"]
     assert {n.id for n in definition.nodes} == {"A", "B", "C", "D"}
 
 
@@ -95,7 +95,7 @@ def test_real_pipeline_examples_are_valid() -> None:
 def test_support_router_output_node_is_a_list() -> None:
     pipelines_dir = FIXTURES_DIR / "pipelines"
     definition = load_pipeline_definition(pipelines_dir / "support-router.yaml")
-    assert definition.output_node_candidates == [
+    assert definition.output_nodes == [
         "refund_flow",
         "tech_support_flow",
         "general_flow",
@@ -106,7 +106,7 @@ def test_support_router_output_node_is_a_list() -> None:
 def test_iterative_refinement_output_node_is_the_loop_back_target() -> None:
     pipelines_dir = FIXTURES_DIR / "pipelines"
     definition = load_pipeline_definition(pipelines_dir / "iterative-refinement.yaml")
-    assert definition.output_node_candidates == ["generate"]
+    assert definition.output_nodes == ["generate"]
     assert definition.loops[0].max_iterations == 3
     assert definition.loops[0].on_max_iterations == "proceed"
 
@@ -120,7 +120,7 @@ def test_llm_call_node_without_model_is_rejected() -> None:
         "nodes": [
             {"id": "A", "depends_on": [], "type": "llm_call", "prompt_template": "{{ input }}"}
         ],
-        "output_node": "A",
+        "output_nodes": ["A"],
     }
     with pytest.raises(ValidationError, match="node 'A' has no model"):
         PipelineDefinition.model_validate(raw)

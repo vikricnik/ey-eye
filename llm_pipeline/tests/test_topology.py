@@ -12,7 +12,7 @@ from llm_pipeline.rerun import replay_outputs
 def _raw(nodes: list[dict[str, Any]], **rest: Any) -> dict[str, Any]:
     return {
         "name": "p",
-        "defaults": {"model": {"provider": "ollama", "model": "m"}},
+        "defaults": {"model": {"provider": "ollama", "name": "m"}},
         "nodes": [{"prompt_template": "x", **n} for n in nodes],
         **rest,
     }
@@ -31,7 +31,7 @@ ROUTED = _definition(
             "routes": [{"when": '"A" in output', "to": ["a", "b"]}, {"default": True, "to": "b"}],
         }
     ],
-    output_node="j",
+    output_nodes=["j"],
 )
 
 NESTED = _definition(
@@ -57,7 +57,7 @@ NESTED = _definition(
             "exit_when": "False",
         },
     ],
-    output_node="review",
+    output_nodes=["review"],
 )
 
 # A loop whose way "back" points forward: `polish` declares the loop's source
@@ -71,7 +71,7 @@ FORWARD_BACK_TO = _definition(
     loops=[
         {"id": "l", "from": "draft", "back_to": "polish", "exit_to": "END", "exit_when": "True"}
     ],
-    output_node="publish",
+    output_nodes=["publish"],
 )
 
 
@@ -162,7 +162,7 @@ def test_a_node_named_END_is_not_where_a_loop_exiting_to_END_goes() -> None:
     raw = _raw(
         [{"id": "n1"}, {"id": "n2", "depends_on": ["n1"]}, {"id": "END", "depends_on": ["n2"]}],
         loops=[{"id": "l", "from": "n2", "back_to": "n1", "exit_to": "END", "exit_when": "True"}],
-        output_node="n1",
+        output_nodes=["n1"],
     )
     with pytest.raises(ValidationError, match="silently unreachable"):
         PipelineDefinition.model_validate(raw)

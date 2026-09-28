@@ -8,7 +8,7 @@ import { PipelineClient } from "../src/apiClient.js";
 import type { PipelineDefinitionResponse } from "../src/types.js";
 
 const stored: PipelineDefinitionResponse = {
-  definition: { name: "my-pipe", nodes: [{ id: "a", prompt_template: "{{ input }}" }], output_node: "a" },
+  definition: { name: "my-pipe", nodes: [{ id: "a", prompt_template: "{{ input }}" }], output_nodes: ["a"] },
   revision: "0123456789abcdef",
   has_comments: false,
 };

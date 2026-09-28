@@ -60,13 +60,9 @@ export function findNode(def: PipelineDefinition, id: string): NodeConfig {
   return node;
 }
 
-export function outputCandidates(def: PipelineDefinition): string[] {
-  return Array.isArray(def.output_node) ? def.output_node : [def.output_node];
-}
-
-/** "provider:model", e.g. "ollama:gemma3:12b" (model names may contain ':'). */
+/** "provider:name", e.g. "ollama:gemma3:12b" (model names may contain ':'). */
 export function modelIdentity(model: NodeModelConfig | undefined): string {
-  return model ? `${model.provider}:${model.model}` : "(no model)";
+  return model ? `${model.provider}:${model.name}` : "(no model)";
 }
 
 const DEFAULT_TEMPERATURE = 0.2;
@@ -92,21 +88,21 @@ export function inheritsModel(node: NodeConfig): boolean {
   return node.model === undefined;
 }
 
-/** Parses "provider:model". A bare name with no known provider prefix is
+/** Parses "provider:name". A bare name with no known provider prefix is
  * taken as an Ollama model ("gemma3:12b" -> ollama / gemma3:12b). */
-export function parseModelIdentity(identity: string): { provider: ProviderType; model: string } {
+export function parseModelIdentity(identity: string): { provider: ProviderType; name: string } {
   const trimmed = identity.trim();
   const colon = trimmed.indexOf(":");
   if (colon > 0) {
     const prefix = trimmed.slice(0, colon);
     if ((PROVIDERS as readonly string[]).includes(prefix)) {
-      const model = trimmed.slice(colon + 1);
-      if (!model) throw new DraftError(`missing model name in '${identity}'`);
-      return { provider: prefix as ProviderType, model };
+      const name = trimmed.slice(colon + 1);
+      if (!name) throw new DraftError(`missing model name in '${identity}'`);
+      return { provider: prefix as ProviderType, name };
     }
   }
   if (!trimmed) throw new DraftError("model name is empty");
-  return { provider: "ollama", model: trimmed };
+  return { provider: "ollama", name: trimmed };
 }
 
 /** A node id not used yet: `base`, then `base_2`, `base_3`, … */
@@ -144,19 +140,19 @@ function mapNode(
 /** A new one-node pipeline — the smallest definition the server accepts.
  * Its node is a blank "answer" node, or one made from a preset. */
 export function newDefinition(name: string, model: NodeModelConfig, preset?: NodePreset): PipelineDefinition {
-  const empty: PipelineDefinition = { name, description: "", version: 1, nodes: [], output_node: "" };
+  const empty: PipelineDefinition = { name, description: "", version: 2, nodes: [], output_nodes: [] };
   const { definition, id } = addNode(empty, {
     ...(preset ? { preset } : { id: "answer", model }),
     layout: { x: 0, y: 0 },
   });
-  return { ...definition, output_node: id };
+  return { ...definition, output_nodes: [id] };
 }
 
 export function setOutput(def: PipelineDefinition, ids: string | string[]): PipelineDefinition {
   const list = Array.isArray(ids) ? ids : [ids];
   if (list.length === 0) throw new DraftError("at least one output node is required");
   for (const id of list) findNode(def, id);
-  return { ...def, output_node: list.length === 1 ? list[0]! : list };
+  return { ...def, output_nodes: list };
 }
 
 // ---------------------------------------------------------------------------
@@ -186,7 +182,7 @@ export function addNode(
   // With a pipeline default model, a new node simply inherits it; without
   // one it copies another node's model so it's runnable straight away.
   const fallbackModel = def.nodes.find((n) => n.model)?.model;
-  const model = opts.model ?? (def.defaults?.model ? undefined : (fallbackModel ?? { provider: "ollama", model: "llama3" }));
+  const model = opts.model ?? (def.defaults?.model ? undefined : (fallbackModel ?? { provider: "ollama", name: "llama3" }));
   const refs = after.map((dep) => `{{ ${dep}.output }}`).join("\n\n");
   let node: NodeConfig = {
     id,
@@ -195,7 +191,7 @@ export function addNode(
       ? {
           model: {
             provider: model.provider,
-            model: model.model,
+            name: model.name,
             ...(model.temperature !== undefined ? { temperature: model.temperature } : {}),
           },
         }
@@ -262,7 +258,7 @@ export function removeNode(def: PipelineDefinition, id: string): PipelineDefinit
     (l) => l.from !== id && l.back_to !== id && l.exit_to !== id
   );
 
-  let outputs = outputCandidates(def).filter((o) => o !== id);
+  let outputs = def.output_nodes.filter((o) => o !== id);
   if (outputs.length === 0) {
     // Fall back to a sink (a node nothing depends on), so the draft keeps
     // a plausible output instead of an empty one.
@@ -279,7 +275,7 @@ export function removeNode(def: PipelineDefinition, id: string): PipelineDefinit
     ...(def.history?.remember
       ? { history: { ...def.history, remember: def.history.remember.filter((r) => r !== id) } }
       : {}),
-    output_node: outputs.length === 1 ? outputs[0]! : outputs,
+    output_nodes: outputs,
   };
 }
 
@@ -334,7 +330,7 @@ export function renameNode(def: PipelineDefinition, oldId: string, newId: string
         }
       : {}),
     ...(def.history?.remember ? { history: { ...def.history, remember: def.history.remember.map(swap) } } : {}),
-    output_node: Array.isArray(def.output_node) ? def.output_node.map(swap) : swap(def.output_node),
+    output_nodes: def.output_nodes.map(swap),
   };
 }
 
@@ -361,15 +357,15 @@ export function moveNode(def: PipelineDefinition, id: string, x: number, y: numb
 // into these; see cli/src/fieldPaths.ts.)
 // ---------------------------------------------------------------------------
 
-/** A model block switched to another "provider:model" — a model picker's
+/** A model block switched to another "provider:name" — a model picker's
  * value — keeping its temperature, and its Ollama options only while it
  * stays on Ollama (the server rejects options for other providers). */
 export function modelWithIdentity(current: NodeModelConfig | undefined, identity: string): NodeModelConfig {
-  const { provider, model } = parseModelIdentity(identity);
+  const { provider, name } = parseModelIdentity(identity);
   const keepOptions = provider === "ollama" && current?.options;
   return {
     provider,
-    model,
+    name,
     ...(current?.temperature !== undefined ? { temperature: current.temperature } : {}),
     ...(keepOptions ? { options: current!.options } : {}),
   };

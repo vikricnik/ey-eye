@@ -332,7 +332,7 @@ async def test_prompt_referencing_an_output_that_did_not_run_yet_fails() -> None
             {"id": "critique", "depends_on": ["join"], "prompt_template": "critique"},
         ],
         loops=[_REVISE_LOOP],
-        output_node="join",
+        output_nodes=["join"],
     )
 
     with pytest.raises(PipelineExecutionError, match="side2") as excinfo:
@@ -346,7 +346,7 @@ def _from_nodes(nodes: list[dict[str, Any]], **rest: Any) -> PipelineDefinition:
     return PipelineDefinition.model_validate(
         {
             "name": "p",
-            "defaults": {"model": {"provider": "ollama", "model": "m"}},
+            "defaults": {"model": {"provider": "ollama", "name": "m"}},
             "nodes": nodes,
             **rest,
         }
@@ -404,7 +404,7 @@ async def test_join_after_one_route_with_uneven_paths_waits_for_both() -> None:
                 ],
             }
         ],
-        output_node=["combine", "other"],
+        output_nodes=["combine", "other"],
     )
     provider = _RecordingProvider()
 
@@ -435,7 +435,7 @@ async def test_join_inside_a_loop_waits_for_both_inputs_on_every_pass() -> None:
             {"id": "critique", "depends_on": ["join"], "prompt_template": "critique"},
         ],
         loops=[_REVISE_LOOP],
-        output_node="join",
+        output_nodes=["join"],
     )
     provider = _CritiqueProvider()
 
@@ -463,7 +463,7 @@ async def test_join_of_a_looped_and_a_run_once_input_still_runs_on_every_pass() 
             {"id": "critique", "depends_on": ["join"], "prompt_template": "critique"},
         ],
         loops=[_REVISE_LOOP],
-        output_node="join",
+        output_nodes=["join"],
     )
     provider = _CritiqueProvider()
 
@@ -507,7 +507,7 @@ async def test_nested_loop_gets_its_full_budget_on_every_outer_pass() -> None:
                 "max_iterations": 1,
             },
         ],
-        output_node="review",
+        output_nodes=["review"],
     )
     provider = _RecordingProvider()
 
@@ -540,7 +540,7 @@ async def test_branch_can_route_on_the_question() -> None:
                 ],
             }
         ],
-        output_node=["escalate", "answer"],
+        output_nodes=["escalate", "answer"],
     )
 
     async def run(message: str) -> set[str]:

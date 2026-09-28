@@ -92,7 +92,7 @@ def test_nodes_inherit_the_pipeline_defaults(
             "defaults": {
                 "model": {
                     "provider": "ollama",
-                    "model": "base",
+                    "name": "base",
                     "temperature": 0.6,
                     "options": {"num_ctx": 4096, "keep_alive": "10m"},
                 },
@@ -105,12 +105,12 @@ def test_nodes_inherit_the_pipeline_defaults(
                 {
                     "id": "b",
                     "depends_on": ["a"],
-                    "model": {"provider": "ollama", "model": "own", "options": {"num_ctx": 8192}},
+                    "model": {"provider": "ollama", "name": "own", "options": {"num_ctx": 8192}},
                     "system_prompt": "Be brief.",
                     "prompt_template": "{{ a.output }}",
                 },
             ],
-            "output_node": "b",
+            "output_nodes": ["b"],
         },
     )
     recorder = _Recorder()
@@ -133,7 +133,7 @@ def test_a_node_needs_its_own_model_or_a_default() -> None:
             {
                 "name": "x",
                 "nodes": [{"id": "a", "prompt_template": "{{ input }}"}],
-                "output_node": "a",
+                "output_nodes": ["a"],
             }
         )
 
@@ -150,11 +150,11 @@ def test_reserved_node_ids_are_rejected(name: str) -> None:
                 "nodes": [
                     {
                         "id": name,
-                        "model": {"provider": "ollama", "model": "m"},
+                        "model": {"provider": "ollama", "name": "m"},
                         "prompt_template": "{{ message }}",
                     }
                 ],
-                "output_node": name,
+                "output_nodes": [name],
             }
         )
 
@@ -165,7 +165,7 @@ def test_reserved_node_ids_are_rejected(name: str) -> None:
 def _classifier_pipeline(**history: Any) -> dict[str, Any]:
     return {
         "name": "chat",
-        "defaults": {"model": {"provider": "ollama", "model": "m"}},
+        "defaults": {"model": {"provider": "ollama", "name": "m"}},
         "history": {"remember": ["classify"], **history},
         "nodes": [
             {
@@ -181,7 +181,7 @@ def _classifier_pipeline(**history: Any) -> dict[str, Any]:
                 ),
             },
         ],
-        "output_node": "answer",
+        "output_nodes": ["answer"],
     }
 
 
@@ -250,8 +250,8 @@ def test_streamed_runs_also_report_remembered_outputs(
 def test_older_turns_are_summarized_with_the_chosen_model(
     client: TestClient, pipelines: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    definition = _classifier_pipeline(summarize={"model": {"provider": "ollama", "model": "small"}})
-    definition["execution"] = {"max_history_turns": 1}
+    definition = _classifier_pipeline(summarize={"model": {"provider": "ollama", "name": "small"}})
+    definition["history"]["max_turns"] = 1
     _write(pipelines, definition)
     _use_catalog(client)
     summarizer = _Recorder({"small": "they talked about cats"})
@@ -294,12 +294,12 @@ def test_reasoning_is_stripped_per_pipeline_default_and_node_override(
         pipelines,
         {
             "name": "think",
-            "defaults": {"model": {"provider": "ollama", "model": "m"}, "strip_reasoning": True},
+            "defaults": {"model": {"provider": "ollama", "name": "m"}, "strip_reasoning": True},
             "nodes": [
                 {"id": "a", "prompt_template": "{{ input }}"},
                 {"id": "b", "strip_reasoning": False, "prompt_template": "{{ input }}"},
             ],
-            "output_node": ["a", "b"],
+            "output_nodes": ["a", "b"],
         },
     )
     monkeypatch.setattr(
@@ -315,12 +315,12 @@ def test_max_concurrency_limits_parallel_model_calls(
 ) -> None:
     roots = [{"id": f"r{i}", "prompt_template": "{{ input }}"} for i in range(4)]
     base = {
-        "defaults": {"model": {"provider": "ollama", "model": "m"}},
+        "defaults": {"model": {"provider": "ollama", "name": "m"}},
         "nodes": [
             *roots,
             {"id": "join", "depends_on": [r["id"] for r in roots], "prompt_template": "x"},
         ],
-        "output_node": "join",
+        "output_nodes": ["join"],
     }
     _write(pipelines, {"name": "limited", "execution": {"max_concurrency": 1}, **base})
     _write(pipelines, {"name": "unlimited", **base})
@@ -358,13 +358,13 @@ def _use_catalog(client: TestClient) -> None:
 
 def test_default_and_summarizer_models_must_be_allowed(client: TestClient) -> None:
     _use_catalog(client)
-    definition = _classifier_pipeline(summarize={"model": {"provider": "ollama", "model": "big"}})
+    definition = _classifier_pipeline(summarize={"model": {"provider": "ollama", "name": "big"}})
     response = client.put("/pipelines/chat", json={"definition": definition}, headers=CREATE)
     assert response.status_code == 422
     assert "history summarizer" in response.json()["message"]
 
     definition = _classifier_pipeline()
-    definition["defaults"]["model"]["model"] = "unknown"
+    definition["defaults"]["model"]["name"] = "unknown"
     response = client.put("/pipelines/chat", json={"definition": definition}, headers=CREATE)
     assert response.status_code == 422
     assert "pipeline default model" in response.json()["message"]
@@ -388,11 +388,11 @@ def test_an_injected_node_template_fails_the_node_instead_of_running(
         pipelines,
         {
             "name": "evil",
-            "defaults": {"model": {"provider": "ollama", "model": "m"}},
+            "defaults": {"model": {"provider": "ollama", "name": "m"}},
             "nodes": [
                 {"id": "a", "prompt_template": "{{ input.__class__.__mro__[1].__subclasses__() }}"}
             ],
-            "output_node": "a",
+            "output_nodes": ["a"],
         },
     )
     recorder = _Recorder()

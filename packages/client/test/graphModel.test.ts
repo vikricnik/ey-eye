@@ -14,11 +14,11 @@ import type { AskStreamEvent, PipelineDefinition } from "../src/types.js";
 const def: PipelineDefinition = {
   name: "p",
   nodes: [
-    { id: "a", prompt_template: "{{ input }}", model: { provider: "ollama", model: "m" } },
-    { id: "b", depends_on: ["a"], prompt_template: "", model: { provider: "ollama", model: "m" } },
-    { id: "c", depends_on: ["a"], prompt_template: "", model: { provider: "ollama", model: "m" } },
+    { id: "a", prompt_template: "{{ input }}", model: { provider: "ollama", name: "m" } },
+    { id: "b", depends_on: ["a"], prompt_template: "", model: { provider: "ollama", name: "m" } },
+    { id: "c", depends_on: ["a"], prompt_template: "", model: { provider: "ollama", name: "m" } },
   ],
-  output_node: ["b", "c"],
+  output_nodes: ["b", "c"],
 };
 
 const start = (id: string): AskStreamEvent => ({ type: "node_start", data: { node_id: id, model_name: "ollama:m" } });
@@ -31,12 +31,12 @@ describe("detailFromDefinition", () => {
   it("labels a node that inherits the pipeline's default model", () => {
     const inherits: PipelineDefinition = {
       name: "d",
-      defaults: { model: { provider: "ollama", model: "llama3" } },
+      defaults: { model: { provider: "ollama", name: "llama3" } },
       nodes: [
         { id: "draft", prompt_template: "{{ input }}" },
-        { id: "polish", depends_on: ["draft"], prompt_template: "", model: { provider: "ollama", model: "gemma3" } },
+        { id: "polish", depends_on: ["draft"], prompt_template: "", model: { provider: "ollama", name: "gemma3" } },
       ],
-      output_node: "polish",
+      output_nodes: ["polish"],
     };
     assert.deepEqual(
       detailFromDefinition(inherits).nodes.map((n) => n.model),
@@ -71,7 +71,7 @@ describe("node_start events", () => {
   });
 
   it("clears inferred running on the first real start", () => {
-    const graph = buildGraphModel(detailFromDefinition({ ...def, nodes: [def.nodes[0]!, { ...def.nodes[1]!, depends_on: [] }] , output_node: "b" }));
+    const graph = buildGraphModel(detailFromDefinition({ ...def, nodes: [def.nodes[0]!, { ...def.nodes[1]!, depends_on: [] }] , output_nodes: ["b"] }));
     let state = createGraphViewState(graph, { running: true });
     assert.deepEqual(state.nodeStatus, { a: "running", b: "running" });
     state = applyStreamEvent(state, start("a"));
@@ -142,10 +142,10 @@ describe("multi-target branch routes", () => {
     nodes: ["cls", "tech", "sec", "gen"].map((id) => ({
       id,
       prompt_template: "{{ input }}",
-      model: { provider: "ollama" as const, model: "m" },
+      model: { provider: "ollama" as const, name: "m" },
     })),
     branches: [{ id: "br", from: "cls", routes: [{ when: "'T' in output", to: ["tech", "sec"] }, { default: true, to: "gen" }] }],
-    output_node: ["tech", "gen"],
+    output_nodes: ["tech", "gen"],
   };
 
   it("draws one edge per target, grouped by route", () => {

@@ -38,7 +38,7 @@ def test_references_outside_an_is_defined_guard_are_found(
 
 
 def _definition(**rest: Any) -> dict[str, Any]:
-    return {"name": "p", "defaults": {"model": {"provider": "ollama", "model": "m"}}, **rest}
+    return {"name": "p", "defaults": {"model": {"provider": "ollama", "name": "m"}}, **rest}
 
 
 def _branch_join(summary_template: str) -> dict[str, Any]:
@@ -63,7 +63,7 @@ def _branch_join(summary_template: str) -> dict[str, Any]:
                 ],
             }
         ],
-        output_node="summary",
+        output_nodes=["summary"],
     )
 
 
@@ -89,7 +89,7 @@ def test_join_after_one_route_needs_no_guards() -> None:
         {"default": True, "to": "other"},
     ]
     raw["nodes"].append({"id": "other", "prompt_template": "o"})
-    raw["output_node"] = ["summary", "other"]
+    raw["output_nodes"] = ["summary", "other"]
     PipelineDefinition.model_validate(raw)
 
 
@@ -112,7 +112,7 @@ def _revise_loop(generate_template: str) -> dict[str, Any]:
                 "exit_when": 'output.startswith("APPROVE")',
             }
         ],
-        output_node="generate",
+        output_nodes=["generate"],
     )
 
 

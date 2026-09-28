@@ -25,23 +25,23 @@ PIPELINE: dict[str, Any] = {
     "nodes": [
         {
             "id": "sized",
-            "model": {"provider": "ollama", "model": "big", "options": {"num_ctx": 8192}},
+            "model": {"provider": "ollama", "name": "big", "options": {"num_ctx": 8192}},
             "prompt_template": "{{ input }}",
         },
         {
             "id": "unsized",
             "depends_on": ["sized"],
-            "model": {"provider": "ollama", "model": "small"},
+            "model": {"provider": "ollama", "name": "small"},
             "prompt_template": "{{ sized.output }}",
         },
         {
             "id": "quiet",
             "depends_on": ["unsized"],
-            "model": {"provider": "ollama", "model": "silent"},
+            "model": {"provider": "ollama", "name": "silent"},
             "prompt_template": "{{ unsized.output }}",
         },
     ],
-    "output_node": "quiet",
+    "output_nodes": ["quiet"],
 }
 
 
@@ -163,17 +163,17 @@ async def test_each_node_asks_for_its_context_right_after_its_own_call(
             "nodes": [
                 {
                     "id": "first",
-                    "model": {"provider": "ollama", "model": "m"},
+                    "model": {"provider": "ollama", "name": "m"},
                     "prompt_template": "{{ input }}",
                 },
                 {
                     "id": "second",
                     "depends_on": ["first"],
-                    "model": {"provider": "ollama", "model": "m"},
+                    "model": {"provider": "ollama", "name": "m"},
                     "prompt_template": "{{ first.output }}",
                 },
             ],
-            "output_node": "second",
+            "output_nodes": ["second"],
         }
     )
     graph = build_graph(
