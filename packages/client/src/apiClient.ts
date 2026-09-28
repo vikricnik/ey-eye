@@ -1,6 +1,7 @@
 import type {
   ApiErrorBody,
   DeletedResponse,
+  ErrorCode,
   AskOptions,
   AskRequest,
   RequestOptions,
@@ -34,49 +35,77 @@ export class RequestCancelledError extends Error {
   }
 }
 
+/** What the server reported about a failure — see ApiErrorBody. */
+export interface PipelineApiErrorInfo {
+  statusCode?: number | undefined;
+  code?: ErrorCode | undefined;
+  exceptionUID?: string | undefined;
+  validations?: ValidationIssue[] | undefined;
+  details?: Record<string, unknown> | undefined;
+  serverMessage?: string | undefined;
+}
+
 export class PipelineApiError extends Error {
-  constructor(
-    message: string,
-    public readonly statusCode?: number,
-    public readonly exceptionUID?: string,
-    public readonly validations?: ValidationIssue[],
-    // Structured extra context — for a pipeline execution failure, this is
-    // where node_id/loop_id live (see api_schemas.py's ErrorResponse.details
-    // and specs/001-visual-dag-graph/contracts/pipeline-detail-api.md),
-    // letting a live-status client mark the SPECIFIC node/loop a failure
-    // is attributable to instead of only knowing the run as a whole failed.
-    public readonly details?: Record<string, unknown>,
-    // The server's own `message`, without the per-field validation details
-    // appended to `.message` — for UIs that show those separately.
-    public readonly serverMessage?: string
-  ) {
+  readonly statusCode: number | undefined;
+  /** Which failure this is — branch on this, not on `statusCode`. Unset
+   * when the server was never reached. */
+  readonly code: ErrorCode | undefined;
+  readonly exceptionUID: string | undefined;
+  readonly validations: ValidationIssue[] | undefined;
+  /** Structured extra context — for a pipeline execution failure, this is
+   * where node_id/loop_id live (see api_schemas.py's ErrorResponse.details
+   * and specs/001-visual-dag-graph/contracts/pipeline-detail-api.md),
+   * letting a live-status client mark the SPECIFIC node/loop a failure
+   * is attributable to instead of only knowing the run as a whole failed. */
+  readonly details: Record<string, unknown> | undefined;
+  /** The server's own `message`, without the per-field validation details
+   * appended to `.message` — for UIs that show those separately. */
+  readonly serverMessage: string | undefined;
+
+  constructor(message: string, info: PipelineApiErrorInfo = {}) {
     super(message);
     this.name = "PipelineApiError";
+    this.statusCode = info.statusCode;
+    this.code = info.code;
+    this.exceptionUID = info.exceptionUID;
+    this.validations = info.validations;
+    this.details = info.details;
+    this.serverMessage = info.serverMessage;
   }
+}
+
+/** The error an ErrorResponse body describes — a failed request's, or a
+ * stream's `error` event, so both carry the same fields. */
+function errorFromBody(
+  body: Partial<ApiErrorBody>,
+  statusCode: number | undefined,
+  fallbackMessage: string
+): PipelineApiError {
+  let message = body.message ?? fallbackMessage;
+  if (body.validations && body.validations.length > 0) {
+    const fieldDetails = body.validations.map((v) => `${v.field}: ${v.message}`).join("; ");
+    message = `${message} (${fieldDetails})`;
+  }
+  return new PipelineApiError(message, {
+    statusCode,
+    code: body.code,
+    exceptionUID: body.exceptionUID,
+    validations: body.validations,
+    details: body.details,
+    serverMessage: body.message,
+  });
 }
 
 async function buildApiError(response: Response): Promise<PipelineApiError> {
   const fallbackMessage = `Request failed with status ${response.status}`;
   try {
     const body = (await response.json()) as Partial<ApiErrorBody>;
-    let message = body.message ?? fallbackMessage;
-    if (body.validations && body.validations.length > 0) {
-      const fieldDetails = body.validations.map((v) => `${v.field}: ${v.message}`).join("; ");
-      message = `${message} (${fieldDetails})`;
-    }
-    return new PipelineApiError(
-      message,
-      response.status,
-      body.exceptionUID,
-      body.validations,
-      body.details,
-      body.message
-    );
+    return errorFromBody(body, response.status, fallbackMessage);
   } catch {
     // response body wasn't JSON (or didn't match the expected shape) —
     // fall back to a generic message rather than throwing while handling
     // an error.
-    return new PipelineApiError(fallbackMessage, response.status);
+    return new PipelineApiError(fallbackMessage, { statusCode: response.status });
   }
 }
 
@@ -393,13 +422,7 @@ export class PipelineClient {
 
           if (parsed.event === "error") {
             const errBody = JSON.parse(parsed.data) as Partial<ApiErrorBody>;
-            throw new PipelineApiError(
-              errBody.message ?? "Pipeline execution failed",
-              errBody.status,
-              errBody.exceptionUID,
-              errBody.validations,
-              errBody.details
-            );
+            throw errorFromBody(errBody, errBody.status, "Pipeline execution failed");
           }
           if (known.has(parsed.event)) {
             yield { event: parsed.event, data: JSON.parse(parsed.data) as unknown };

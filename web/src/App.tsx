@@ -344,7 +344,7 @@ export function App() {
         });
       } catch (err) {
         if (seq !== validationSeq.current) return;
-        if (err instanceof PipelineApiError && err.statusCode === 422) {
+        if (err instanceof PipelineApiError && err.code === "DEFINITION_INVALID") {
           const nodeId = typeof err.details?.node_id === "string" ? err.details.node_id : null;
           setValidation({ status: "invalid", message: errorText(err), nodeId });
         } else {
@@ -512,13 +512,11 @@ export function App() {
       void refreshPipelines();
       return true;
     } catch (err) {
-      const conflict = err instanceof PipelineApiError && err.statusCode === 409;
+      const stale = err instanceof PipelineApiError && err.code === "REVISION_CONFLICT";
       notify(
         "error",
         `not saved: ${errorText(err)}`,
-        conflict && base !== null
-          ? { label: "reload latest", run: () => void openPipeline(definition.name) }
-          : undefined
+        stale ? { label: "reload latest", run: () => void openPipeline(definition.name) } : undefined
       );
       return false;
     }

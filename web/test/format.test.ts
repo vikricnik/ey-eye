@@ -18,7 +18,11 @@ describe("formatting", () => {
   });
 
   it("prefers the server's own message", () => {
-    const fromServer = new PipelineApiError("HTTP 422", 422, undefined, undefined, undefined, "node 'a' has no model");
+    const fromServer = new PipelineApiError("HTTP 422", {
+      statusCode: 422,
+      code: "DEFINITION_INVALID",
+      serverMessage: "node 'a' has no model",
+    });
     assert.equal(errorText(fromServer), "node 'a' has no model");
     assert.equal(errorText(new Error("boom")), "boom");
     assert.equal(errorText("plain"), "plain");

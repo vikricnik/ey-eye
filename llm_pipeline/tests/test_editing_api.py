@@ -107,6 +107,7 @@ def test_saving_is_forbidden_when_editing_is_disabled(
     monkeypatch.setattr(settings, "pipeline_editing_enabled", False)
     response = client.put("/pipelines/fresh", json={"definition": _pipeline()})
     assert response.status_code == 403
+    assert response.json()["code"] == "EDITING_DISABLED"
     assert "PIPELINE_EDITING_ENABLED" in response.json()["message"]
     assert not (dirs[0] / "fresh.yaml").exists()
     # Reads and validation stay available.
@@ -135,6 +136,7 @@ def test_wildcard_cors_without_api_key_blocks_editing(
     monkeypatch.setattr(settings, "cors_allowed_origins", "*")
     response = client.put("/pipelines/fresh", json={"definition": _pipeline()})
     assert response.status_code == 403
+    assert response.json()["code"] == "EDITING_DISABLED"
     assert "CORS_ALLOWED_ORIGINS" in response.json()["message"]
     assert not (dirs[0] / "fresh.yaml").exists()
 
@@ -293,6 +295,7 @@ def test_invalid_definition_is_rejected_and_nothing_is_written(
     cyclic["nodes"][0]["depends_on"] = ["polish"]
     response = client.put("/pipelines/fresh", json={"definition": cyclic})
     assert response.status_code == 422
+    assert response.json()["code"] == "DEFINITION_INVALID"
     assert "cycle" in response.json()["message"]
     assert not (dirs[0] / "fresh.yaml").exists()
     assert list(dirs[0].glob(".*.tmp")) == []
@@ -303,6 +306,7 @@ def test_disallowed_models_are_rejected_and_nothing_is_written(
 ) -> None:
     response = client.put("/pipelines/fresh", json={"definition": _pipeline(model="evil:latest")})
     assert response.status_code == 422
+    assert response.json()["code"] == "MODEL_NOT_ALLOWED"
     assert response.json()["details"] == {"node_id": "draft"}
 
     cloud = _pipeline()
@@ -343,6 +347,7 @@ def test_create_refuses_to_overwrite_and_stale_revisions_conflict(client: TestCl
     created = client.put("/pipelines/fresh", json={"definition": _pipeline()}).json()
     again = client.put("/pipelines/fresh", json={"definition": _pipeline()})
     assert again.status_code == 409
+    assert again.json()["code"] == "PIPELINE_EXISTS"
     assert "already exists" in again.json()["message"]
 
     edited = _pipeline()
@@ -355,6 +360,7 @@ def test_create_refuses_to_overwrite_and_stale_revisions_conflict(client: TestCl
         "/pipelines/fresh", json={"definition": edited, "base_revision": created["revision"]}
     )
     assert stale.status_code == 409
+    assert stale.json()["code"] == "REVISION_CONFLICT"
     assert "changed since you loaded it" in stale.json()["message"]
 
 
@@ -449,7 +455,9 @@ def test_presets_can_be_saved_listed_and_read(client: TestClient, dirs: tuple[Pa
 def test_presets_validate_and_allowlist_their_model(
     client: TestClient, dirs: tuple[Path, Path]
 ) -> None:
-    assert client.get("/presets/missing").status_code == 404
+    missing = client.get("/presets/missing")
+    assert missing.status_code == 404
+    assert missing.json()["code"] == "PRESET_NOT_FOUND"
     evil = _preset(name="p", model="evil")
     assert client.put("/presets/p", json={"preset": evil}).status_code == 422
     bad = _preset(name="p")
@@ -515,15 +523,22 @@ def test_delete_refuses_the_default_pipeline_stale_revisions_and_unknown_names(
     default = settings.default_pipeline_name
     refused = client.delete(f"/pipelines/{default}")
     assert refused.status_code == 409
+    assert refused.json()["code"] == "PIPELINE_PROTECTED"
     assert "default pipeline" in refused.json()["message"]
     assert (dirs[0] / f"{default}.yaml").is_file()
 
     client.put("/pipelines/fresh", json={"definition": _pipeline()})
-    assert client.delete("/pipelines/fresh?revision=0000000000000000").status_code == 409
+    stale = client.delete("/pipelines/fresh?revision=0000000000000000")
+    assert stale.status_code == 409
+    assert stale.json()["code"] == "REVISION_CONFLICT"
     assert (dirs[0] / "fresh.yaml").is_file()
 
-    assert client.delete("/pipelines/missing").status_code == 404
-    assert client.delete("/pipelines/bad%20name").status_code == 400
+    missing = client.delete("/pipelines/missing")
+    assert missing.status_code == 404
+    assert missing.json()["code"] == "PIPELINE_NOT_FOUND"
+    bad_name = client.delete("/pipelines/bad%20name")
+    assert bad_name.status_code == 400
+    assert bad_name.json()["code"] == "NAME_INVALID"
 
 
 def test_delete_needs_editing_enabled(
@@ -693,7 +708,9 @@ def test_model_limits_endpoint(client: TestClient) -> None:
         "family": "llama",
     }
     # Names with a namespace contain '/', which the route accepts.
-    assert client.get("/models/ollama/someone/unknown:7b").status_code == 404
+    unknown = client.get("/models/ollama/someone/unknown:7b")
+    assert unknown.status_code == 404
+    assert unknown.json()["code"] == "MODEL_NOT_FOUND"
 
 
 def test_validate_warns_when_num_ctx_exceeds_the_model_maximum(client: TestClient) -> None:

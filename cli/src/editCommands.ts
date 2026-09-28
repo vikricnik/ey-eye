@@ -394,7 +394,7 @@ async function saveDraft(ctx: EditContext, newName?: string): Promise<void> {
     console.log();
   } catch (err) {
     console.log(chalk.red(`✕ not saved: ${describeServerError(err)}`));
-    if (err instanceof PipelineApiError && err.statusCode === 409 && baseRevision === null) {
+    if (err instanceof PipelineApiError && err.code === "PIPELINE_EXISTS") {
       console.log(chalk.gray(`  use /edit ${draft.name} to load the existing pipeline, or /save <other-name>`));
     }
     console.log();

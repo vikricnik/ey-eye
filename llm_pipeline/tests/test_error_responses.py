@@ -1,9 +1,12 @@
+import ast
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
+import llm_pipeline
 import llm_pipeline.rate_limit as rate_limit_module
 from llm_pipeline.error_handling import register_exception_handlers
 from llm_pipeline.main import app
@@ -13,6 +16,7 @@ EXPECTED_KEYS = {
     "timestamp",
     "status",
     "error",
+    "code",
     "message",
     "request",
     "exceptionUID",
@@ -57,6 +61,7 @@ def _assert_matches_error_shape(body: dict[str, object]) -> None:
     assert isinstance(body["timestamp"], str)
     assert isinstance(body["status"], int)
     assert isinstance(body["error"], str)
+    assert isinstance(body["code"], str) and body["code"].isupper()
     assert isinstance(body["message"], str)
     assert isinstance(body["request"], str)
     assert isinstance(body["exceptionUID"], str) and body["exceptionUID"] != ""
@@ -73,6 +78,7 @@ def test_pipeline_not_found_matches_error_shape(client: TestClient) -> None:
     _assert_matches_error_shape(body)
     assert body["status"] == 404
     assert body["error"] == "Not Found"
+    assert body["code"] == "PIPELINE_NOT_FOUND"
     assert "does-not-exist" in body["message"]
     assert body["request"] == "POST /ask"
     assert body["validations"] == []
@@ -87,7 +93,19 @@ def test_empty_prompt_matches_error_shape(client: TestClient) -> None:
     _assert_matches_error_shape(body)
     assert body["status"] == 400
     assert body["error"] == "Bad Request"
+    assert body["code"] == "INPUT_INVALID"
     assert "empty" in body["message"].lower()
+
+
+def test_an_oversized_prompt_is_input_too_large(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "max_prompt_length", 10)
+    response = client.post(
+        "/ask", json={"prompt": "x" * 11, "pipeline_name": "simple-local", "history": []}
+    )
+    assert response.status_code == 400
+    assert response.json()["code"] == "INPUT_TOO_LARGE"
 
 
 def test_malformed_request_body_matches_error_shape_with_validations(
@@ -102,6 +120,7 @@ def test_malformed_request_body_matches_error_shape_with_validations(
     _assert_matches_error_shape(body)
     assert body["status"] == 422
     assert body["error"] == "Unprocessable Entity"
+    assert body["code"] == "REQUEST_INVALID"
     assert len(body["validations"]) >= 1
     issue = body["validations"][0]
     assert set(issue.keys()) == {"field", "message", "type"}
@@ -120,6 +139,7 @@ def test_missing_api_key_matches_error_shape(
     _assert_matches_error_shape(body)
     assert body["status"] == 401
     assert body["error"] == "Unauthorized"
+    assert body["code"] == "UNAUTHENTICATED"
 
 
 def test_rate_limit_matches_error_shape_with_retry_after(
@@ -139,6 +159,7 @@ def test_rate_limit_matches_error_shape_with_retry_after(
     _assert_matches_error_shape(body)
     assert body["status"] == 429
     assert body["error"] == "Too Many Requests"
+    assert body["code"] == "RATE_LIMITED"
     assert "retry_after_seconds" in body["details"]
     assert "Retry-After" in response.headers
 
@@ -164,6 +185,23 @@ def test_the_error_shape_does_not_depend_on_the_path() -> None:
     _assert_matches_error_shape(missing.json())
     assert malformed.status_code == 422
     _assert_matches_error_shape(malformed.json())
+
+
+def test_the_api_raises_coded_errors_not_bare_http_exceptions() -> None:
+    """A bare HTTPException reaches clients with only a generic fallback
+    code, so errors that share a status can't be told apart again. Raise
+    ApiError with the ErrorCode that names the failure instead."""
+    package = Path(llm_pipeline.__file__).parent
+    bare: list[str] = []
+    for path in sorted(package.rglob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
+            if name == "HTTPException":
+                bare.append(f"{path.relative_to(package)}:{node.lineno}")
+    assert bare == []
 
 
 def test_exception_uid_is_consistent_within_one_request(client: TestClient) -> None:

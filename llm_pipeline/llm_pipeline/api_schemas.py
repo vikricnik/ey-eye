@@ -7,6 +7,7 @@ state.py's internal PipelineState shape is not.
 """
 
 from datetime import datetime
+from enum import StrEnum
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -428,6 +429,39 @@ class DeletedResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class ErrorCode(StrEnum):
+    """What went wrong, for clients to act on. `status` alone can't tell
+    apart failures that share one — a 409 is a pipeline changed since it
+    was loaded, a taken name, or the protected default pipeline. Set where
+    the error is raised. Codes may be added over time, so a client should
+    handle a code it doesn't know by its `status`."""
+
+    # -- any endpoint
+    REQUEST_INVALID = "REQUEST_INVALID"  # malformed or contradictory request; see `validations`
+    UNAUTHENTICATED = "UNAUTHENTICATED"  # missing or unknown API key
+    RATE_LIMITED = "RATE_LIMITED"  # retry after the `Retry-After` header
+    INTERNAL_ERROR = "INTERNAL_ERROR"  # a server bug; quote `exceptionUID` when reporting it
+    # -- pipelines, presets and models
+    NAME_INVALID = "NAME_INVALID"  # not usable as a file name
+    PIPELINE_NOT_FOUND = "PIPELINE_NOT_FOUND"
+    PRESET_NOT_FOUND = "PRESET_NOT_FOUND"
+    MODEL_NOT_FOUND = "MODEL_NOT_FOUND"  # Ollama model not installed, or Ollama unreachable
+    DEFINITION_INVALID = "DEFINITION_INVALID"  # `details.node_id` names the node at fault, if one
+    MODEL_NOT_ALLOWED = "MODEL_NOT_ALLOWED"  # `details.node_id` names the node, if one
+    EDITING_DISABLED = "EDITING_DISABLED"  # writes are off on this server; `message` says why
+    PIPELINE_EXISTS = "PIPELINE_EXISTS"  # creating a pipeline whose name is taken
+    REVISION_CONFLICT = "REVISION_CONFLICT"  # changed or deleted since loaded: reload first
+    PIPELINE_PROTECTED = "PIPELINE_PROTECTED"  # the server's default pipeline can't be deleted
+    # -- runs, prompt previews and test runs
+    INPUT_INVALID = "INPUT_INVALID"  # empty prompt, or a chat not ending with the user's message
+    INPUT_TOO_LARGE = "INPUT_TOO_LARGE"  # prompt, history or re-run outputs over the limits
+    NODE_NOT_FOUND = "NODE_NOT_FOUND"  # `rerun.from_node` or a preview's `node_id`
+    TEST_CASE_NOT_FOUND = "TEST_CASE_NOT_FOUND"
+    TEMPLATE_RENDER_FAILED = "TEMPLATE_RENDER_FAILED"
+    PIPELINE_RUN_FAILED = "PIPELINE_RUN_FAILED"  # `details.node_id` or `details.loop_id` if known
+    REQUEST_CANCELLED = "REQUEST_CANCELLED"  # the client disconnected; nobody receives this
+
+
 class ValidationIssue(BaseModel):
     """One field-level problem, used only when `validations` is non-empty
     (request body schema validation failures)."""
@@ -447,6 +481,7 @@ class ErrorResponse(BaseModel):
     timestamp: datetime
     status: int
     error: str  # HTTP reason phrase, e.g. "Not Found", "Too Many Requests"
+    code: ErrorCode  # which failure this is — what clients branch on
     message: str  # human-readable detail — what used to be the bare "detail" string
     request: str  # "<METHOD> <path>", e.g. "POST /ask"
     exceptionUID: str  # ties this error to server log lines carrying the same id

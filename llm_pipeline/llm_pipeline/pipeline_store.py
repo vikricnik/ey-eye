@@ -46,6 +46,7 @@ from ruamel.yaml.scalarstring import LiteralScalarString
 from llm_pipeline.errors import (
     DefinitionInvalidError,
     InvalidNameError,
+    PipelineExistsError,
     PipelineNotFoundError,
     ProtectedPipelineError,
     RevisionConflictError,
@@ -477,7 +478,7 @@ class PipelineStore:
         async with self._lock(path):
             current = path.read_bytes() if path.is_file() else None
             if base_revision is None and current is not None:
-                raise RevisionConflictError(
+                raise PipelineExistsError(
                     f"pipeline '{name}' already exists — load it first, or save under a "
                     f"different name"
                 )

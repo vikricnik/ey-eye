@@ -54,6 +54,10 @@ class RevisionConflictError(Exception):
     deleted since the client loaded it."""
 
 
+class PipelineExistsError(RevisionConflictError):
+    """A create (no base revision) for a name that is already taken."""
+
+
 class ProtectedPipelineError(Exception):
     """A pipeline that can't be deleted — the server's default pipeline."""
 

@@ -203,12 +203,16 @@ Full endpoint detail in [contracts/http-api.md](./contracts/http-api.md).
 | `WorkflowDetail` | `{name, description, input_fields, output, nodes: [...], models: [...], resources: {...}}` |
 | `BackendStatus` | `{provider, available, physical_model \| None}` |
 | `HealthResponse` | `{status, ollama_reachable, backends: [BackendStatus]}` (FR-041) |
-| `ErrorResponse` | Existing shape, plus `category: FailureCategory` |
+| `ErrorResponse` | Existing shape — `code` carries the `FailureCategory` |
 
 `ErrorResponse` keeps its current fields (`timestamp`, `status`, `error`,
-`message`, `request`, `exceptionUID`, `details`, `validations`) — the
-existing error contract is sound and the clients already parse it. Only
-`category` is added.
+`code`, `message`, `request`, `exceptionUID`, `details`, `validations`) —
+the existing error contract is sound and the clients already parse it.
+`code` (`ErrorCode` in api_schemas.py) was added after this plan was
+written (API_REVIEW.md, API-002), so no `category` field is added: each
+`FailureCategory` maps to an `ErrorCode` value, adding the ones that don't
+exist yet (e.g. `PROVIDER_TIMEOUT`) and reusing those that do (e.g.
+`REQUEST_INVALID` for a missing input field).
 
 ---
 

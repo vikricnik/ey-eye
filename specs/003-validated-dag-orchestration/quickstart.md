@@ -66,7 +66,7 @@ resources to see genuine overlap.
 finish. Its `resource_wait_ms` is the visible evidence of it waiting.
 
 **Confirm fail-fast** (FR-023): point one alias at a model Ollama doesn't
-have and re-run. Expect a 502, `category: "provider_unavailable"`,
+have and re-run. Expect a 502, `code: "PROVIDER_UNAVAILABLE"`,
 `details.node_id` naming the failing step, and no downstream step in the
 response.
 
@@ -158,7 +158,7 @@ uv run pytest tests/test_resource_pool.py -k cancel -v
 
 **Identity mismatch rejected** (FR-039): point an `airllm` alias at a
 model this process didn't load. Expect a 500 with
-`category: "configuration"`, not an attempt to load it.
+`code: "CONFIGURATION"`, not an attempt to load it.
 
 ---
 

@@ -14,8 +14,10 @@ is visible rather than silently permissive. Set `API_KEYS` to enable it.
 import logging
 import secrets
 
-from fastapi import Header, HTTPException
+from fastapi import Header
 
+from llm_pipeline.api_error import ApiError
+from llm_pipeline.api_schemas import ErrorCode
 from llm_pipeline.settings import settings
 
 logger: logging.Logger = logging.getLogger("llm_pipeline")
@@ -62,13 +64,14 @@ async def require_api_key(
 
     presented = _extract_key(authorization, x_api_key)
     if presented is None:
-        raise HTTPException(
-            status_code=401,
-            detail="Missing API key — provide 'Authorization: Bearer <key>' or 'X-API-Key: <key>'",
+        raise ApiError(
+            401,
+            ErrorCode.UNAUTHENTICATED,
+            "Missing API key — provide 'Authorization: Bearer <key>' or 'X-API-Key: <key>'",
         )
 
     for valid_key in configured_keys:
         if secrets.compare_digest(presented, valid_key):
             return
 
-    raise HTTPException(status_code=401, detail="Invalid API key")
+    raise ApiError(401, ErrorCode.UNAUTHENTICATED, "Invalid API key")

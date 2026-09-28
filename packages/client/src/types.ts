@@ -479,6 +479,34 @@ export interface ValidationIssue {
   type: string;
 }
 
+/** What went wrong — the server's ErrorCode (api_schemas.py), for code
+ * that must act differently per failure. `status` alone can't tell apart
+ * failures that share one (409: changed since loaded, name taken, or the
+ * protected default pipeline). The server may add codes; treat one you
+ * don't know by its status. */
+export type ErrorCode =
+  | "REQUEST_INVALID"
+  | "UNAUTHENTICATED"
+  | "RATE_LIMITED"
+  | "INTERNAL_ERROR"
+  | "NAME_INVALID"
+  | "PIPELINE_NOT_FOUND"
+  | "PRESET_NOT_FOUND"
+  | "MODEL_NOT_FOUND"
+  | "DEFINITION_INVALID"
+  | "MODEL_NOT_ALLOWED"
+  | "EDITING_DISABLED"
+  | "PIPELINE_EXISTS"
+  | "REVISION_CONFLICT"
+  | "PIPELINE_PROTECTED"
+  | "INPUT_INVALID"
+  | "INPUT_TOO_LARGE"
+  | "NODE_NOT_FOUND"
+  | "TEST_CASE_NOT_FOUND"
+  | "TEMPLATE_RENDER_FAILED"
+  | "PIPELINE_RUN_FAILED"
+  | "REQUEST_CANCELLED";
+
 // Matches the server's ErrorResponse model exactly (api_schemas.py) —
 // every error response, regardless of status code or where it was raised,
 // takes this shape.
@@ -486,6 +514,7 @@ export interface ApiErrorBody {
   timestamp: string;
   status: number;
   error: string;
+  code: ErrorCode;
   message: string;
   request: string;
   exceptionUID: string;

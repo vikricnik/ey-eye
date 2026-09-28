@@ -177,6 +177,7 @@ def test_errors_use_openais_shape(client: TestClient) -> None:
     )
     assert missing.status_code == 404
     assert missing.json()["error"]["type"] == "invalid_request_error"
+    assert missing.json()["error"]["code"] == "pipeline_not_found"
     assert "no-such-pipeline" in missing.json()["error"]["message"]
 
     not_asked = client.post(

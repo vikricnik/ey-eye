@@ -12,11 +12,13 @@ translate between HTTP and those.
 
 from collections.abc import AsyncGenerator
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 
+from llm_pipeline.api_error import ApiError
 from llm_pipeline.api_schemas import (
     DeletedResponse,
+    ErrorCode,
     ModelInfo,
     ModelIssue,
     ModelLimitsResponse,
@@ -61,16 +63,15 @@ router = APIRouter(dependencies=[Depends(require_api_key), Depends(enforce_rate_
 
 async def require_editing_enabled() -> None:
     if not settings.pipeline_editing_enabled:
-        raise HTTPException(
-            status_code=403,
-            detail=(
-                "Pipeline editing is disabled on this server — set "
-                "PIPELINE_EDITING_ENABLED=true to allow saving from clients"
-            ),
+        raise ApiError(
+            403,
+            ErrorCode.EDITING_DISABLED,
+            "Pipeline editing is disabled on this server — set "
+            "PIPELINE_EDITING_ENABLED=true to allow saving from clients",
         )
     reason = settings.editing_block_reason
     if reason is not None:
-        raise HTTPException(status_code=403, detail=f"Pipeline {reason}")
+        raise ApiError(403, ErrorCode.EDITING_DISABLED, f"Pipeline {reason}")
 
 
 @router.get(
@@ -118,9 +119,10 @@ async def get_ollama_model_limits(
     model (names may contain '/' and ':')."""
     found = await store.catalog.limits(name)
     if found is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No details for Ollama model '{name}' (not installed, or Ollama unreachable)",
+        raise ApiError(
+            404,
+            ErrorCode.MODEL_NOT_FOUND,
+            f"No details for Ollama model '{name}' (not installed, or Ollama unreachable)",
         )
     return ModelLimitsResponse(
         name=found.name,
@@ -144,7 +146,7 @@ async def get_pipeline_full_definition(
     try:
         stored = store.read_pipeline(name)
     except PipelineNotFoundError:
-        raise HTTPException(status_code=404, detail=f"No pipeline named '{name}'") from None
+        raise ApiError(404, ErrorCode.PIPELINE_NOT_FOUND, f"No pipeline named '{name}'") from None
     return PipelineDefinitionResponse(
         definition=definition_to_json(stored.definition),
         revision=stored.revision,
@@ -165,7 +167,7 @@ async def validate_pipeline(
     (YAML in) and export (canonical YAML out). Never writes anything, so
     it doesn't need editing to be enabled."""
     if (req.definition is None) == (req.yaml is None):
-        raise HTTPException(status_code=400, detail="send exactly one of 'definition' or 'yaml'")
+        raise ApiError(400, ErrorCode.REQUEST_INVALID, "send exactly one of 'definition' or 'yaml'")
     definition = (
         parse_definition(req.definition)
         if req.definition is not None
@@ -196,9 +198,11 @@ async def preview_node_prompt(req: PreviewPromptRequest) -> PreviewPromptRespons
             definition, req.node_id, req.prompt, req.history, req.outputs
         )
     except KeyError as e:
-        raise HTTPException(status_code=404, detail=f"no node '{req.node_id}'") from e
+        raise ApiError(404, ErrorCode.NODE_NOT_FOUND, f"no node '{req.node_id}'") from e
     except Exception as e:  # the sandbox's SecurityError, undefined variables, …
-        raise HTTPException(status_code=422, detail=f"the prompt can't be rendered: {e}") from e
+        raise ApiError(
+            422, ErrorCode.TEMPLATE_RENDER_FAILED, f"the prompt can't be rendered: {e}"
+        ) from e
     return PreviewPromptResponse(
         prompt=preview.prompt, system=preview.system, missing=preview.missing
     )
@@ -243,19 +247,21 @@ async def run_pipeline_tests(
         by_name = {case.name: case for case in cases}
         unknown = [name for name in req.cases if name not in by_name]
         if unknown:
-            raise HTTPException(status_code=404, detail=f"no test case named '{unknown[0]}'")
+            raise ApiError(404, ErrorCode.TEST_CASE_NOT_FOUND, f"no test case named '{unknown[0]}'")
         cases = [by_name[name] for name in req.cases]
     cases = cases + [
         EvalCase(name=f"message {i}", input=text)
         for i, text in enumerate((t for t in req.inputs if t.strip()), start=1)
     ]
     if not cases:
-        raise HTTPException(
-            status_code=400, detail="no test cases to run — add some, or send a message to try"
+        raise ApiError(
+            400,
+            ErrorCode.REQUEST_INVALID,
+            "no test cases to run — add some, or send a message to try",
         )
     labels = ["current", *(v.label for v in req.variants)]
     if len(set(labels)) != len(labels):
-        raise HTTPException(status_code=400, detail="each variant needs its own label")
+        raise ApiError(400, ErrorCode.REQUEST_INVALID, "each variant needs its own label")
 
     definitions = [base, *(_with_models(base, v.models) for v in req.variants)]
     for definition in definitions:
@@ -317,7 +323,7 @@ async def delete_pipeline(
     try:
         moved = await store.delete_pipeline(name, revision)
     except PipelineNotFoundError:
-        raise HTTPException(status_code=404, detail=f"No pipeline named '{name}'") from None
+        raise ApiError(404, ErrorCode.PIPELINE_NOT_FOUND, f"No pipeline named '{name}'") from None
     return DeletedResponse(name=name, recoverable_as=moved)
 
 
@@ -343,7 +349,7 @@ async def get_preset(
     try:
         stored = store.read_preset(name)
     except FileNotFoundError:
-        raise HTTPException(status_code=404, detail=f"No preset named '{name}'") from None
+        raise ApiError(404, ErrorCode.PRESET_NOT_FOUND, f"No preset named '{name}'") from None
     return PresetResponse(
         preset=stored.preset.model_dump(mode="json", exclude_none=True), revision=stored.revision
     )
@@ -377,5 +383,5 @@ async def delete_preset(
     try:
         moved = await store.delete_preset(name)
     except FileNotFoundError:
-        raise HTTPException(status_code=404, detail=f"No preset named '{name}'") from None
+        raise ApiError(404, ErrorCode.PRESET_NOT_FOUND, f"No preset named '{name}'") from None
     return DeletedResponse(name=name, recoverable_as=moved)

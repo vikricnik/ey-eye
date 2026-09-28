@@ -9,9 +9,11 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel
 
+from llm_pipeline.api_error import ApiError
 from llm_pipeline.api_schemas import (
     AskRequest,
     AskResponse,
+    ErrorCode,
     LoopIterationEvent,
     NodeCompleteEvent,
     NodeOutputDTO,
@@ -43,33 +45,35 @@ router = APIRouter()
 
 def _validate_prompt_and_history(req: AskRequest) -> None:
     if not req.prompt.strip():
-        raise HTTPException(status_code=400, detail="prompt cannot be empty")
+        raise ApiError(400, ErrorCode.INPUT_INVALID, "prompt cannot be empty")
 
     if len(req.prompt) > settings.max_prompt_length:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"prompt exceeds max_prompt_length ({len(req.prompt)} > "
-                f"{settings.max_prompt_length} characters)"
-            ),
+        raise ApiError(
+            400,
+            ErrorCode.INPUT_TOO_LARGE,
+            f"prompt exceeds max_prompt_length ({len(req.prompt)} > "
+            f"{settings.max_prompt_length} characters)",
         )
 
     for i, turn in enumerate(req.history):
         if len(turn.prompt) > settings.max_history_turn_length:
-            raise HTTPException(
-                status_code=400,
-                detail=f"history[{i}].prompt exceeds max_history_turn_length",
+            raise ApiError(
+                400,
+                ErrorCode.INPUT_TOO_LARGE,
+                f"history[{i}].prompt exceeds max_history_turn_length",
             )
         if len(turn.final_answer) > settings.max_history_turn_length:
-            raise HTTPException(
-                status_code=400,
-                detail=f"history[{i}].final_answer exceeds max_history_turn_length",
+            raise ApiError(
+                400,
+                ErrorCode.INPUT_TOO_LARGE,
+                f"history[{i}].final_answer exceeds max_history_turn_length",
             )
         for node_id, text in turn.outputs.items():
             if len(text) > settings.max_history_turn_length:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"history[{i}].outputs.{node_id} exceeds max_history_turn_length",
+                raise ApiError(
+                    400,
+                    ErrorCode.INPUT_TOO_LARGE,
+                    f"history[{i}].outputs.{node_id} exceeds max_history_turn_length",
                 )
 
 
@@ -128,8 +132,8 @@ async def prepare_ask(
 ) -> tuple[PipelineDefinition, CompiledStateGraph, PipelineState]:
     """Shared setup for both /ask and /ask/stream: validates the request,
     resolves the pipeline, and builds the initial LangGraph state. Every
-    error raised here is a normal HTTPException with the correct status
-    code — this always runs BEFORE either endpoint has sent any response
+    error raised here is an ApiError with the correct status and code —
+    this always runs BEFORE either endpoint has sent any response
     (streaming or not), so raising here is always safe. Once /ask/stream
     starts actually streaming, that safety no longer holds — see
     pipeline_events' docstring."""
@@ -138,7 +142,7 @@ async def prepare_ask(
     try:
         definition, graph = cache.get(req.pipeline_name)
     except PipelineNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
+        raise ApiError(404, ErrorCode.PIPELINE_NOT_FOUND, str(e)) from e
 
     replay = _replay(req, definition)
     prepared = await prepare_input(
@@ -162,18 +166,17 @@ def _replay(req: AskRequest, definition: PipelineDefinition) -> dict[str, str]:
     if req.rerun is None:
         return {}
     if not any(n.id == req.rerun.from_node for n in definition.nodes):
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"can't re-run from '{req.rerun.from_node}': "
-                f"no such node in '{definition.name}'"
-            ),
+        raise ApiError(
+            400,
+            ErrorCode.NODE_NOT_FOUND,
+            f"can't re-run from '{req.rerun.from_node}': no such node in '{definition.name}'",
         )
     for node_id, text in req.rerun.outputs.items():
         if len(text) > settings.max_history_turn_length:
-            raise HTTPException(
-                status_code=400,
-                detail=f"rerun.outputs.{node_id} exceeds max_history_turn_length",
+            raise ApiError(
+                400,
+                ErrorCode.INPUT_TOO_LARGE,
+                f"rerun.outputs.{node_id} exceeds max_history_turn_length",
             )
     return replay_outputs(definition, req.rerun.from_node, req.rerun.outputs)
 
@@ -213,7 +216,7 @@ async def ask(
 async def run_ask(req: AskRequest, cache: PipelineCache, request: Request) -> AskResponse:
     """One whole run, answered when it finishes — /ask, and the OpenAI-
     compatible endpoint when it isn't streaming. Stopped if the client
-    disconnects (see disconnects.py). Raises HTTPException."""
+    disconnects (see disconnects.py). Raises ApiError."""
     definition, graph, initial_state = await prepare_ask(req, cache)
 
     try:
@@ -231,21 +234,20 @@ async def run_ask(req: AskRequest, cache: PipelineCache, request: Request) -> As
         raise  # the client disconnected
     except PipelineExecutionError as e:
         logger.exception(f"Pipeline '{req.pipeline_name}' run failed")
-        raise HTTPException(status_code=503, detail=str(e)) from e
+        raise ApiError(503, ErrorCode.PIPELINE_RUN_FAILED, str(e)) from e
     except Exception as e:
         logger.exception(f"Pipeline '{req.pipeline_name}' run failed unexpectedly")
-        raise HTTPException(status_code=502, detail=f"Pipeline error: {e}") from e
+        raise ApiError(502, ErrorCode.INTERNAL_ERROR, f"Pipeline error: {e}") from e
 
     node_outputs = final_state["node_outputs"]
     resolved_output_node = _resolve_output_node(definition, node_outputs)
 
     if resolved_output_node is None:
-        raise HTTPException(
-            status_code=502,
-            detail=(
-                f"Pipeline completed but none of its output_node candidates "
-                f"({', '.join(definition.output_node_candidates)}) produced a result"
-            ),
+        raise ApiError(
+            502,
+            ErrorCode.PIPELINE_RUN_FAILED,
+            f"Pipeline completed but none of its output_node candidates "
+            f"({', '.join(definition.output_node_candidates)}) produced a result",
         )
 
     return AskResponse(
@@ -439,11 +441,21 @@ async def pipeline_events(
             details["node_id"] = e.node_id
         elif e.loop_id is not None:
             details["loop_id"] = e.loop_id
-        yield "error", build_error_response(request, 503, str(e), details=details)
+        yield (
+            "error",
+            build_error_response(
+                request, 503, str(e), code=ErrorCode.PIPELINE_RUN_FAILED, details=details
+            ),
+        )
         return
     except Exception as e:
         logger.exception(f"Pipeline '{req.pipeline_name}' stream failed unexpectedly")
-        yield "error", build_error_response(request, 502, f"Pipeline error: {e}")
+        yield (
+            "error",
+            build_error_response(
+                request, 502, f"Pipeline error: {e}", code=ErrorCode.INTERNAL_ERROR
+            ),
+        )
         return
 
     resolved_output_node = _resolve_output_node(definition, node_outputs)
@@ -455,6 +467,7 @@ async def pipeline_events(
                 502,
                 f"Pipeline completed but none of its output_node candidates "
                 f"({', '.join(definition.output_node_candidates)}) produced a result",
+                code=ErrorCode.PIPELINE_RUN_FAILED,
             ),
         )
         return

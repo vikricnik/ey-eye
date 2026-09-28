@@ -135,10 +135,11 @@ The example shows why: `analyze` waited 1.9s for `gpu0` while an Ollama
 step finished. Folding the two together would hide the contention this
 stage exists to manage.
 
-**Error responses** use the existing `ErrorResponse` shape plus
-`category`:
+**Error responses** use the existing `ErrorResponse` shape. The failure
+category travels in its `code` field (`ErrorCode`, see data-model.md) —
+no separate `category` field:
 
-| Status | Category | Cause |
+| Status | `code` | Cause |
 |---|---|---|
 | 400 | `VALIDATION` | Missing or undeclared input field |
 | 400 | `INPUT_TOO_LARGE` | Input or rendered prompt over limit |
@@ -159,7 +160,7 @@ SC-005):
   "status": 504,
   "error": "Gateway Timeout",
   "message": "Node 'analyze' failed: model call exceeded 900s",
-  "category": "provider_timeout",
+  "code": "PROVIDER_TIMEOUT",
   "request": "POST /v1/workflows/document_qa/run",
   "exceptionUID": "…",
   "details": {"node_id": "analyze", "alias": "deep_reasoner"}

@@ -14,8 +14,10 @@ import logging
 import time
 from collections import defaultdict, deque
 
-from fastapi import Header, HTTPException, Request
+from fastapi import Header, Request
 
+from llm_pipeline.api_error import ApiError
+from llm_pipeline.api_schemas import ErrorCode
 from llm_pipeline.settings import settings
 
 logger: logging.Logger = logging.getLogger("llm_pipeline")
@@ -31,7 +33,7 @@ class RateLimiter:
         self._requests: dict[str, deque[float]] = defaultdict(deque)
 
     def check(self, client_id: str) -> None:
-        """Raises HTTPException(429) if client_id is over the limit;
+        """Raises ApiError(429) if client_id is over the limit;
         otherwise records this request and returns."""
         now = time.monotonic()
         history = self._requests[client_id]
@@ -41,9 +43,10 @@ class RateLimiter:
 
         if len(history) >= self.requests_per_window:
             retry_after = self.window_seconds - (now - history[0])
-            raise HTTPException(
-                status_code=429,
-                detail=(
+            raise ApiError(
+                429,
+                ErrorCode.RATE_LIMITED,
+                (
                     f"Rate limit exceeded: {self.requests_per_window} requests per "
                     f"{int(self.window_seconds)}s. Retry in {retry_after:.0f}s."
                 ),

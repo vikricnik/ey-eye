@@ -21,10 +21,12 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from llm_pipeline.api_schemas import ErrorResponse, ValidationIssue
+from llm_pipeline.api_error import ApiError
+from llm_pipeline.api_schemas import ErrorCode, ErrorResponse, ValidationIssue
 from llm_pipeline.errors import (
     DefinitionInvalidError,
     InvalidNameError,
+    PipelineExistsError,
     ProtectedPipelineError,
     RevisionConflictError,
 )
@@ -45,15 +47,18 @@ def build_error_response(
     request: Request,
     status_code: int,
     message: str,
+    *,
+    code: ErrorCode,
     details: dict[str, object] | None = None,
     validations: list[ValidationIssue] | None = None,
 ) -> ErrorResponse:
-    """The one place every error field gets populated, so all three handlers
+    """The one place every error field gets populated, so all the handlers
     registered below produce byte-for-byte the same shape."""
     return ErrorResponse(
         timestamp=datetime.now(UTC),
         status=status_code,
         error=_reason_phrase(status_code),
+        code=code,
         message=message,
         request=f"{request.method} {request.url.path}",
         exceptionUID=get_request_id(),
@@ -65,11 +70,20 @@ def build_error_response(
 def error_response_from_http_exception(request: Request, exc: HTTPException) -> ErrorResponse:
     """Mirrors a `Retry-After` header into `details` too, since that's the
     one piece of already-structured extra data a plain HTTPException
-    carries. The header itself still has to be forwarded by the caller."""
+    carries. The header itself still has to be forwarded by the caller.
+
+    This API raises ApiError, which names its code. A bare HTTPException
+    (from a library, say) only gets a generic code from its status."""
     details: dict[str, object] = {}
     if exc.headers and "Retry-After" in exc.headers:
         details["retry_after_seconds"] = exc.headers["Retry-After"]
-    return build_error_response(request, exc.status_code, str(exc.detail), details=details)
+    if isinstance(exc, ApiError):
+        code = exc.code
+    else:
+        code = ErrorCode.INTERNAL_ERROR if exc.status_code >= 500 else ErrorCode.REQUEST_INVALID
+    return build_error_response(
+        request, exc.status_code, str(exc.detail), code=code, details=details
+    )
 
 
 def error_response_from_validation_error(
@@ -87,12 +101,18 @@ def error_response_from_validation_error(
         )
         for e in exc.errors()
     ]
-    return build_error_response(request, 422, "Request validation failed", validations=validations)
+    return build_error_response(
+        request,
+        422,
+        "Request validation failed",
+        code=ErrorCode.REQUEST_INVALID,
+        validations=validations,
+    )
 
 
 def register_exception_handlers(app: FastAPI) -> None:
-    """Registers all three handlers on the given app. Called once from
-    main.py at app creation."""
+    """Registers every handler on the given app. Called once from main.py
+    at app creation."""
 
     @app.exception_handler(HTTPException)
     async def http_exception_handler(  # pyright: ignore[reportUnusedFunction]
@@ -141,7 +161,14 @@ def register_exception_handlers(app: FastAPI) -> None:
             ValidationIssue(field=location, message=message, type=error_type)
             for location, message, error_type in exc.issues
         ]
-        body = build_error_response(request, 422, str(exc), details, validations)
+        body = build_error_response(
+            request,
+            422,
+            str(exc),
+            code=ErrorCode.DEFINITION_INVALID,
+            details=details,
+            validations=validations,
+        )
         return JSONResponse(status_code=422, content=body.model_dump(mode="json"))
 
     @app.exception_handler(ModelNotAllowedError)
@@ -150,7 +177,9 @@ def register_exception_handlers(app: FastAPI) -> None:
     ) -> JSONResponse:
         """(pyright false positive — see http_exception_handler's docstring.)"""
         details: dict[str, object] = {"node_id": exc.node_id} if exc.node_id else {}
-        body = build_error_response(request, 422, str(exc), details)
+        body = build_error_response(
+            request, 422, str(exc), code=ErrorCode.MODEL_NOT_ALLOWED, details=details
+        )
         return JSONResponse(status_code=422, content=body.model_dump(mode="json"))
 
     @app.exception_handler(RevisionConflictError)
@@ -159,7 +188,13 @@ def register_exception_handlers(app: FastAPI) -> None:
         request: Request, exc: Exception
     ) -> JSONResponse:
         """(pyright false positive — see http_exception_handler's docstring.)"""
-        body = build_error_response(request, 409, str(exc))
+        if isinstance(exc, PipelineExistsError):
+            code = ErrorCode.PIPELINE_EXISTS
+        elif isinstance(exc, ProtectedPipelineError):
+            code = ErrorCode.PIPELINE_PROTECTED
+        else:
+            code = ErrorCode.REVISION_CONFLICT
+        body = build_error_response(request, 409, str(exc), code=code)
         return JSONResponse(status_code=409, content=body.model_dump(mode="json"))
 
     @app.exception_handler(InvalidNameError)
@@ -167,7 +202,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         request: Request, exc: InvalidNameError
     ) -> JSONResponse:
         """(pyright false positive — see http_exception_handler's docstring.)"""
-        body = build_error_response(request, 400, str(exc))
+        body = build_error_response(request, 400, str(exc), code=ErrorCode.NAME_INVALID)
         return JSONResponse(status_code=400, content=body.model_dump(mode="json"))
 
     @app.exception_handler(Exception)
@@ -183,7 +218,9 @@ def register_exception_handlers(app: FastAPI) -> None:
         (pyright false positive — see http_exception_handler's docstring above
         for why.)"""
         logger.exception("Unhandled exception")
-        body = build_error_response(request, 500, "Internal server error")
+        body = build_error_response(
+            request, 500, "Internal server error", code=ErrorCode.INTERNAL_ERROR
+        )
         return JSONResponse(status_code=500, content=body.model_dump(mode="json"))
 
 

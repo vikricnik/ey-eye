@@ -176,6 +176,7 @@ def test_rerun_from_an_unknown_node_is_rejected(client: TestClient) -> None:
         json={"prompt": "q", "pipeline_name": "consensus-qa", "rerun": {"from_node": "nope"}},
     )
     assert response.status_code == 400
+    assert response.json()["code"] == "NODE_NOT_FOUND"
     assert "no such node" in response.json()["message"]
 
 
@@ -212,13 +213,16 @@ def test_preview_problems(client: TestClient, monkeypatch: pytest.MonkeyPatch) -
     definition = _definition("simple-local.yaml")
     unknown = client.post("/pipelines/preview", json={"definition": definition, "node_id": "x"})
     assert unknown.status_code == 404
+    assert unknown.json()["code"] == "NODE_NOT_FOUND"
 
     definition["nodes"][0]["prompt_template"] = "{{ input.__class__.__mro__ }}"
     unsafe = client.post("/pipelines/preview", json={"definition": definition, "node_id": "answer"})
     assert unsafe.status_code == 422 and "can't be rendered" in unsafe.json()["message"]
+    assert unsafe.json()["code"] == "TEMPLATE_RENDER_FAILED"
 
     monkeypatch.setattr(settings, "pipeline_editing_enabled", False)
     blocked = client.post(
         "/pipelines/preview", json={"definition": definition, "node_id": "answer"}
     )
     assert blocked.status_code == 403
+    assert blocked.json()["code"] == "EDITING_DISABLED"

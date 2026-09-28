@@ -203,6 +203,7 @@ def test_stream_provider_failure_yields_error_event_with_200_status(
         "timestamp",
         "status",
         "error",
+        "code",
         "message",
         "request",
         "exceptionUID",
@@ -210,6 +211,7 @@ def test_stream_provider_failure_yields_error_event_with_200_status(
         "validations",
     }
     assert data["status"] == 503
+    assert data["code"] == "PIPELINE_RUN_FAILED"
     # FR-012 (visual DAG graph): a live-status client needs to know WHICH
     # node failed, not just that the run as a whole did — simple-local has
     # exactly one node, "answer".

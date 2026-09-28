@@ -44,7 +44,7 @@ problems are where the parts meet:
 | ID | Severity | Title |
 |----|----------|-------|
 | [API-001](#api-001-v1-means-openai-compatible-not-api-version-1) | CRITICAL | `/v1/` means "OpenAI-compatible", not "API version 1" — ✅ fixed |
-| [API-002](#api-002-errors-have-no-machine-readable-code) | WARNING | Errors have no machine-readable code |
+| [API-002](#api-002-errors-have-no-machine-readable-code) | WARNING | Errors have no machine-readable code — ✅ fixed |
 | [API-003](#api-003-status-codes-disagree-for-the-same-kind-of-failure) | WARNING | Status codes disagree for the same kind of failure |
 | [API-004](#api-004-get-pipelinesname-doesnt-return-what-put-accepts) | WARNING | `GET /pipelines/{name}` doesn't return what `PUT` accepts |
 | [API-005](#api-005-optimistic-concurrency-is-spelled-three-different-ways) | WARNING | Optimistic concurrency is spelled three different ways |
@@ -109,6 +109,13 @@ working around them.
 ### API-002: Errors have no machine-readable code
 
 - **Severity**: WARNING
+- **Status**: ✅ Fixed (2026-09-28). `ErrorResponse.code` is set to an
+  `ErrorCode` value (21 codes) on every error, streamed `error` events
+  included. The server raises `ApiError`, and a test fails if anything
+  raises a bare `HTTPException`. `PipelineApiError.code` exposes it. The
+  CLI and web app now branch on `PIPELINE_EXISTS`, `REVISION_CONFLICT` and
+  `DEFINITION_INVALID` instead of the status. Spec 003 now carries its
+  failure category in `code`.
 - **Principle**: Consistent error response structure
 - **File(s)**:
   - [api_schemas.py:440-454](llm_pipeline/llm_pipeline/api_schemas.py#L440-L454)

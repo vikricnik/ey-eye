@@ -1,6 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 
+from llm_pipeline.api_error import ApiError
 from llm_pipeline.api_schemas import (
+    ErrorCode,
     HealthResponse,
     PipelineBranchInfo,
     PipelineBranchRouteInfo,
@@ -77,7 +79,7 @@ async def get_pipeline_definition(
     try:
         definition, _ = cache.get(name)
     except PipelineNotFoundError:
-        raise HTTPException(status_code=404, detail=f"No pipeline named '{name}'") from None
+        raise ApiError(404, ErrorCode.PIPELINE_NOT_FOUND, f"No pipeline named '{name}'") from None
 
     return PipelineDetailResponse(
         name=definition.name,

@@ -207,16 +207,19 @@ def test_a_variant_may_only_use_allowed_models(client: TestClient) -> None:
         },
     )
     assert response.status_code == 422
+    assert response.json()["code"] == "MODEL_NOT_ALLOWED"
     assert "not-installed" in response.json()["message"]
 
 
 def test_test_run_problems(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     nothing = client.post("/pipelines/test", json={"definition": _definition()})
     assert nothing.status_code == 400
+    assert nothing.json()["code"] == "REQUEST_INVALID"
     unknown = client.post(
         "/pipelines/test", json={"definition": _definition(TESTS), "cases": ["nope"]}
     )
     assert unknown.status_code == 404
+    assert unknown.json()["code"] == "TEST_CASE_NOT_FOUND"
     same_label = client.post(
         "/pipelines/test",
         json={
@@ -227,6 +230,7 @@ def test_test_run_problems(client: TestClient, monkeypatch: pytest.MonkeyPatch) 
         },
     )
     assert same_label.status_code == 400
+    assert same_label.json()["code"] == "REQUEST_INVALID"
     no_node = client.post(
         "/pipelines/test",
         json={
@@ -237,6 +241,7 @@ def test_test_run_problems(client: TestClient, monkeypatch: pytest.MonkeyPatch) 
         },
     )
     assert no_node.status_code == 422
+    assert no_node.json()["code"] == "DEFINITION_INVALID"
     monkeypatch.setattr(settings, "pipeline_editing_enabled", False)
     assert (
         client.post("/pipelines/test", json={"definition": _definition(TESTS)}).status_code == 403

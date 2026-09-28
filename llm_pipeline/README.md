@@ -760,20 +760,23 @@ saves (and hand edits) apply without a restart.
 ## Error handling
 
 **Every response — success or failure — is a Pydantic model, including
-genuinely unexpected exceptions.** Three custom exception handlers cover the
+genuinely unexpected exceptions.** Custom exception handlers cover the
 entire surface:
 
 - `@app.exception_handler(HTTPException)` — every `HTTPException` raised
   anywhere (an endpoint, or a `Depends()` dependency like
-  `require_api_key`/`enforce_rate_limit`)
+  `require_api_key`/`enforce_rate_limit`). The server raises `ApiError`
+  (`api_error.py`), an `HTTPException` that names its `code`.
 - `@app.exception_handler(RequestValidationError)` — FastAPI's automatic
   `422` when a request body fails schema validation
+- one handler per domain error the store and validation raise (an invalid
+  definition, a model not on the allowlist, a revision conflict, …)
 - `@app.exception_handler(Exception)` — a catch-all for anything not already
   handled above (a genuine bug slipping past intended error handling),
   returned as `500`, so there's no path where an error can bypass this
   contract entirely
 
-All three build the **same shape** via one shared `_build_error_response()`
+All of them build the **same shape** via one shared `build_error_response()`
 helper:
 
 ```json
@@ -781,6 +784,7 @@ helper:
   "timestamp": "2026-08-04T06:25:52.813Z",
   "status": 404,
   "error": "Not Found",
+  "code": "PIPELINE_NOT_FOUND",
   "message": "No pipeline named 'does-not-exist'",
   "request": "POST /ask",
   "exceptionUID": "a1b2c3d4e5f6",
@@ -794,22 +798,39 @@ helper:
 | `timestamp` | UTC, when the error was handled |
 | `status` | HTTP status code (int) |
 | `error` | The HTTP reason phrase for that code (`"Not Found"`, `"Too Many Requests"`, etc.) |
+| `code` | Which failure this is — see below. **Branch on this, not on `status`**: failures that share a status (a `409` is a stale revision, a taken name or the protected default pipeline) have different codes |
 | `message` | Human-readable detail — what a plain `HTTPException(detail=...)` used to surface alone |
 | `request` | `"<METHOD> <path>"` of the request that failed |
 | `exceptionUID` | Same value as the `X-Request-ID` response header — ties this error directly to server log lines carrying the same id (see `logging_context.py`) |
-| `details` | Extra structured context; currently populated for rate-limit errors (`retry_after_seconds`), `{}` otherwise |
+| `details` | Extra structured context: `retry_after_seconds` for rate limits, `node_id` (or `loop_id`) when a node is at fault; `{}` otherwise |
 | `validations` | One entry per field problem, **only** non-empty for `422` schema validation errors — each entry is `{"field": ..., "message": ..., "type": ...}` |
 
-| Situation | Status | `error` |
+The codes (`ErrorCode` in `api_schemas.py`). New codes may be added, so a
+client should handle a code it doesn't know by its `status`.
+
+| `code` | Status | When |
 |---|---|---|
-| Missing/invalid API key (when `API_KEYS` is set) | `401` | Unauthorized |
-| Request body fails schema validation | `422` | Unprocessable Entity |
-| Prompt/history exceeds length caps, or empty prompt | `400` | Bad Request |
-| `pipeline_name` doesn't match any file | `404` | Not Found |
-| Rate limit exceeded | `429` | Too Many Requests — `Retry-After` header + mirrored in `details.retry_after_seconds` |
-| A node fails after retries are exhausted, or a loop hits `max_iterations` with `on_max_iterations: fail` | `503` | Service Unavailable — `message` names which node/loop |
-| No output_node candidate produced a result, or any other anticipated pipeline error | `502` | Bad Gateway |
-| A genuinely unexpected exception (a bug) | `500` | Internal Server Error |
+| `REQUEST_INVALID` | `422` / `400` | The request body fails schema validation (`validations` lists each problem), or asks for something contradictory (e.g. both `definition` and `yaml`) |
+| `UNAUTHENTICATED` | `401` | Missing or unknown API key (when `API_KEYS` is set) |
+| `RATE_LIMITED` | `429` | Rate limit exceeded — `Retry-After` header, mirrored in `details.retry_after_seconds` |
+| `INTERNAL_ERROR` | `500` (`502` during a run) | A genuinely unexpected exception (a bug) — quote `exceptionUID` when reporting it |
+| `NAME_INVALID` | `400` | A pipeline or preset name that isn't filename-safe (`^[a-zA-Z0-9_-]+$`) |
+| `PIPELINE_NOT_FOUND` | `404` | No pipeline with that name |
+| `PRESET_NOT_FOUND` | `404` | No preset with that name |
+| `MODEL_NOT_FOUND` | `404` | An Ollama model that isn't installed (or Ollama is unreachable) |
+| `DEFINITION_INVALID` | `422` | A submitted pipeline or preset fails validation — `details.node_id` names the node at fault, if one |
+| `MODEL_NOT_ALLOWED` | `422` | A submitted definition uses a model the server doesn't allow — `details.node_id` likewise |
+| `EDITING_DISABLED` | `403` | Writes are off on this server; `message` says why |
+| `PIPELINE_EXISTS` | `409` | Creating a pipeline whose name is taken |
+| `REVISION_CONFLICT` | `409` | The pipeline changed (or was deleted) since it was loaded — reload before saving |
+| `PIPELINE_PROTECTED` | `409` | Deleting the server's default pipeline |
+| `INPUT_INVALID` | `400` | An empty prompt, or an OpenAI chat that doesn't end with the user's message |
+| `INPUT_TOO_LARGE` | `400` | The prompt, a history turn or a re-run's outputs exceed the configured length caps |
+| `NODE_NOT_FOUND` | `400` / `404` | `rerun.from_node`, or a prompt preview's `node_id`, isn't in the pipeline |
+| `TEST_CASE_NOT_FOUND` | `404` | A test run names a case the definition doesn't have |
+| `TEMPLATE_RENDER_FAILED` | `422` | A prompt preview's template can't be rendered |
+| `PIPELINE_RUN_FAILED` | `503` / `502` | A node fails after retries are exhausted, a loop hits `max_iterations` with `on_max_iterations: fail` (`details` names the node or loop), or no `output_node` candidate produced a result |
+| `REQUEST_CANCELLED` | `499` | The client disconnected mid-run — logged only, nobody receives it |
 
 `pipeline_name` is validated against a strict filename-safe pattern
 (`^[a-zA-Z0-9_-]+$`) before being used to build a filesystem path.

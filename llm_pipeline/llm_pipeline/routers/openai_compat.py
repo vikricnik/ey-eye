@@ -36,9 +36,11 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, Field
 
+from llm_pipeline.api_error import ApiError
 from llm_pipeline.api_schemas import (
     AskRequest,
     ConversationTurn,
+    ErrorCode,
     ErrorResponse,
     NodeOutputDTO,
     NodeStartEvent,
@@ -83,7 +85,7 @@ def openai_error(body: ErrorResponse) -> dict[str, object]:
             "message": body.message,
             "type": error_type,
             "param": None,
-            "code": body.error.lower().replace(" ", "_"),
+            "code": body.code.lower(),  # e.g. "pipeline_not_found"
             "exceptionUID": body.exceptionUID,
         }
     }
@@ -226,7 +228,7 @@ def conversation(messages: list[ChatMessage]) -> tuple[str, list[ConversationTur
     answers the user message(s) before it; system messages are dropped."""
     exchange = [m for m in messages if m.role in ("user", "assistant")]
     if not exchange or exchange[-1].role != "user":
-        raise HTTPException(status_code=400, detail="the last message must be the user's")
+        raise ApiError(400, ErrorCode.INPUT_INVALID, "the last message must be the user's")
 
     history: list[ConversationTurn] = []
     asked: list[str] = []
