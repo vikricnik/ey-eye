@@ -117,13 +117,13 @@ version: 1
 
 execution:
   model_timeout_seconds: 60   # hard timeout per node's model call
-  max_history_turns: 6         # prior conversation turns folded into {{ input }}
+  max_history_turns: 6         # prior conversation turns folded into {{ conversation }}
 
 nodes:
   - id: analyze
     depends_on: []              # no dependencies = a root node, runs first
     model: { provider: ollama, model: llama3.2:3b, temperature: 0.0 }
-    prompt_template: "Analyze this request: {{ input }}"
+    prompt_template: "Analyze this request: {{ conversation }}"
 
   - id: draft
     depends_on: [analyze]        # runs after `analyze` completes
@@ -135,7 +135,7 @@ nodes:
     # and API key; see "Requirements" below.
     prompt_template: |
       Analysis: {{ analyze.output }}
-      Original request: {{ input }}
+      Original request: {{ conversation }}
       Write a draft response.
 
 output_node: draft   # which node's output becomes final_answer
@@ -188,16 +188,18 @@ Every template can use:
 
 | Variable | Contains |
 |---|---|
-| `{{ input }}` | the new message, with the earlier conversation folded in (see "Conversation history") |
-| `{{ question }}` | just the new message |
+| `{{ message }}` | just the new message |
+| `{{ conversation }}` | the earlier conversation, then the new message (see "Conversation history") — just the message for a node with `include_history: false` |
 | `{{ history }}` | just the earlier conversation (empty on the first message) |
 | `{{ <node>.output }}` | another node's output — that node must be in `depends_on` |
 
-`input`, `question` and `history` are therefore reserved and can't be node ids.
+`{{ question }}` and `{{ input }}` are older names for `{{ message }}` and
+`{{ conversation }}`, and keep working. All five are therefore reserved and
+can't be node ids.
 
 Templates are rendered in Jinja's **sandbox**: they can't reach Python
-internals — `{{ input.__class__ }}` renders nothing, and going further
-(`{{ input.__class__.__mro__ }}`) fails the node with a security error.
+internals — `{{ message.__class__ }}` renders nothing, and going further
+(`{{ message.__class__.__mro__ }}`) fails the node with a security error.
 That matters because editor clients can save templates.
 
 ### Pipeline-wide settings
@@ -214,13 +216,13 @@ defaults:                   # every node inherits these unless it sets its own
 nodes:
   - id: classify
     include_history: false  # sees only the new message
-    prompt_template: "Classify: {{ question }}"   # no model: uses defaults.model
+    prompt_template: "Classify: {{ message }}"    # no model: uses defaults.model
   - id: answer
     depends_on: [classify]
     model: { provider: ollama, model: gemma3:12b }  # own model; temperature 0.4 and
                                                     # keep_alive inherited from defaults
     strip_reasoning: false  # overrides the pipeline default
-    prompt_template: "{{ input }}"
+    prompt_template: "{{ conversation }}"
 ```
 
 Inheritance rules: a node without `model` uses `defaults.model` entirely; a
@@ -283,10 +285,10 @@ output_node: [refund_flow, tech_support_flow, general_flow]
   Python (`output.startswith(...)`, `output.contains(...)`, `"X" in output`,
   `and`/`or`/`not`), **never** `eval()`. Syntax is validated at YAML load time,
   not the first time a request happens to hit that branch. Besides `output`,
-  a condition can read `question` — the user's new message, as
-  `{{ question }}` in prompts: `'"URGENT" in question'` routes on what the
-  user wrote without a classifier call. `exit_when` and test `check`s can
-  read it too.
+  a condition can read `message` — the user's new message, as
+  `{{ message }}` in prompts (`question` is its older name):
+  `'"URGENT" in message'` routes on what the user wrote without a classifier
+  call. `exit_when` and test `check`s can read it too.
 - `to` can list several nodes — `to: [tech_answer, security_check]` — which
   all start, in parallel, when that route is taken.
 - A branch's route targets (`refund_flow`, etc.) have `depends_on: []` but are
@@ -301,7 +303,7 @@ output_node: [refund_flow, tech_support_flow, general_flow]
   - id: classify
     labels: [REFUND, TECHNICAL, GENERAL]
     prompt_template: |
-      Classify this support request as REFUND, TECHNICAL or GENERAL: {{ input }}
+      Classify this support request as REFUND, TECHNICAL or GENERAL: {{ message }}
 ```
 
 A node with `labels` answers with exactly one of them: its output is
@@ -311,7 +313,7 @@ appearing in it as a whole word) and replaced by that label as written.
 An answer naming none of them, or more than one, fails the run with an
 error naming the node. Routes can then test `output == "REFUND"`, and a
 route no label can ever take (a typo, or one an earlier route always
-catches first) is a load-time error. Routes that also read `question` are
+catches first) is a load-time error. Routes that also read `message` are
 left out of that check — whether they match depends on the message.
 
 ### Joins after branches and loops
@@ -333,7 +335,7 @@ nodes:
     depends_on: []
     model: { provider: ollama, model: llama3, temperature: 0.4 }
     prompt_template: |
-      {{ input }}
+      {{ conversation }}
       {% if critique is defined %}
       Revise based on this critique: {{ critique.output }}
       {% endif %}
@@ -1009,7 +1011,7 @@ conversation state). Per pipeline:
 execution:
   max_history_turns: 6      # most recent turns kept verbatim (0: history off)
 history:
-  intro: "Conversation so far:"                           # first line of the history in {{ input }}
+  intro: "Conversation so far:"                           # first line of the history in {{ conversation }}
   turn_template: "User: {{ prompt }}\nAssistant: {{ answer }}"   # how each turn is written
   max_chars: 4000           # budget for the verbatim turns; oldest dropped first
   remember: [classify]      # also remember these nodes' outputs with each turn
@@ -1030,4 +1032,4 @@ history:
   the summary call fails, the older turns are simply dropped (a warning is
   logged) — the run itself never fails because of it.
 - A node with `include_history: false` gets just the new message as
-  `{{ input }}` and an empty `{{ history }}`.
+  `{{ conversation }}` and an empty `{{ history }}`.

@@ -200,7 +200,9 @@ export function addNode(
           },
         }
       : {}),
-    prompt_template: refs ? `{{ input }}\n\n${refs}` : "{{ input }}",
+    // {{ conversation }}: the message with the earlier turns — a node that
+    // should see the message alone can switch to {{ message }}.
+    prompt_template: refs ? `{{ conversation }}\n\n${refs}` : "{{ conversation }}",
     ...(opts.layout ? { layout: opts.layout } : {}),
   };
   if (opts.preset) node = fitSavedPrompt(def, presetApplied(node, opts.preset), opts.preset);

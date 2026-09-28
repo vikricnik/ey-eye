@@ -54,7 +54,7 @@ problems are where the parts meet:
 | [API-009](#api-009-the-draftops-field-setters-use-string-paths-with-unknown-values) | WARNING | The `draftOps` field setters use string paths with `unknown` values — ✅ fixed |
 | [API-010](#api-010-wire-types-are-untyped-on-the-server-and-hand-copied-under-different-names-in-typescript) | WARNING | Wire types are untyped on the server and hand-copied under different names in TypeScript — ✅ fixed |
 | [API-011](#api-011-health-is-public-but-returns-what-pipelines-requires-a-key-for) | WARNING | `/health` is public but returns what `/pipelines` requires a key for — ✅ fixed |
-| [API-012](#api-012-the-template-variable--input--quietly-includes-the-conversation) | WARNING | The template variable `{{ input }}` quietly includes the conversation |
+| [API-012](#api-012-the-template-variable--input--quietly-includes-the-conversation) | WARNING | The template variable `{{ input }}` quietly includes the conversation — ✅ fixed |
 | [API-013](#api-013-python-signatures-rely-on-positional-tuples-and-long-parameter-lists) | SUGGESTION | Python signatures rely on positional tuples and long parameter lists |
 | [API-014](#api-014-one-concept-has-three-names-and-several-cli-commands-differ-by-one-keystroke) | SUGGESTION | One concept has three names, and several CLI commands differ by one keystroke |
 | [API-015](#api-015-yaml-schema-naming) | SUGGESTION | YAML schema naming |
@@ -535,6 +535,21 @@ working around them.
 ### API-012: The template variable `{{ input }}` quietly includes the conversation
 
 - **Severity**: WARNING
+- **Status**: ✅ Fixed (2026-09-28).
+  - `{{ message }}` (the new message alone) and `{{ conversation }}` (earlier
+    turns, then the new message; just the message for a node with
+    `include_history: false`) are the documented names. `{{ question }}` and
+    `{{ input }}` keep working as their older names, and all five are
+    reserved node ids.
+  - `message` also works wherever `question` did: in branch/loop/test
+    conditions (the classifier-route check treats both alike) and in judge
+    prompts.
+  - New nodes start from `{{ conversation }}`, so behaviour is unchanged
+    under an explicit name. The editor's insert buttons and hints and the
+    READMEs use the new names.
+  - The shipped YAML files still say `{{ input }}` and work unchanged.
+    Whether `support-router`'s classifier should switch to `{{ message }}`
+    is a content decision left open.
 - **Principle**: Names should reveal intent (public template language)
 - **File(s)**:
   - [templating.py:24-38](llm_pipeline/llm_pipeline/dag_builder/templating.py#L24-L38)

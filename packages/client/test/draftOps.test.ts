@@ -60,7 +60,7 @@ describe("addNode", () => {
     assert.equal(id, "summary");
     const node = definition.nodes.at(-1)!;
     assert.deepEqual(node.depends_on, ["b", "c"]);
-    assert.equal(node.prompt_template, "{{ input }}\n\n{{ b.output }}\n\n{{ c.output }}");
+    assert.equal(node.prompt_template, "{{ conversation }}\n\n{{ b.output }}\n\n{{ c.output }}");
     assert.equal(diamond().nodes.length, 4, "input is not mutated");
   });
 
@@ -333,7 +333,7 @@ describe("saved nodes (presets)", () => {
     const model = { provider: "ollama" as const, model: "llama3", temperature: 0.2 };
     const blank = newDefinition("p", model);
     assert.equal(blank.output_node, "answer");
-    assert.equal(blank.nodes[0]!.prompt_template, "{{ input }}");
+    assert.equal(blank.nodes[0]!.prompt_template, "{{ conversation }}");
     const saved = newDefinition("p", model, {
       name: "polite-answer",
       model: { provider: "ollama", model: "gemma3:12b" },

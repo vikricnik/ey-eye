@@ -64,6 +64,8 @@ def test_invalid_python_syntax_raises_syntax_error() -> None:
     "expression,expected",
     [
         ('"order" in question', True),
+        ('"order" in message', True),
+        ('message.startswith("URGENT")', True),
         ('question.startswith("URGENT")', True),
         ('output == "REFUND" and question.contains("order")', True),
         ('output == "REFUND" and not question.contains("order")', False),
@@ -79,4 +81,5 @@ def test_question_is_empty_when_not_given() -> None:
 
 def test_names_used_by_an_expression() -> None:
     assert expression_names('output == "A" and "x" in question') == {"output", "question"}
+    assert expression_names('"x" in message') == {"message"}
     assert expression_names('output.startswith("A")') == {"output"}

@@ -136,9 +136,10 @@ def test_route_that_also_depends_on_the_question_is_not_judged_by_labels_alone()
     """Whether `output == "REFUND" and "order" in question` matches depends
     on the message, so the load-time check can't call it unreachable — nor
     assume it always catches REFUND before later routes."""
-    routes: list[dict[str, Any]] = [
-        {"when": 'output == "REFUND" and "order" in question', "to": "refund_flow"},
-        {"when": 'output == "REFUND"', "to": "general_flow"},
-        {"default": True, "to": "general_flow"},
-    ]
-    PipelineDefinition.model_validate(_router(LABELS, routes))  # does not raise
+    for name in ("question", "message"):
+        routes: list[dict[str, Any]] = [
+            {"when": f'output == "REFUND" and "order" in {name}', "to": "refund_flow"},
+            {"when": 'output == "REFUND"', "to": "general_flow"},
+            {"default": True, "to": "general_flow"},
+        ]
+        PipelineDefinition.model_validate(_router(LABELS, routes))  # does not raise

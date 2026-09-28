@@ -130,6 +130,12 @@ def test_the_tests_block_is_validated() -> None:
     blind = {**TESTS, "judge": {"model": {"provider": "ollama", "model": "j"}, "prompt": "{{ q }}"}}
     with pytest.raises(ValidationError, match="unknown variable"):
         PipelineDefinition.model_validate(_definition(blind))
+    # {{ message }} works wherever {{ question }} does.
+    judge = {
+        "model": {"provider": "ollama", "model": "j"},
+        "prompt": "{{ message }} {{ answer }} {{ criterion }}",
+    }
+    PipelineDefinition.model_validate(_definition({**TESTS, "judge": judge}))
 
 
 def test_tests_are_saved_only_when_there_are_some(client: TestClient) -> None:

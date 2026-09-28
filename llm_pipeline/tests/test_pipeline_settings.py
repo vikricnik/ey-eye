@@ -138,7 +138,9 @@ def test_a_node_needs_its_own_model_or_a_default() -> None:
         )
 
 
-def test_reserved_node_ids_are_rejected() -> None:
+@pytest.mark.parametrize("name", ["message", "conversation", "history", "input", "question"])
+def test_reserved_node_ids_are_rejected(name: str) -> None:
+    """Each is a template variable, which a node's output can't shadow."""
     from pydantic import ValidationError
 
     with pytest.raises(ValidationError, match="reserved"):
@@ -147,12 +149,12 @@ def test_reserved_node_ids_are_rejected() -> None:
                 "name": "x",
                 "nodes": [
                     {
-                        "id": "history",
+                        "id": name,
                         "model": {"provider": "ollama", "model": "m"},
-                        "prompt_template": "{{ input }}",
+                        "prompt_template": "{{ message }}",
                     }
                 ],
-                "output_node": "history",
+                "output_node": name,
             }
         )
 
@@ -201,6 +203,32 @@ def test_history_reaches_only_the_nodes_that_include_it(
     assert "I=Conversation so far:\nUser: earlier" in answer_prompt
     # The classifier's output is handed back to be remembered with this turn.
     assert body["remembered"] == {"classify": "JOKE"}
+
+
+def test_message_and_conversation_say_what_they_hold(
+    client: TestClient, pipelines: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """{{ message }} is the new message alone; {{ conversation }} is the
+    earlier turns and then it — or just it, for a node that doesn't see the
+    history. {{ question }} and {{ input }} are their older names."""
+    definition = _classifier_pipeline()
+    definition["nodes"][0]["prompt_template"] = "Classify: {{ conversation }}"
+    definition["nodes"][1]["prompt_template"] = (
+        "M={{ message }}|Q={{ question }}|V={{ conversation }}|I={{ input }}"
+    )
+    _write(pipelines, definition)
+    recorder = _Recorder({"m": "JOKE"})
+    monkeypatch.setattr(node_types_module, "get_provider", recorder.provider_for)
+    history = [{"prompt": "earlier", "final_answer": "ok"}]
+    client.post("/pipelines/chat/runs", json={"prompt": "tell one", "history": history})
+
+    classify_prompt, answer_prompt = recorder.calls[0][1], recorder.calls[1][1]
+    assert classify_prompt == "Classify: tell one"
+    message, question, conversation, contextual = answer_prompt.split("|")
+    assert message == "M=tell one" and question == "Q=tell one"
+    assert conversation.startswith("V=Conversation so far:\nUser: earlier")
+    assert conversation.endswith("New request: tell one")
+    assert conversation[2:] == contextual[2:]
 
 
 def test_streamed_runs_also_report_remembered_outputs(

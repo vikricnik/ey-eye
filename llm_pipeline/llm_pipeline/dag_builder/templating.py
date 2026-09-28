@@ -28,13 +28,17 @@ def render_template(
     question: str | None = None,
     history: str = "",
 ) -> str:
-    """`input_text` is {{ input }} (the new message, with the conversation
-    folded in when the node sees history); `question` is just the new
-    message and `history` just the earlier turns."""
+    """`input_text` is {{ conversation }} (the new message, with the earlier
+    turns before it when the node sees history); `question` is
+    {{ message }}, the new message alone; `history` just the earlier turns.
+    {{ input }} and {{ question }} are their older names."""
+    message = question if question is not None else input_text
     context: dict[str, object] = {
-        "input": input_text,
-        "question": question if question is not None else input_text,
+        "message": message,
+        "conversation": input_text,
         "history": history,
+        "question": message,
+        "input": input_text,
     }
     for node_id, result in node_outputs.items():
         context[node_id] = _NodeOutputView(result["output"])

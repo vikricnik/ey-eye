@@ -28,6 +28,7 @@ NAMES = {"a", "b"}
         ("{{ a.output if a is defined else '' }}", set()),
         ("{% if a is defined or b is defined %}{{ a.output }}{% endif %}", {"a"}),
         ("{{ input }} {{ question }}", set()),
+        ("{{ message }} {{ conversation }}", set()),
     ],
 )
 def test_references_outside_an_is_defined_guard_are_found(

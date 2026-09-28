@@ -52,8 +52,8 @@ def merge_loop_counts(a: dict[str, int], b: dict[str, int]) -> dict[str, int]:
 
 
 class PipelineState(TypedDict):
-    input: str  # the new message on its own (the {{ question }} variable)
-    contextual_input: str  # input with conversation history folded in ({{ input }})
+    input: str  # the new message on its own (the {{ message }} variable)
+    contextual_input: str  # input with conversation history folded in ({{ conversation }})
     history: str  # just the earlier turns ({{ history }}); "" when there are none
     node_outputs: Annotated[dict[str, NodeResult], merge_node_outputs]
     loop_counts: Annotated[dict[str, int], merge_loop_counts]

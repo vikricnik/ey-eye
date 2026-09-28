@@ -21,7 +21,7 @@ from llm_pipeline.pipeline_config.activation import inputs_that_may_never_arrive
 from llm_pipeline.pipeline_config.schema import JUDGE_VARIABLES, TEMPLATE_INPUT_VARIABLES
 from llm_pipeline.pipeline_config.templates import undeclared_variables, unguarded_references
 from llm_pipeline.pipeline_config.topology import Topology
-from llm_pipeline.safe_eval import evaluate_condition, expression_names
+from llm_pipeline.safe_eval import MESSAGE_NAMES, evaluate_condition, expression_names
 
 if TYPE_CHECKING:
     from llm_pipeline.pipeline_config.schema import BranchConfig, PipelineDefinition
@@ -53,7 +53,7 @@ def validate_pipeline_dag(definition: "PipelineDefinition") -> None:
         if node.id in TEMPLATE_INPUT_VARIABLES:
             raise PipelineValidationError(
                 f"node id '{node.id}' is reserved (templates use {{{{ {node.id} }}}} for the "
-                f"conversation) — rename the node",
+                f"message or the conversation) — rename the node",
                 node.id,
             )
         if node.type == "llm_call" and node.model is None and definition.defaults.model is None:
@@ -150,9 +150,9 @@ def _check_routes_reachable_by_labels(
     if source.labels is None:
         return
     conditional = [(r, r.when) for r in branch.routes if r.when is not None]
-    # A route that also reads `question` may or may not match any label —
+    # A route that also reads the message may or may not match any label —
     # it's neither checked nor assumed to catch the labels it could match.
-    judged = ["question" not in expression_names(when) for _, when in conditional]
+    judged = [MESSAGE_NAMES.isdisjoint(expression_names(when)) for _, when in conditional]
     taken: set[int] = set()
     for label in source.labels:
         # Routes are tried in order; the first match wins.

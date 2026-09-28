@@ -177,8 +177,8 @@ function NodeInspector(props: InspectorProps & { node: NodeConfig; tab: NodeTab;
   const loop = (def.loops ?? []).find((l) => l.from === id);
   const loopBackSources = (def.loops ?? []).filter((l) => l.back_to === id).map((l) => l.from);
   const refs = [
-    "{{ input }}",
-    "{{ question }}",
+    "{{ message }}",
+    "{{ conversation }}",
     "{{ history }}",
     ...[...deps, ...loopBackSources].map((d) => `{{ ${d}.output }}`),
   ];
@@ -311,7 +311,7 @@ function NodeInspector(props: InspectorProps & { node: NodeConfig; tab: NodeTab;
             disabled={!editable}
             onChange={(e) => set("include_history", e.target.checked ? undefined : false, false)}
           />
-          sees the conversation history — off: {"{{ input }}"} is just the new message
+          sees the conversation history — off: {"{{ conversation }}"} is just the new message
         </label>
         <Field label="Strip <think> reasoning">
           <select
@@ -361,7 +361,7 @@ function NodeInspector(props: InspectorProps & { node: NodeConfig; tab: NodeTab;
         />
         <PromptEditor
           label="Prompt template"
-          hint="{{ input }}: new message + history · {{ question }}: new message only · {{ history }}: earlier turns only · {{ node.output }} needs that node as a dependency"
+          hint="{{ message }}: the new message · {{ conversation }}: earlier turns + the new message · {{ history }}: earlier turns only · {{ node.output }} needs that node as a dependency · {{ question }} and {{ input }} are older names for message and conversation"
           value={node.prompt_template}
           refs={refs}
           rows={7}
@@ -964,8 +964,9 @@ function HistorySettings(props: InspectorProps) {
     <section>
       <h3>Conversation history</h3>
       <p className="dim">
-        Earlier turns reach nodes through <code>{"{{ input }}"}</code> (history + new message),{" "}
-        <code>{"{{ history }}"}</code> and <code>{"{{ question }}"}</code>. Nodes can opt out in their settings.
+        Earlier turns reach nodes through <code>{"{{ conversation }}"}</code> (earlier turns, then the new
+        message) and <code>{"{{ history }}"}</code> (earlier turns only); <code>{"{{ message }}"}</code> is the new
+        message alone. Nodes can opt out in their settings.
       </p>
       <div className="field-stack">
         <Field label="turns kept" hint="most recent turns sent verbatim; 0 turns history off">
@@ -985,7 +986,7 @@ function HistorySettings(props: InspectorProps) {
           />
         </Field>
       </div>
-      <Field label="Intro line" hint="first line of the history inside {{ input }}">
+      <Field label="Intro line" hint="first line of the history inside {{ conversation }}">
         <input
           type="text"
           value={history.intro ?? "Conversation so far:"}

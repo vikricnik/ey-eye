@@ -275,8 +275,8 @@ export interface NodeConfig {
    * the pipeline's default system prompt. */
   system_prompt?: string;
   prompt_template: string;
-  /** false: the node doesn't see the conversation ({{ input }} is just the
-   * new message, {{ history }} empty). Default true. */
+  /** false: the node doesn't see the conversation ({{ conversation }} is
+   * just the new message, {{ history }} empty). Default true. */
   include_history?: boolean;
   /** Remove <think>…</think> reasoning from the output. Unset: pipeline default. */
   strip_reasoning?: boolean;
@@ -304,7 +304,7 @@ export interface HistorySummaryConfig {
 
 /** How earlier turns reach the nodes (how many: execution.max_history_turns). */
 export interface HistoryConfig {
-  /** First line of the history inside {{ input }}. */
+  /** First line of the history inside {{ conversation }}. */
   intro?: string;
   /** Template for one earlier turn; variables: prompt, answer, outputs. */
   turn_template?: string;

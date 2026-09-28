@@ -71,7 +71,8 @@ def make_judge(
 
     async def judge(question: str, answer: str, requirement: str) -> str:
         prompt = render(
-            config.prompt, {"question": question, "answer": answer, "criterion": requirement}
+            config.prompt,
+            {"question": question, "message": question, "answer": answer, "criterion": requirement},
         )
         generation = await generate_with_retry(
             get_provider(spec),

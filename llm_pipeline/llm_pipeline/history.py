@@ -1,8 +1,8 @@
 """
 Conversation history: turning the earlier turns a client sends into the
 text nodes see — `{{ history }}` (just the earlier turns), and
-`{{ input }}` (the new message with the history folded in, the historical
-format).
+`{{ conversation }}` (the new message with the history folded in, the
+historical format; also called `{{ input }}`).
 
 Per pipeline (HistoryConfig + execution.max_history_turns):
   - how many recent turns are kept verbatim, and a character budget for
@@ -33,9 +33,9 @@ Summarizer = Callable[[str], Awaitable[str]]
 
 @dataclass(frozen=True)
 class PreparedInput:
-    question: str  # {{ question }}: the new message alone
+    question: str  # {{ message }}: the new message alone
     history: str  # {{ history }}: the earlier turns (and recap), "" if none
-    contextual: str  # {{ input }}: the new message with history folded in
+    contextual: str  # {{ conversation }}: the new message with history folded in
 
 
 def render_turn(template: str, turn: ConversationTurn) -> str:
@@ -46,7 +46,7 @@ def render_turn(template: str, turn: ConversationTurn) -> str:
 
 
 def build_contextual_input(question: str, history: str, intro: str) -> str:
-    """{{ input }} — kept byte-identical to the original fixed format
+    """{{ conversation }} — kept byte-identical to the original fixed format
     ("Conversation so far:\\n…\\n\\nNew request: …") under default settings."""
     if not history:
         return question

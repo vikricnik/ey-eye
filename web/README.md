@@ -192,7 +192,7 @@ it everything below is read-only and a banner says so):
 - **Configure a node** in **Settings**: id (renaming rewrites every
   reference), model (picked from what `GET /models` says is installed or
   allowlisted, with its max context, size and quantization), temperature, system prompt, prompt template (with insert
-  buttons for `{{ input }}` and each dependency's `{{ node.output }}`), all
+  buttons for `{{ message }}`, `{{ conversation }}` and each dependency's `{{ node.output }}`), all
   Ollama options (`num_ctx`, `num_predict`, `top_p`, `top_k`,
   `repeat_penalty`, `seed`, `stop`, `mirostat`, `keep_alive`, `format`, …),
   output-node flag, and its branch or loop.
@@ -224,7 +224,7 @@ it everything below is read-only and a banner says so):
 - On a node: pick "pipeline default" as the model to inherit it, switch
   "sees the conversation history" off for nodes that should only see the
   new message, and override reasoning stripping. Prompt insert buttons
-  include `{{ question }}` and `{{ history }}`.
+  include `{{ message }}`, `{{ conversation }}` and `{{ history }}`.
 - Pipelines flow **top to bottom**: each dependency level is a row, and
   nodes that run in parallel sit side by side. Node positions are saved in
   the YAML (`layout`); **Auto-layout** re-arranges everything by dependency

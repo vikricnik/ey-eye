@@ -47,11 +47,16 @@ DEFAULT_SUMMARY_PROMPT = (
     "questions; drop small talk.\n\n{{ history }}"
 )
 
-# Template variables every node prompt can use, besides other nodes' outputs.
-TEMPLATE_INPUT_VARIABLES = frozenset({"input", "question", "history"})
+# Template variables every node prompt can use, besides other nodes' outputs:
+# {{ message }} (the new message alone), {{ conversation }} (the earlier
+# turns, then the new message — just the message for a node that doesn't see
+# the history) and {{ history }} (the earlier turns alone). {{ question }} and
+# {{ input }} are older names for {{ message }} and {{ conversation }}.
+TEMPLATE_INPUT_VARIABLES = frozenset({"message", "conversation", "history", "question", "input"})
 
 # How a judge model is asked whether a test case's answer meets one
-# requirement. Variables: question, answer, criterion.
+# requirement. Variables: question (or message) — the case's message —,
+# answer, criterion.
 DEFAULT_JUDGE_PROMPT = (
     "You are checking an answer against one requirement.\n\n"
     "Question: {{ question }}\n\n"
@@ -59,7 +64,7 @@ DEFAULT_JUDGE_PROMPT = (
     "Requirement: {{ criterion }}\n\n"
     "Reply with PASS or FAIL on the first line, then one sentence saying why."
 )
-JUDGE_VARIABLES = frozenset({"question", "answer", "criterion"})
+JUDGE_VARIABLES = frozenset({"question", "message", "answer", "criterion"})
 
 
 class ExecutionConfig(BaseModel):
@@ -125,8 +130,8 @@ class NodeConfig(BaseModel):
     # None: use the pipeline's `defaults.system_prompt`.
     system_prompt: str | None = None
     prompt_template: str
-    # False: this node doesn't see the conversation — its {{ input }} is just
-    # the new message and {{ history }} is empty.
+    # False: this node doesn't see the conversation — its {{ conversation }}
+    # is just the new message and {{ history }} is empty.
     include_history: bool = True
     # Remove <think>…</think> reasoning from this node's output before other
     # nodes or the user see it. None: use the pipeline's default.
@@ -181,7 +186,7 @@ class HistoryConfig(BaseModel):
     kept verbatim is `execution.max_history_turns`."""
 
     model_config = _STRICT
-    # First line of the history block inside {{ input }}.
+    # First line of the history block inside {{ conversation }}.
     intro: str = DEFAULT_HISTORY_INTRO
     # Template for one earlier turn; variables: prompt, answer, outputs
     # (the remembered node outputs of that turn, by node id).

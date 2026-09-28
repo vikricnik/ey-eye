@@ -10,8 +10,8 @@ else raises UnsafeExpressionError instead of silently doing something
 unexpected.
 
 Supported syntax, evaluated against two string variables: `output` (the
-node's answer) and `question` (the user's new message, as {{ question }} in
-prompts — "" where there is none):
+node's answer) and `message` (the user's new message, as {{ message }} in
+prompts — "" where there is none; `question` is its older name):
   output.startswith("APPROVE")
   output.endswith("...")
   output.contains("REFUND")        # custom: substring test
@@ -22,8 +22,8 @@ prompts — "" where there is none):
   not output.startswith("X")
   output.contains("A") or output.contains("B")
   output.contains("A") and output.contains("B")
-  output == "REFUND" and "order" in question
-  question.startswith("URGENT")    # methods work on either variable
+  output == "REFUND" and "order" in message
+  message.startswith("URGENT")     # methods work on either variable
 """
 
 import ast
@@ -48,13 +48,18 @@ def _equals(a: str, b: str) -> bool:
 _CUSTOM_METHODS = {"contains": _contains, "equals": _equals}
 
 
+# The names a condition reads the user's new message by.
+MESSAGE_NAMES = frozenset({"message", "question"})
+
+
 def evaluate_condition(expression: str, output: str, question: str = "") -> bool:
     """Evaluates an expression against a node's output text and the user's
     message. Raises UnsafeExpressionError (unsupported construct) or
     SyntaxError (invalid Python syntax) — callers should let both surface
     as clear failures rather than catching and guessing."""
     tree = ast.parse(expression, mode="eval")
-    result = _eval_node(tree.body, {"output": output, "question": question})
+    names = {"output": output} | dict.fromkeys(MESSAGE_NAMES, question)
+    result = _eval_node(tree.body, names)
     return bool(result)
 
 
@@ -111,7 +116,7 @@ def _eval_node(node: ast.AST, names: dict[str, str]) -> object:
             )
         if not isinstance(node.func.value, ast.Name) or node.func.value.id not in names:
             raise UnsafeExpressionError(
-                "method calls are only allowed directly on `output` or `question` "
+                "method calls are only allowed directly on `output` or `message` "
                 "(no chaining in v1)"
             )
         target = names[node.func.value.id]
@@ -141,7 +146,7 @@ def _eval_node(node: ast.AST, names: dict[str, str]) -> object:
         if node.id in names:
             return names[node.id]
         raise UnsafeExpressionError(
-            f"unknown name '{node.id}' — only `output` and `question` are available in conditions"
+            f"unknown name '{node.id}' — only `output` and `message` are available in conditions"
         )
 
     raise UnsafeExpressionError(f"unsupported expression construct: {type(node).__name__}")
