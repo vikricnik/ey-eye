@@ -20,10 +20,10 @@ from fastapi.responses import StreamingResponse
 
 from llm_pipeline.api_error import ApiError
 from llm_pipeline.api_schemas import (
+    DefinitionIssue,
     DeletedResponse,
     ErrorCode,
     ModelInfo,
-    ModelIssue,
     ModelLimitsResponse,
     ModelsResponse,
     PipelineDefinitionResponse,
@@ -217,8 +217,10 @@ async def validate_pipeline(
     return ValidatePipelineResponse(
         definition=definition_to_json(definition),
         yaml=definition_to_yaml(definition),
-        model_issues=[ModelIssue(node_id=i.node_id, message=str(i)) for i in issues],
-        warnings=[ModelIssue(node_id=node_id, message=message) for node_id, message in warnings],
+        model_issues=[DefinitionIssue(node_id=i.node_id, message=str(i)) for i in issues],
+        warnings=[
+            DefinitionIssue(node_id=node_id, message=message) for node_id, message in warnings
+        ],
     )
 
 

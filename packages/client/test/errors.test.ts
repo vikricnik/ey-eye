@@ -5,9 +5,9 @@ import type { AddressInfo } from "node:net";
 import { after, before, describe, it } from "node:test";
 
 import { PipelineApiError, PipelineClient, ServerUnreachableError } from "../src/apiClient.js";
-import type { ApiErrorBody } from "../src/types.js";
+import type { ErrorResponse } from "../src/types.js";
 
-function errorBody(status: number, code: ApiErrorBody["code"], message: string, details = {}): ApiErrorBody {
+function errorBody(status: number, code: ErrorResponse["code"], message: string, details = {}): ErrorResponse {
   return {
     timestamp: "2026-09-28T00:00:00Z",
     status,

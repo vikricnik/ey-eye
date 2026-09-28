@@ -11,7 +11,7 @@ from typing import Annotated, NotRequired, TypedDict
 
 
 class NodeUsage(TypedDict):
-    """See api_schemas.UsageDTO."""
+    """See api_schemas.NodeUsage."""
 
     prompt_tokens: int | None
     completion_tokens: int | None

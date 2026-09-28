@@ -1,12 +1,12 @@
 import type {
-  ApiErrorBody,
+  ErrorResponse,
   DeletedResponse,
   ErrorCode,
   AskInput,
   RequestOptions,
   AskStreamEvent,
   HealthResponse,
-  ModelLimits,
+  ModelLimitsResponse,
   ModelsResponse,
   NodePreset,
   PipelineDefinition,
@@ -18,6 +18,8 @@ import type {
   RunRequest,
   RunResponse,
   RunTestsRequest,
+  SavePipelineRequest,
+  SavePresetRequest,
   PresetsListResponse,
   SavePipelineResponse,
   TestRunEvent,
@@ -34,7 +36,7 @@ export class RequestCancelledError extends Error {
 }
 
 
-/** What the server reported about a failure — see ApiErrorBody. */
+/** What the server reported about a failure — see ErrorResponse. */
 export interface PipelineApiErrorInfo {
   statusCode?: number | undefined;
   code?: ErrorCode | undefined;
@@ -89,7 +91,7 @@ export class ServerUnreachableError extends PipelineApiError {
 /** The error an ErrorResponse body describes — a failed request's, or a
  * stream's `error` event, so both carry the same fields. */
 function errorFromBody(
-  body: Partial<ApiErrorBody>,
+  body: Partial<ErrorResponse>,
   statusCode: number | undefined,
   fallbackMessage: string
 ): PipelineApiError {
@@ -111,7 +113,7 @@ function errorFromBody(
 async function buildApiError(response: Response): Promise<PipelineApiError> {
   const fallbackMessage = `Request failed with status ${response.status}`;
   try {
-    const body = (await response.json()) as Partial<ApiErrorBody>;
+    const body = (await response.json()) as Partial<ErrorResponse>;
     return errorFromBody(body, response.status, fallbackMessage);
   } catch {
     // response body wasn't JSON (or didn't match the expected shape) —
@@ -269,9 +271,9 @@ export class PipelineClient {
 
   /** Max context, size and quantization of an installed Ollama model.
    * Throws (404) when it isn't installed or Ollama can't be reached. */
-  async getModelLimits(ollamaModel: string): Promise<ModelLimits> {
+  async getModelLimits(ollamaModel: string): Promise<ModelLimitsResponse> {
     const path = ollamaModel.split("/").map(encodeURIComponent).join("/");
-    return this.get<ModelLimits>(`/models/ollama/${path}`);
+    return this.get<ModelLimitsResponse>(`/models/ollama/${path}`);
   }
 
   /** Validates without saving. Pass a definition (live validation, export
@@ -293,8 +295,9 @@ export class PipelineClient {
   /** Saves a new pipeline (If-None-Match: *). Throws ALREADY_EXISTS (412)
    * if the name is taken, EDITING_DISABLED (403) if writes are off. */
   async createPipeline(definition: PipelineDefinition): Promise<SavePipelineResponse> {
+    const body: SavePipelineRequest = { definition };
     return this.request<SavePipelineResponse>("PUT", pipelinePath(definition.name), {
-      body: { definition },
+      body,
       headers: { "If-None-Match": "*" },
     });
   }
@@ -306,8 +309,9 @@ export class PipelineClient {
     definition: PipelineDefinition,
     options: { baseRevision: string }
   ): Promise<SavePipelineResponse> {
+    const body: SavePipelineRequest = { definition };
     return this.request<SavePipelineResponse>("PUT", pipelinePath(definition.name), {
-      body: { definition },
+      body,
       headers: ifMatch(options.baseRevision),
     });
   }
@@ -341,8 +345,9 @@ export class PipelineClient {
   /** Creates or replaces a preset — last write wins, unless you pass the
    * `baseRevision` you loaded (REVISION_CONFLICT if it changed since). */
   async savePreset(preset: NodePreset, baseRevision?: string): Promise<PresetResponse> {
+    const body: SavePresetRequest = { preset };
     return this.request<PresetResponse>("PUT", `/presets/${encodeURIComponent(preset.name)}`, {
-      body: { preset },
+      body,
       headers: baseRevision === undefined ? {} : ifMatch(baseRevision),
     });
   }
@@ -441,7 +446,7 @@ export class PipelineClient {
           if (!parsed) continue;
 
           if (parsed.event === "error") {
-            const errBody = JSON.parse(parsed.data) as Partial<ApiErrorBody>;
+            const errBody = JSON.parse(parsed.data) as Partial<ErrorResponse>;
             throw errorFromBody(errBody, errBody.status, "Pipeline execution failed");
           }
           if (known.has(parsed.event)) {

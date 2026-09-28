@@ -20,7 +20,7 @@ from llm_pipeline.api_schemas import (
     ErrorCode,
     LoopIterationEvent,
     NodeCompleteEvent,
-    NodeOutputDTO,
+    NodeOutput,
     NodeStartEvent,
     NodeTokenEvent,
     RunRequest,
@@ -198,10 +198,8 @@ def _failure_details(e: PipelineExecutionError) -> dict[str, object]:
     return {}
 
 
-def node_dtos(node_outputs: dict[str, NodeResult]) -> dict[str, NodeOutputDTO]:
-    return {
-        node_id: NodeOutputDTO.model_validate(result) for node_id, result in node_outputs.items()
-    }
+def node_dtos(node_outputs: dict[str, NodeResult]) -> dict[str, NodeOutput]:
+    return {node_id: NodeOutput.model_validate(result) for node_id, result in node_outputs.items()}
 
 
 def _resolve_output_node(
@@ -352,7 +350,7 @@ async def pipeline_events(
     the stream) rather than propagating the exception further.
     """
     node_outputs: dict[str, NodeResult] = {}
-    completed: dict[str, NodeOutputDTO] = {}  # what node_complete sent, reused by `done`
+    completed: dict[str, NodeOutput] = {}  # what node_complete sent, reused by `done`
     loop_counts: dict[str, int] = {}
     # Only pipeline-defined nodes stream tokens to clients; internal graph
     # nodes (fan-out root, loop bookkeeping) never call a model anyway.
@@ -420,7 +418,7 @@ async def pipeline_events(
                     if isinstance(node_update, dict):
                         for node_id, result in node_update.items():
                             node_outputs[node_id] = result
-                            completed[node_id] = NodeOutputDTO.model_validate(result)
+                            completed[node_id] = NodeOutput.model_validate(result)
                             yield "node_complete", NodeCompleteEvent(node=completed[node_id])
                         continue
                     loop_update = update.get("loop_counts")

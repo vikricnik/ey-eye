@@ -1,17 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import type { ModelLimits, ModelsResponse, NodeModelConfig, OllamaOptions } from "@llm-pipeline/client";
+import type { ModelLimitsResponse, ModelsResponse, NodeModelConfig, OllamaOptions } from "@llm-pipeline/client";
 import { client } from "../config";
 import { formatBytes } from "../format";
 
 // One request per model per page load: limits don't change while you edit.
-const limitsCache = new Map<string, Promise<ModelLimits | null>>();
+const limitsCache = new Map<string, Promise<ModelLimitsResponse | null>>();
 
 /** An Ollama model's limits (max context, size) for hints; null while
  * loading, for other providers, or when the server can't tell. */
-export function useModelLimits(model: NodeModelConfig | undefined): ModelLimits | null {
+export function useModelLimits(model: NodeModelConfig | undefined): ModelLimitsResponse | null {
   const name = model?.provider === "ollama" ? model.model : null;
-  const [limits, setLimits] = useState<ModelLimits | null>(null);
+  const [limits, setLimits] = useState<ModelLimitsResponse | null>(null);
   useEffect(() => {
     setLimits(null);
     if (!name) return;
@@ -127,7 +127,7 @@ function normalizeOllama(name: string): string {
 export function ModelPicker(props: {
   model: NodeModelConfig | undefined;
   models: ModelsResponse | null;
-  limits: ModelLimits | null;
+  limits: ModelLimitsResponse | null;
   /** Called with "provider:model", or "" for the empty choice. */
   onChange: (identity: string) => void;
   onRefresh: () => void;

@@ -1,19 +1,49 @@
 """
 The public API contract — every model that actually crosses the wire:
-request bodies, response bodies, error bodies. Anything here is effectively
-a promise to API consumers (the CLI, the web client, anyone else); changing
-a field name or type here is a breaking change in a way that changing
-state.py's internal PipelineState shape is not.
+request bodies, response bodies, error bodies, streamed events. Anything
+here is effectively a promise to API consumers (the CLI, the web client,
+anyone else); changing a field name or type here is a breaking change in a
+way that changing state.py's internal PipelineState shape is not.
+
+Names: request bodies end in Request, whole response bodies in Response,
+streamed event payloads in Event; the records inside them are plain nouns
+(NodeOutput, CaseResult, …). packages/client/src/types.ts declares the same
+types under the same names — contracts/wire-types.json and the tests on
+both sides of it (tests/test_wire_contract.py) keep the two in step.
 """
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Annotated, Any, Literal, cast
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PlainValidator
 
 # Shared with history.py, which doesn't import this wire contract.
 from llm_pipeline.conversation import ConversationTurn as ConversationTurn
+from llm_pipeline.pipeline_config import NodeModelConfig, NodePreset, PipelineDefinition
+
+
+def _json_object(value: object) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError("expected a JSON object")
+    return cast(dict[str, Any], value)
+
+
+# Definitions and presets travel as plain JSON, in exactly the shape of the
+# pipeline YAML (aliases applied, e.g. "from"; unset optional fields
+# omitted). The server validates them itself, through the same models the
+# YAML loader uses, so a failure produces this API's own ErrorResponse —
+# naming the offending node — rather than FastAPI's generic 422. The
+# schemas still document them as those models.
+PipelineDefinitionJson = Annotated[
+    dict[str, Any], PlainValidator(_json_object, json_schema_input_type=PipelineDefinition)
+]
+NodePresetJson = Annotated[
+    dict[str, Any], PlainValidator(_json_object, json_schema_input_type=NodePreset)
+]
+NodeModelJson = Annotated[
+    dict[str, Any], PlainValidator(_json_object, json_schema_input_type=NodeModelConfig)
+]
 
 
 class RerunRequest(BaseModel):
@@ -37,7 +67,7 @@ class RunRequest(BaseModel):
     rerun: RerunRequest | None = None
 
 
-class UsageDTO(BaseModel):
+class NodeUsage(BaseModel):
     """What the model's backend reported for a node's call (its last one,
     for a node a loop re-ran). Any field may be null when not reported."""
 
@@ -58,12 +88,12 @@ class UsageDTO(BaseModel):
     prompt_chars: int | None = None
 
 
-class NodeOutputDTO(BaseModel):
+class NodeOutput(BaseModel):
     node_id: str
     model_name: str
     output: str
     duration_ms: float
-    usage: UsageDTO | None = None
+    usage: NodeUsage | None = None
     # Reused from the previous run by a re-run, not generated now.
     replayed: bool = False
 
@@ -72,7 +102,7 @@ class RunResponse(BaseModel):
     pipeline_name: str
     output_node: str  # whichever output_node candidate actually resolved
     final_answer: str
-    node_outputs: dict[str, NodeOutputDTO]
+    node_outputs: dict[str, NodeOutput]
     loop_iterations: dict[str, int] = {}
     # Outputs of the nodes in the pipeline's `history.remember`: store them
     # with this turn and send them back as its `outputs` next time.
@@ -137,9 +167,9 @@ class NodeCompleteEvent(BaseModel):
     """One graph node just finished. Synthetic/internal nodes (the
     multi-root fan-out node, loop increment/failed nodes) are filtered out
     before reaching the client — this only ever describes a real
-    pipeline-defined node, the same NodeOutputDTO shape RunResponse uses."""
+    pipeline-defined node, the same NodeOutput shape RunResponse uses."""
 
-    node: NodeOutputDTO
+    node: NodeOutput
 
 
 class LoopIterationEvent(BaseModel):
@@ -160,7 +190,7 @@ class StreamDoneEvent(BaseModel):
     pipeline_name: str
     output_node: str
     final_answer: str
-    node_outputs: dict[str, NodeOutputDTO]
+    node_outputs: dict[str, NodeOutput]
     loop_iterations: dict[str, int] = {}
     remembered: dict[str, str] = {}  # see RunResponse.remembered
 
@@ -197,12 +227,8 @@ class PipelinesListResponse(BaseModel):
 # Pipeline editing — full definitions, validation, saving, presets, models
 # ---------------------------------------------------------------------------
 #
-# Definitions and presets travel as plain JSON objects in exactly the shape
-# of the pipeline YAML (aliases applied, e.g. "from"; unset optional fields
-# omitted). They are typed `dict[str, Any]` here deliberately: the server
-# validates them itself through the same PipelineDefinition model the YAML
-# loader uses, so that a failure produces this API's own ErrorResponse —
-# naming the offending node — rather than FastAPI's generic 422.
+# Definitions and presets travel as plain JSON the server validates itself —
+# see PipelineDefinitionJson.
 
 
 class ModelInfo(BaseModel):
@@ -237,7 +263,7 @@ class ModelsResponse(BaseModel):
 
 
 class PipelineDefinitionResponse(BaseModel):
-    definition: dict[str, Any]
+    definition: PipelineDefinitionJson
     # Content hash of the file — also the response's ETag. Send it back as
     # If-Match when saving, so a save refuses to overwrite a newer version.
     revision: str
@@ -250,7 +276,7 @@ class PreviewPromptRequest(BaseModel):
     """What to render: a node of `definition` (which needn't be saved),
     given a message, the conversation so far and other nodes' outputs."""
 
-    definition: dict[str, object]
+    definition: PipelineDefinitionJson
     node_id: str
     prompt: str = ""  # empty: a placeholder stands in for the message
     history: list[ConversationTurn] = []
@@ -270,7 +296,7 @@ class VariantRequest(BaseModel):
     rest of the variant's definition)."""
 
     label: str = Field(min_length=1, max_length=40)
-    models: dict[str, dict[str, object]] = Field(min_length=1)
+    models: dict[str, NodeModelJson] = Field(min_length=1)
 
 
 class RunTestsRequest(BaseModel):
@@ -279,7 +305,7 @@ class RunTestsRequest(BaseModel):
     cases without expectations; each variant runs every case too, next to
     the definition as it is ("current")."""
 
-    definition: dict[str, object]
+    definition: PipelineDefinitionJson
     cases: list[str] | None = None
     inputs: list[str] = Field(default_factory=list[str], max_length=5)
     variants: list[VariantRequest] = Field(default_factory=list[VariantRequest], max_length=3)
@@ -293,7 +319,7 @@ class ExpectationResult(BaseModel):
     detail: str | None = None
 
 
-class CaseStart(BaseModel):
+class CaseStartEvent(BaseModel):
     case: str
     variant: str
 
@@ -325,18 +351,18 @@ class VariantSummary(BaseModel):
     completion_tokens: int
 
 
-class RunTestsDone(BaseModel):
+class TestsDoneEvent(BaseModel):
     summaries: list[VariantSummary]
 
 
 class ValidatePipelineRequest(BaseModel):
     """Exactly one of `definition` or `yaml`."""
 
-    definition: dict[str, Any] | None = None
+    definition: PipelineDefinitionJson | None = None
     yaml: str | None = None
 
 
-class ModelIssue(BaseModel):
+class DefinitionIssue(BaseModel):
     node_id: str | None
     message: str
 
@@ -347,23 +373,23 @@ class ValidatePipelineResponse(BaseModel):
     models a save would currently reject (not installed / not allowlisted);
     reported rather than raised so an editor can show them as warnings."""
 
-    definition: dict[str, Any]
+    definition: PipelineDefinitionJson
     yaml: str
-    model_issues: list[ModelIssue] = []
+    model_issues: list[DefinitionIssue] = []
     # Settings beyond what a model supports (e.g. num_ctx above its maximum
     # context). Advisory only — a save is not blocked by these.
-    warnings: list[ModelIssue] = []
+    warnings: list[DefinitionIssue] = []
 
 
 class SavePipelineRequest(BaseModel):
     """Whether this creates or updates is said by a header, not the body:
     If-None-Match: * to create, If-Match: "<revision>" to update."""
 
-    definition: dict[str, Any]
+    definition: PipelineDefinitionJson
 
 
 class SavePipelineResponse(BaseModel):
-    definition: dict[str, Any]
+    definition: PipelineDefinitionJson
     revision: str
     # Saving over an existing file keeps its comments and layout. False only
     # in the rare case the file had to be rewritten in canonical form.
@@ -371,16 +397,16 @@ class SavePipelineResponse(BaseModel):
 
 
 class PresetsListResponse(BaseModel):
-    presets: list[dict[str, Any]]
+    presets: list[NodePresetJson]
 
 
 class PresetResponse(BaseModel):
-    preset: dict[str, Any]
+    preset: NodePresetJson
     revision: str
 
 
 class SavePresetRequest(BaseModel):
-    preset: dict[str, Any]
+    preset: NodePresetJson
 
 
 class DeletedResponse(BaseModel):

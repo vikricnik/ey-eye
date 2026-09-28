@@ -1,0 +1,377 @@
+{
+  "objects": {
+    "BranchConfig": [
+      "from",
+      "id",
+      "routes"
+    ],
+    "BranchRoute": [
+      "default",
+      "to",
+      "when"
+    ],
+    "CaseResult": [
+      "answer",
+      "case",
+      "completion_tokens",
+      "duration_ms",
+      "error",
+      "expectations",
+      "output_node",
+      "passed",
+      "prompt_tokens",
+      "variant"
+    ],
+    "CaseStartEvent": [
+      "case",
+      "variant"
+    ],
+    "ConversationTurn": [
+      "final_answer",
+      "outputs",
+      "prompt"
+    ],
+    "DefinitionIssue": [
+      "message",
+      "node_id"
+    ],
+    "DeletedResponse": [
+      "name",
+      "recoverable_as"
+    ],
+    "ErrorResponse": [
+      "code",
+      "details",
+      "error",
+      "exceptionUID",
+      "message",
+      "request",
+      "status",
+      "timestamp",
+      "validations"
+    ],
+    "EvalCase": [
+      "expect",
+      "input",
+      "name"
+    ],
+    "EvalExpectation": [
+      "check",
+      "contains",
+      "judge",
+      "not_contains"
+    ],
+    "EvalJudge": [
+      "model",
+      "prompt"
+    ],
+    "ExecutionConfig": [
+      "max_concurrency",
+      "max_history_turns",
+      "max_retries",
+      "model_timeout_seconds",
+      "retry_backoff_seconds"
+    ],
+    "ExpectationResult": [
+      "detail",
+      "expected",
+      "kind",
+      "passed"
+    ],
+    "HealthResponse": [
+      "available_pipelines",
+      "default_pipeline_name",
+      "editing_disabled_reason",
+      "editing_enabled",
+      "pipelines_dir",
+      "status"
+    ],
+    "HistoryConfig": [
+      "intro",
+      "max_chars",
+      "remember",
+      "summarize",
+      "turn_template"
+    ],
+    "HistorySummaryConfig": [
+      "model",
+      "prompt"
+    ],
+    "LoopConfig": [
+      "back_to",
+      "exit_to",
+      "exit_when",
+      "from",
+      "id",
+      "max_iterations",
+      "on_max_iterations"
+    ],
+    "LoopIterationEvent": [
+      "iteration",
+      "loop_id"
+    ],
+    "ModelInfo": [
+      "family",
+      "name",
+      "parameter_size",
+      "quantization",
+      "size_bytes"
+    ],
+    "ModelLimitsResponse": [
+      "context_length",
+      "family",
+      "name",
+      "parameter_size",
+      "quantization"
+    ],
+    "ModelsResponse": [
+      "providers"
+    ],
+    "NodeCompleteEvent": [
+      "node"
+    ],
+    "NodeConfig": [
+      "depends_on",
+      "id",
+      "include_history",
+      "labels",
+      "layout",
+      "model",
+      "prompt_template",
+      "strip_reasoning",
+      "system_prompt",
+      "type"
+    ],
+    "NodeDefaults": [
+      "model",
+      "strip_reasoning",
+      "system_prompt"
+    ],
+    "NodeLayout": [
+      "x",
+      "y"
+    ],
+    "NodeModelConfig": [
+      "model",
+      "options",
+      "provider",
+      "temperature"
+    ],
+    "NodeOutput": [
+      "duration_ms",
+      "model_name",
+      "node_id",
+      "output",
+      "replayed",
+      "usage"
+    ],
+    "NodePreset": [
+      "description",
+      "include_history",
+      "model",
+      "name",
+      "prompt_template",
+      "strip_reasoning",
+      "system_prompt"
+    ],
+    "NodeStartEvent": [
+      "attempt",
+      "model_name",
+      "node_id",
+      "prompt",
+      "replayed",
+      "system"
+    ],
+    "NodeTokenEvent": [
+      "node_id",
+      "text"
+    ],
+    "NodeUsage": [
+      "completion_tokens",
+      "context_window",
+      "generation_ms",
+      "prompt_chars",
+      "prompt_tokens"
+    ],
+    "OllamaOptions": [
+      "format",
+      "keep_alive",
+      "mirostat",
+      "mirostat_eta",
+      "mirostat_tau",
+      "num_ctx",
+      "num_gpu",
+      "num_predict",
+      "num_thread",
+      "repeat_last_n",
+      "repeat_penalty",
+      "seed",
+      "stop",
+      "tfs_z",
+      "top_k",
+      "top_p"
+    ],
+    "PipelineDefinition": [
+      "branches",
+      "defaults",
+      "description",
+      "execution",
+      "history",
+      "loops",
+      "name",
+      "nodes",
+      "output_node",
+      "tests",
+      "version"
+    ],
+    "PipelineDefinitionResponse": [
+      "definition",
+      "has_comments",
+      "revision"
+    ],
+    "PipelineSummary": [
+      "description",
+      "filename",
+      "name"
+    ],
+    "PipelinesListResponse": [
+      "pipelines"
+    ],
+    "PresetResponse": [
+      "preset",
+      "revision"
+    ],
+    "PresetsListResponse": [
+      "presets"
+    ],
+    "PreviewPromptRequest": [
+      "definition",
+      "history",
+      "node_id",
+      "outputs",
+      "prompt"
+    ],
+    "PreviewPromptResponse": [
+      "missing",
+      "prompt",
+      "system"
+    ],
+    "ProviderModels": [
+      "error",
+      "models",
+      "provider",
+      "reachable"
+    ],
+    "RerunRequest": [
+      "from_node",
+      "outputs"
+    ],
+    "RunRequest": [
+      "history",
+      "prompt",
+      "rerun"
+    ],
+    "RunResponse": [
+      "final_answer",
+      "loop_iterations",
+      "node_outputs",
+      "output_node",
+      "pipeline_name",
+      "remembered"
+    ],
+    "RunTestsRequest": [
+      "cases",
+      "definition",
+      "inputs",
+      "variants"
+    ],
+    "SavePipelineRequest": [
+      "definition"
+    ],
+    "SavePipelineResponse": [
+      "comments_preserved",
+      "definition",
+      "revision"
+    ],
+    "SavePresetRequest": [
+      "preset"
+    ],
+    "StreamDoneEvent": [
+      "final_answer",
+      "loop_iterations",
+      "node_outputs",
+      "output_node",
+      "pipeline_name",
+      "remembered"
+    ],
+    "TestsConfig": [
+      "cases",
+      "judge"
+    ],
+    "TestsDoneEvent": [
+      "summaries"
+    ],
+    "ValidatePipelineRequest": [
+      "definition",
+      "yaml"
+    ],
+    "ValidatePipelineResponse": [
+      "definition",
+      "model_issues",
+      "warnings",
+      "yaml"
+    ],
+    "ValidationIssue": [
+      "field",
+      "message",
+      "type"
+    ],
+    "VariantRequest": [
+      "label",
+      "models"
+    ],
+    "VariantSummary": [
+      "completion_tokens",
+      "duration_ms",
+      "errors",
+      "failed",
+      "passed",
+      "prompt_tokens",
+      "unchecked",
+      "variant"
+    ]
+  },
+  "enums": {
+    "ErrorCode": [
+      "ALREADY_EXISTS",
+      "DEFINITION_INVALID",
+      "EDITING_DISABLED",
+      "INPUT_INVALID",
+      "INPUT_TOO_LARGE",
+      "INTERNAL_ERROR",
+      "MODEL_NOT_ALLOWED",
+      "MODEL_NOT_FOUND",
+      "NAME_INVALID",
+      "NODE_NOT_FOUND",
+      "PIPELINE_NOT_FOUND",
+      "PIPELINE_PROTECTED",
+      "PIPELINE_RUN_FAILED",
+      "PRECONDITION_REQUIRED",
+      "PRESET_NOT_FOUND",
+      "RATE_LIMITED",
+      "REQUEST_CANCELLED",
+      "REQUEST_INVALID",
+      "REVISION_CONFLICT",
+      "TEMPLATE_RENDER_FAILED",
+      "TEST_CASE_NOT_FOUND",
+      "UNAUTHENTICATED"
+    ],
+    "ProviderType": [
+      "anthropic",
+      "copilot",
+      "gemini",
+      "ollama",
+      "openai"
+    ]
+  }
+}

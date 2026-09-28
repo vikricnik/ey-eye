@@ -102,7 +102,15 @@ def create_app() -> FastAPI:
     possible to construct multiple independent app instances (each with
     their own PipelineCache on app.state) in the same process, e.g. one per
     test, without any risk of cross-instance state leakage."""
-    app = FastAPI(title="LLM Pipeline", version="3.1.0", lifespan=lifespan)
+    app = FastAPI(
+        title="LLM Pipeline",
+        version="3.1.0",
+        lifespan=lifespan,
+        # One schema per model, as clients read it: definitions and presets
+        # are documented as the models they are (see
+        # api_schemas.PipelineDefinitionJson), in responses too.
+        separate_input_output_schemas=False,
+    )
 
     app.add_middleware(
         CORSMiddleware,

@@ -68,6 +68,8 @@ llm-pipeline-monorepo/
 ├── packages/client/              @llm-pipeline/client — shared API types + typed
 │                                  fetch client, single source of truth for the
 │                                  request/response contract both clients depend on
+├── contracts/                     files both test suites check against: the wire
+│                                  types (wire-types.json) and topology cases
 ├── cli/                           keyboard-driven terminal client
 ├── web/                            browser client
 └── llm_pipeline/                    Python package (uv)
@@ -99,6 +101,16 @@ llm-pipeline-monorepo/
 ```
 
 A few design decisions worth calling out:
+
+- **The wire types are declared twice — and checked against each other.**
+  `llm_pipeline/api_schemas.py` and `packages/client/src/types.ts` name the
+  same types and fields. `contracts/wire-types.json` records them: a Python
+  test fails when `api_schemas.py` drifts from it, a TypeScript test when
+  `types.ts` does. After changing a wire model, regenerate the file with
+  `UPDATE_WIRE_CONTRACT=1 uv run pytest tests/test_wire_contract.py` (from
+  `llm_pipeline/`) and update `types.ts` until the client tests pass. Request
+  bodies end in `Request`, response bodies in `Response`, streamed event
+  payloads in `Event`.
 
 - **The provider/dag_builder/pipeline_config splits use `__init__.py` re-exports**,
   so `from llm_pipeline.providers import ModelSpec, get_provider` (etc.) keeps

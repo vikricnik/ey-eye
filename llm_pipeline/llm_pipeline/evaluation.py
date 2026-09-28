@@ -27,9 +27,9 @@ from pydantic import BaseModel
 
 from llm_pipeline.api_schemas import (
     CaseResult,
-    CaseStart,
+    CaseStartEvent,
     ExpectationResult,
-    RunTestsDone,
+    TestsDoneEvent,
     VariantSummary,
 )
 from llm_pipeline.history import prepare_input
@@ -201,11 +201,11 @@ async def run_tests(
     results: dict[str, list[CaseResult]] = {v.label: [] for v in variants}
     for case in cases:
         for variant in variants:
-            yield "case_start", CaseStart(case=case.name, variant=variant.label)
+            yield "case_start", CaseStartEvent(case=case.name, variant=variant.label)
             result = await run_case(variant, case, judge)
             results[variant.label].append(result)
             yield "case_result", result
     yield (
         "tests_done",
-        RunTestsDone(summaries=[summarize(v.label, results[v.label]) for v in variants]),
+        TestsDoneEvent(summaries=[summarize(v.label, results[v.label]) for v in variants]),
     )

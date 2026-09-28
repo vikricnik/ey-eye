@@ -41,7 +41,7 @@ from llm_pipeline.api_schemas import (
     ConversationTurn,
     ErrorCode,
     ErrorResponse,
-    NodeOutputDTO,
+    NodeOutput,
     NodeStartEvent,
     NodeTokenEvent,
     RunRequest,
@@ -241,7 +241,7 @@ def conversation(messages: list[ChatMessage]) -> tuple[str, list[ConversationTur
     return "\n\n".join(asked), history
 
 
-def total_usage(nodes: Iterable[NodeOutputDTO]) -> ChatCompletionUsage:
+def total_usage(nodes: Iterable[NodeOutput]) -> ChatCompletionUsage:
     reported = [n.usage for n in nodes if n.usage is not None]
     prompt = sum(u.prompt_tokens or 0 for u in reported)
     completion = sum(u.completion_tokens or 0 for u in reported)

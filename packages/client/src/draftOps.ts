@@ -14,7 +14,7 @@ import type {
   NodePreset,
   OllamaOptions,
   PipelineDefinition,
-  ProviderName,
+  ProviderType,
   TestsConfig,
 } from "./types.js";
 import { PROVIDERS } from "./types.js";
@@ -94,7 +94,7 @@ export function inheritsModel(node: NodeConfig): boolean {
 
 /** Parses "provider:model". A bare name with no known provider prefix is
  * taken as an Ollama model ("gemma3:12b" -> ollama / gemma3:12b). */
-export function parseModelIdentity(identity: string): { provider: ProviderName; model: string } {
+export function parseModelIdentity(identity: string): { provider: ProviderType; model: string } {
   const trimmed = identity.trim();
   const colon = trimmed.indexOf(":");
   if (colon > 0) {
@@ -102,7 +102,7 @@ export function parseModelIdentity(identity: string): { provider: ProviderName; 
     if ((PROVIDERS as readonly string[]).includes(prefix)) {
       const model = trimmed.slice(colon + 1);
       if (!model) throw new DraftError(`missing model name in '${identity}'`);
-      return { provider: prefix as ProviderName, model };
+      return { provider: prefix as ProviderType, model };
     }
   }
   if (!trimmed) throw new DraftError("model name is empty");

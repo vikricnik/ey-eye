@@ -52,7 +52,7 @@ problems are where the parts meet:
 | [API-007](#api-007-the-contract-documentation-contradicts-actual-behaviour) | WARNING | The contract documentation contradicts actual behaviour — ✅ fixed |
 | [API-008](#api-008-pipelineclient-method-signatures-make-incorrect-calls-easy) | WARNING | `PipelineClient` method signatures make incorrect calls easy — ✅ fixed |
 | [API-009](#api-009-the-draftops-field-setters-use-string-paths-with-unknown-values) | WARNING | The `draftOps` field setters use string paths with `unknown` values — ✅ fixed |
-| [API-010](#api-010-wire-types-are-untyped-on-the-server-and-hand-copied-under-different-names-in-typescript) | WARNING | Wire types are untyped on the server and hand-copied under different names in TypeScript |
+| [API-010](#api-010-wire-types-are-untyped-on-the-server-and-hand-copied-under-different-names-in-typescript) | WARNING | Wire types are untyped on the server and hand-copied under different names in TypeScript — ✅ fixed |
 | [API-011](#api-011-health-is-public-but-returns-what-pipelines-requires-a-key-for) | WARNING | `/health` is public but returns what `/pipelines` requires a key for |
 | [API-012](#api-012-the-template-variable--input--quietly-includes-the-conversation) | WARNING | The template variable `{{ input }}` quietly includes the conversation |
 | [API-013](#api-013-python-signatures-rely-on-positional-tuples-and-long-parameter-lists) | SUGGESTION | Python signatures rely on positional tuples and long parameter lists |
@@ -448,6 +448,31 @@ working around them.
 ### API-010: Wire types are untyped on the server and hand-copied under different names in TypeScript
 
 - **Severity**: WARNING
+- **Status**: ✅ Fixed (2026-09-28).
+  - **Documented payloads:** definition, preset and variant-model fields are
+    still validated by the server itself, but are now documented as
+    `PipelineDefinition` / `NodePreset` / `NodeModelConfig` (pydantic's
+    `PlainValidator(json_schema_input_type=…)`). OpenAPI publishes those
+    schemas as components, and `separate_input_output_schemas=False` keeps
+    responses referencing them too.
+  - **Contract file:** `contracts/wire-types.json` records every wire model's
+    field names and every enum's values. This covers the SSE event payloads,
+    which OpenAPI never includes.
+    - `tests/test_wire_contract.py` fails when `api_schemas.py` drifts from
+      the file.
+    - `packages/client/test/wireContract.test.ts` parses `types.ts` with the
+      TypeScript compiler API and fails when the client drifts.
+    - Field types and optionality aren't compared.
+  - **Names aligned:**
+    - `NodeOutputDTO`/`UsageDTO` → `NodeOutput`/`NodeUsage`.
+    - `ApiErrorBody` → `ErrorResponse`, `ModelLimits` →
+      `ModelLimitsResponse`, `ProviderName` → `ProviderType`.
+    - `ModelIssue` → `DefinitionIssue` (it also carries warnings).
+    - `CaseStart`/`RunTestsDone` → `CaseStartEvent`/`TestsDoneEvent`.
+    - The client gained named `ValidatePipelineRequest`,
+      `SavePipelineRequest` and `SavePresetRequest`.
+  - **Convention**, written down in `api_schemas.py`: `…Request`,
+    `…Response`, `…Event`, plain nouns for records.
 - **Principle**: Type safety; consistent naming across one contract
 - **File(s)**:
   - [api_schemas.py:233-239](llm_pipeline/llm_pipeline/api_schemas.py#L233-L239)

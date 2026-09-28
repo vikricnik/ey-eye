@@ -218,9 +218,9 @@ export interface PipelinesListResponse {
 // when unset (never null). See llm_pipeline/README.md for what each does.
 // ---------------------------------------------------------------------------
 
-export type ProviderName = "ollama" | "openai" | "anthropic" | "gemini" | "copilot";
+export type ProviderType = "ollama" | "openai" | "anthropic" | "gemini" | "copilot";
 
-export const PROVIDERS: readonly ProviderName[] = [
+export const PROVIDERS: readonly ProviderType[] = [
   "ollama",
   "openai",
   "anthropic",
@@ -249,7 +249,7 @@ export interface OllamaOptions {
 }
 
 export interface NodeModelConfig {
-  provider: ProviderName;
+  provider: ProviderType;
   model: string;
   /** Unset: the pipeline default's temperature, else 0.2. */
   temperature?: number;
@@ -428,7 +428,7 @@ export interface ProviderModels {
 }
 
 /** Limits of one installed Ollama model (GET /models/ollama/{name}). */
-export interface ModelLimits {
+export interface ModelLimitsResponse {
   name: string;
   context_length?: number | null;
   parameter_size?: string | null;
@@ -449,9 +449,15 @@ export interface PipelineDefinitionResponse {
   has_comments: boolean;
 }
 
-export interface ModelIssue {
+export interface DefinitionIssue {
   node_id: string | null;
   message: string;
+}
+
+/** POST /drafts/validation — exactly one of `definition` or `yaml`. */
+export interface ValidatePipelineRequest {
+  definition?: PipelineDefinition;
+  yaml?: string;
 }
 
 export interface ValidatePipelineResponse {
@@ -459,10 +465,16 @@ export interface ValidatePipelineResponse {
   /** Canonical file text — what a save would write, and what to export. */
   yaml: string;
   /** Models a save would currently reject — shown as warnings. */
-  model_issues: ModelIssue[];
+  model_issues: DefinitionIssue[];
   /** Settings beyond what a model supports (e.g. num_ctx above its max
    * context). Advisory only; saving isn't blocked. */
-  warnings?: ModelIssue[];
+  warnings?: DefinitionIssue[];
+}
+
+/** PUT /pipelines/{name}. Whether it creates or updates is said by a
+ * header — see createPipeline() and updatePipeline(). */
+export interface SavePipelineRequest {
+  definition: PipelineDefinition;
 }
 
 export interface SavePipelineResponse {
@@ -471,6 +483,11 @@ export interface SavePipelineResponse {
   /** Saving keeps an existing file's comments and layout; false only when
    * the server had to rewrite it in canonical form. */
   comments_preserved?: boolean;
+}
+
+/** PUT /presets/{name}. */
+export interface SavePresetRequest {
+  preset: NodePreset;
 }
 
 export interface PresetResponse {
@@ -529,7 +546,7 @@ export type ErrorCode =
 // Matches the server's ErrorResponse model exactly (api_schemas.py) —
 // every error response, regardless of status code or where it was raised,
 // takes this shape.
-export interface ApiErrorBody {
+export interface ErrorResponse {
   timestamp: string;
   status: number;
   error: string;
@@ -688,7 +705,18 @@ export interface VariantSummary {
   completion_tokens: number;
 }
 
+/** A case has started running, for one variant. */
+export interface CaseStartEvent {
+  case: string;
+  variant: string;
+}
+
+/** Every case has run: the totals per variant. */
+export interface TestsDoneEvent {
+  summaries: VariantSummary[];
+}
+
 export type TestRunEvent =
-  | { type: "case_start"; data: { case: string; variant: string } }
+  | { type: "case_start"; data: CaseStartEvent }
   | { type: "case_result"; data: CaseResult }
-  | { type: "tests_done"; data: { summaries: VariantSummary[] } };
+  | { type: "tests_done"; data: TestsDoneEvent };
