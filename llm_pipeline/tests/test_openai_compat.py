@@ -17,6 +17,10 @@ from llm_pipeline.providers import Generation, ModelSpec, Usage
 from llm_pipeline.routers.openai_compat import RETRY_NOTICE
 from llm_pipeline.settings import settings
 
+# The base URL an OpenAI client is configured with. Written out rather than
+# imported: it is the public contract these tests pin down.
+BASE = "/openai/v1"
+
 
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
@@ -45,7 +49,7 @@ def _content(chunks: list[Any]) -> list[str]:
 
 
 def test_pipelines_are_listed_as_models(client: TestClient) -> None:
-    body = client.get("/v1/models").json()
+    body = client.get(f"{BASE}/models").json()
     assert body["object"] == "list"
     assert {"simple-local", "consensus-qa", "iterative-refinement"} <= {
         m["id"] for m in body["data"]
@@ -64,7 +68,7 @@ def test_a_conversation_runs_with_its_history_and_reports_summed_usage(
 
     monkeypatch.setattr(node_types_module, "get_provider", lambda spec: _Provider())
     response = client.post(
-        "/v1/chat/completions",
+        f"{BASE}/chat/completions",
         json={
             "model": "simple-local",
             "temperature": 0.9,  # OpenAI parameters are accepted and ignored
@@ -102,7 +106,7 @@ def test_the_output_node_streams_live(client: TestClient, monkeypatch: pytest.Mo
 
     monkeypatch.setattr(node_types_module, "get_provider", provider)
     response = client.post(
-        "/v1/chat/completions",
+        f"{BASE}/chat/completions",
         json={
             "model": "consensus-qa",
             "stream": True,
@@ -131,7 +135,7 @@ def test_a_looping_pipeline_answers_in_one_piece(
 
     monkeypatch.setattr(node_types_module, "get_provider", provider)
     response = client.post(
-        "/v1/chat/completions",
+        f"{BASE}/chat/completions",
         json={
             "model": "iterative-refinement",
             "stream": True,
@@ -150,7 +154,7 @@ def test_a_failure_while_streaming_is_an_error_event(
 
     monkeypatch.setattr(node_types_module, "get_provider", lambda spec: _Down())
     response = client.post(
-        "/v1/chat/completions",
+        f"{BASE}/chat/completions",
         json={
             "model": "simple-local",
             "stream": True,
@@ -168,7 +172,7 @@ def test_a_failure_while_streaming_is_an_error_event(
 
 def test_errors_use_openais_shape(client: TestClient) -> None:
     missing = client.post(
-        "/v1/chat/completions",
+        f"{BASE}/chat/completions",
         json={"model": "no-such-pipeline", "messages": [{"role": "user", "content": "q"}]},
     )
     assert missing.status_code == 404
@@ -176,13 +180,15 @@ def test_errors_use_openais_shape(client: TestClient) -> None:
     assert "no-such-pipeline" in missing.json()["error"]["message"]
 
     not_asked = client.post(
-        "/v1/chat/completions",
+        f"{BASE}/chat/completions",
         json={"model": "simple-local", "messages": [{"role": "assistant", "content": "hi"}]},
     )
     assert not_asked.status_code == 400
     assert not_asked.json()["error"]["message"] == "the last message must be the user's"
 
-    malformed = client.post("/v1/chat/completions", json={"model": "simple-local", "messages": []})
+    malformed = client.post(
+        f"{BASE}/chat/completions", json={"model": "simple-local", "messages": []}
+    )
     assert malformed.status_code == 422 and "error" in malformed.json()
 
 
@@ -190,7 +196,23 @@ def test_the_api_key_is_accepted_as_a_bearer_token(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(settings, "api_keys", "secret")
-    assert client.get("/v1/models").status_code == 401
-    assert client.get("/v1/models").json()["error"]["type"] == "authentication_error"
-    ok = client.get("/v1/models", headers={"Authorization": "Bearer secret"})
+    assert client.get(f"{BASE}/models").status_code == 401
+    assert client.get(f"{BASE}/models").json()["error"]["type"] == "authentication_error"
+    ok = client.get(f"{BASE}/models", headers={"Authorization": "Bearer secret"})
     assert ok.status_code == 200
+
+
+def test_a_rate_limited_request_keeps_retry_after_in_openais_shape(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(rate_limit_module, "_limiter", rate_limit_module.RateLimiter(1))
+    client.get(f"{BASE}/models")
+    limited = client.get(f"{BASE}/models")
+    assert limited.status_code == 429
+    assert limited.json()["error"]["type"] == "rate_limit_error"
+    assert "Retry-After" in limited.headers
+
+
+def test_v1_is_left_to_this_apis_own_versioning(client: TestClient) -> None:
+    assert client.get("/v1/models").status_code == 404
+    assert client.post("/v1/chat/completions", json={}).status_code == 404

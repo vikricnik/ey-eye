@@ -680,15 +680,18 @@ Every pipeline is also a "model" behind an OpenAI-style API, so tools that
 speak it — Open WebUI, Continue, the openai SDKs — can chat with pipelines:
 
 ```bash
-curl http://localhost:8000/v1/chat/completions \
+curl http://localhost:8000/openai/v1/chat/completions \
   -H "Content-Type: application/json" -H "Authorization: Bearer $API_KEY" \
   -d '{"model": "consensus-qa", "messages": [{"role": "user", "content": "When did the Berlin Wall fall?"}], "stream": true}'
 ```
 
-- `GET /v1/models` lists the pipelines; `POST /v1/chat/completions` runs the
-  one named by `model`. Point a client's "OpenAI base URL" at
-  `http://<server>/v1`; the API key (when `API_KEYS` is set) goes in as the
-  usual Bearer token.
+- `GET /openai/v1/models` lists the pipelines; `POST /openai/v1/chat/completions`
+  runs the one named by `model`. Point a client's "OpenAI base URL" at
+  `http://<server>/openai/v1`; the API key (when `API_KEYS` is set) goes in
+  as the usual Bearer token.
+- These endpoints used to be at `/v1`. They moved so that `/v1/` stays free
+  for this API's own versioning; a client still pointed at
+  `http://<server>/v1` now gets 404s — change its base URL.
 - The last message must be the user's; earlier user/assistant pairs become
   the conversation history (the pipeline's history settings apply). System
   messages and generation parameters (`temperature`, `max_tokens`, …) are

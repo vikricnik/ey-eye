@@ -1,10 +1,12 @@
 """
 OpenAI-compatible chat endpoints: every pipeline is a "model", so tools that
 speak the OpenAI API — Open WebUI, Continue, the openai SDKs — can chat with
-pipelines without knowing this API.
+pipelines without knowing this API. Clients use `http://<server>/openai/v1`
+as their OpenAI base URL. Mounted there rather than at /v1, which is kept
+for this API's own versioning (spec 003's /v1/workflows).
 
-- GET  /v1/models lists the pipelines.
-- POST /v1/chat/completions runs the pipeline named by `model`. The last
+- GET  /openai/v1/models lists the pipelines.
+- POST /openai/v1/chat/completions runs the pipeline named by `model`. The last
   message must be the user's (consecutive trailing user messages are joined);
   earlier user/assistant pairs become the conversation history, subject to
   the pipeline's history settings. System messages and generation
@@ -19,17 +21,19 @@ sums every model call in the run.
 
 Auth and rate limits are the same as /ask — OpenAI clients send the API key
 as `Authorization: Bearer`, which require_api_key accepts. Errors use
-OpenAI's error shape (see error_handling.openai_error).
+OpenAI's error shape (see openai_error and OpenAIErrorRoute).
 """
 
 import json
 import time
 import uuid
-from collections.abc import AsyncGenerator, Iterable
-from typing import Literal
+from collections.abc import AsyncGenerator, Callable, Coroutine, Iterable
+from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, Field
 
 from llm_pipeline.api_schemas import (
@@ -43,7 +47,10 @@ from llm_pipeline.api_schemas import (
 )
 from llm_pipeline.auth import require_api_key
 from llm_pipeline.disconnects import until_disconnected
-from llm_pipeline.error_handling import openai_error
+from llm_pipeline.error_handling import (
+    error_response_from_http_exception,
+    error_response_from_validation_error,
+)
 from llm_pipeline.pipeline_config import PipelineDefinition, list_available_pipelines
 from llm_pipeline.pipeline_config.effective import effective_node
 from llm_pipeline.pipeline_loader import PipelineCache, get_pipeline_cache
@@ -51,11 +58,67 @@ from llm_pipeline.rate_limit import enforce_rate_limit
 from llm_pipeline.routers.ask import pipeline_events, prepare_ask, run_ask
 from llm_pipeline.settings import settings
 
-router = APIRouter(prefix="/v1", dependencies=[Depends(require_api_key)])
-
 # Shown between the output node's failed attempt and its retry: text that
 # was already streamed can't be taken back.
 RETRY_NOTICE = "\n\n[retrying after an error]\n\n"
+
+
+# -- errors --------------------------------------------------------------------
+
+_OPENAI_ERROR_TYPES = {
+    401: "authentication_error",
+    403: "permission_error",
+    429: "rate_limit_error",
+}
+
+
+def openai_error(body: ErrorResponse) -> dict[str, object]:
+    """The error shape OpenAI clients understand, carrying the same message
+    and reference id as the ErrorResponse the rest of this API returns."""
+    error_type = _OPENAI_ERROR_TYPES.get(
+        body.status, "server_error" if body.status >= 500 else "invalid_request_error"
+    )
+    return {
+        "error": {
+            "message": body.message,
+            "type": error_type,
+            "param": None,
+            "code": body.error.lower().replace(" ", "_"),
+            "exceptionUID": body.exceptionUID,
+        }
+    }
+
+
+class OpenAIErrorRoute(APIRoute):
+    """A route that answers its errors in OpenAI's shape. Auth, rate-limit
+    and request-validation errors are raised while FastAPI resolves the
+    route's dependencies and body — inside the handler wrapped here — so
+    they are converted before the app-wide handlers in error_handling.py,
+    which keep ErrorResponse for every other route."""
+
+    def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
+        handle = super().get_route_handler()
+
+        async def handle_with_openai_errors(request: Request) -> Response:
+            try:
+                return await handle(request)
+            except HTTPException as exc:
+                body = error_response_from_http_exception(request, exc)
+                return JSONResponse(
+                    openai_error(body), status_code=exc.status_code, headers=exc.headers
+                )
+            except RequestValidationError as exc:
+                body = error_response_from_validation_error(request, exc)
+                return JSONResponse(openai_error(body), status_code=422)
+
+        return handle_with_openai_errors
+
+
+router = APIRouter(
+    prefix="/openai/v1",
+    route_class=OpenAIErrorRoute,
+    dependencies=[Depends(require_api_key)],
+)
 
 
 # -- request -------------------------------------------------------------------

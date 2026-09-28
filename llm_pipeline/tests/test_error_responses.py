@@ -1,9 +1,11 @@
 from collections.abc import Iterator
 
 import pytest
+from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 import llm_pipeline.rate_limit as rate_limit_module
+from llm_pipeline.error_handling import register_exception_handlers
 from llm_pipeline.main import app
 from llm_pipeline.settings import settings
 
@@ -139,6 +141,29 @@ def test_rate_limit_matches_error_shape_with_retry_after(
     assert body["error"] == "Too Many Requests"
     assert "retry_after_seconds" in body["details"]
     assert "Retry-After" in response.headers
+
+
+def test_the_error_shape_does_not_depend_on_the_path() -> None:
+    """Only the OpenAI-compatible router answers in OpenAI's error shape, and
+    it opts in itself. Every other route keeps ErrorResponse — including
+    routes under /v1/, which is reserved for this API's own versioning."""
+    versioned = APIRouter(prefix="/v1")
+
+    @versioned.get("/things/{thing_id}")
+    async def get_thing(thing_id: int) -> None:  # pyright: ignore[reportUnusedFunction]
+        raise HTTPException(status_code=404, detail=f"no thing {thing_id}")
+
+    probe = FastAPI()
+    register_exception_handlers(probe)
+    probe.include_router(versioned)
+    with TestClient(probe) as c:
+        missing = c.get("/v1/things/1")
+        malformed = c.get("/v1/things/not-a-number")
+
+    assert missing.status_code == 404
+    _assert_matches_error_shape(missing.json())
+    assert malformed.status_code == 422
+    _assert_matches_error_shape(malformed.json())
 
 
 def test_exception_uid_is_consistent_within_one_request(client: TestClient) -> None:

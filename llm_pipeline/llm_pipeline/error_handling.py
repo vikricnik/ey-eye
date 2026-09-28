@@ -1,10 +1,16 @@
 """
 Every error response — success responses live in the routers. This module
-owns the ErrorResponse contract end to end: the three exception handlers
-that build it, the shared builder they all call, and the OpenAPI
+owns the ErrorResponse contract end to end: the exception handlers that
+build it, the shared builders they all call, and the OpenAPI
 `responses={...}` map endpoints use to document which error shapes they
 can return (purely descriptive — the handlers below enforce the shape at
 runtime regardless of what's declared per-endpoint).
+
+The one exception is routers/openai_compat.py: its routes answer in
+OpenAI's error shape instead, converting the same ErrorResponse built here.
+That router opts in itself (see OpenAIErrorRoute) — the handlers below
+never look at the request path, so no other route can end up in OpenAI's
+shape by where it is mounted.
 """
 
 import logging
@@ -56,37 +62,32 @@ def build_error_response(
     )
 
 
-OPENAI_PREFIX = "/v1/"
-
-_OPENAI_ERROR_TYPES = {
-    401: "authentication_error",
-    403: "permission_error",
-    429: "rate_limit_error",
-}
-
-
-def openai_error(body: ErrorResponse) -> dict[str, object]:
-    """The error shape OpenAI clients understand — what the OpenAI-
-    compatible endpoints (routers/openai_compat.py) return instead of
-    ErrorResponse, carrying the same message and reference id."""
-    error_type = _OPENAI_ERROR_TYPES.get(
-        body.status, "server_error" if body.status >= 500 else "invalid_request_error"
-    )
-    return {
-        "error": {
-            "message": body.message,
-            "type": error_type,
-            "param": None,
-            "code": body.error.lower().replace(" ", "_"),
-            "exceptionUID": body.exceptionUID,
-        }
-    }
+def error_response_from_http_exception(request: Request, exc: HTTPException) -> ErrorResponse:
+    """Mirrors a `Retry-After` header into `details` too, since that's the
+    one piece of already-structured extra data a plain HTTPException
+    carries. The header itself still has to be forwarded by the caller."""
+    details: dict[str, object] = {}
+    if exc.headers and "Retry-After" in exc.headers:
+        details["retry_after_seconds"] = exc.headers["Retry-After"]
+    return build_error_response(request, exc.status_code, str(exc.detail), details=details)
 
 
-def _content(request: Request, body: ErrorResponse) -> dict[str, object]:
-    if request.url.path.startswith(OPENAI_PREFIX):
-        return openai_error(body)
-    return body.model_dump(mode="json")  # mode="json": datetime -> ISO string
+def error_response_from_validation_error(
+    request: Request, exc: RequestValidationError
+) -> ErrorResponse:
+    """FastAPI's automatic 422 (e.g. a malformed AskRequest body) normally
+    returns Pydantic's own nested error-list shape. Mapped into the same
+    ErrorResponse contract instead — each individual field problem becomes
+    one ValidationIssue in `validations`, rather than being flattened away."""
+    validations = [
+        ValidationIssue(
+            field=".".join(str(loc) for loc in e["loc"]),
+            message=e["msg"],
+            type=e["type"],
+        )
+        for e in exc.errors()
+    ]
+    return build_error_response(request, 422, "Request validation failed", validations=validations)
 
 
 def register_exception_handlers(app: FastAPI) -> None:
@@ -100,9 +101,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         """Every HTTPException raised anywhere (endpoints, or Depends()
         dependencies like require_api_key/enforce_rate_limit) is caught here
         exactly once. Forwards exc.headers so the rate limiter's `Retry-After`
-        header still reaches the client, and mirrors it into `details` too
-        since that's the one piece of already-structured extra data a plain
-        HTTPException carries.
+        header still reaches the client.
 
         (pyright flags this as unused: it can see the `@app.exception_handler`
         decorator is applied, but not that FastAPI's own internal registry is
@@ -110,38 +109,23 @@ def register_exception_handlers(app: FastAPI) -> None:
         referenced again in this function's body. Same false-positive category
         as the pytest autouse fixtures elsewhere in this codebase; the
         decorator's registration side effect IS the usage.)"""
-        details: dict[str, object] = {}
-        if exc.headers and "Retry-After" in exc.headers:
-            details["retry_after_seconds"] = exc.headers["Retry-After"]
-
-        body = build_error_response(request, exc.status_code, str(exc.detail), details=details)
+        body = error_response_from_http_exception(request, exc)
         return JSONResponse(
-            status_code=exc.status_code, content=_content(request, body), headers=exc.headers
+            status_code=exc.status_code,
+            content=body.model_dump(mode="json"),  # mode="json": datetime -> ISO string
+            headers=exc.headers,
         )
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(  # pyright: ignore[reportUnusedFunction]
         request: Request, exc: RequestValidationError
     ) -> JSONResponse:
-        """FastAPI's automatic 422 (e.g. a malformed AskRequest body) normally
-        returns Pydantic's own nested error-list shape. Mapped into the same
-        ErrorResponse contract instead — each individual field problem becomes
-        one ValidationIssue in `validations`, rather than being flattened away.
+        """See error_response_from_validation_error.
 
         (pyright false positive — see http_exception_handler's docstring above
         for why.)"""
-        validations = [
-            ValidationIssue(
-                field=".".join(str(loc) for loc in e["loc"]),
-                message=e["msg"],
-                type=e["type"],
-            )
-            for e in exc.errors()
-        ]
-        body = build_error_response(
-            request, 422, "Request validation failed", validations=validations
-        )
-        return JSONResponse(status_code=422, content=_content(request, body))
+        body = error_response_from_validation_error(request, exc)
+        return JSONResponse(status_code=422, content=body.model_dump(mode="json"))
 
     @app.exception_handler(DefinitionInvalidError)
     async def definition_invalid_handler(  # pyright: ignore[reportUnusedFunction]

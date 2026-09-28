@@ -43,7 +43,7 @@ problems are where the parts meet:
 
 | ID | Severity | Title |
 |----|----------|-------|
-| [API-001](#api-001-v1-means-openai-compatible-not-api-version-1) | CRITICAL | `/v1/` means "OpenAI-compatible", not "API version 1" |
+| [API-001](#api-001-v1-means-openai-compatible-not-api-version-1) | CRITICAL | `/v1/` means "OpenAI-compatible", not "API version 1" — ✅ fixed |
 | [API-002](#api-002-errors-have-no-machine-readable-code) | WARNING | Errors have no machine-readable code |
 | [API-003](#api-003-status-codes-disagree-for-the-same-kind-of-failure) | WARNING | Status codes disagree for the same kind of failure |
 | [API-004](#api-004-get-pipelinesname-doesnt-return-what-put-accepts) | WARNING | `GET /pipelines/{name}` doesn't return what `PUT` accepts |
@@ -74,6 +74,11 @@ working around them.
 ### API-001: `/v1/` means "OpenAI-compatible", not "API version 1"
 
 - **Severity**: CRITICAL
+- **Status**: ✅ Fixed (2026-09-28). The compat router is mounted at
+  `/openai/v1`. It answers its own errors in OpenAI's shape through
+  `OpenAIErrorRoute`, and the app-wide handlers no longer look at the path.
+  Guarded by `test_v1_is_left_to_this_apis_own_versioning` and
+  `test_the_error_shape_does_not_depend_on_the_path`.
 - **Principle**: Names should reveal intent; principle of least surprise (URL structure)
 - **File(s)**:
   - [openai_compat.py:54](llm_pipeline/llm_pipeline/routers/openai_compat.py#L54)
