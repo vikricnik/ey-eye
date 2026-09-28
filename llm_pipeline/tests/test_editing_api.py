@@ -168,7 +168,7 @@ def test_explicit_origins_allow_editing_without_a_key(client: TestClient) -> Non
 
 
 def test_full_definition_includes_prompts_revision_and_comment_flag(client: TestClient) -> None:
-    response = client.get("/pipelines/consensus-qa/definition")
+    response = client.get("/pipelines/consensus-qa")
     assert response.status_code == 200
     body = response.json()
     assert body["has_comments"] is True  # the shipped file is heavily commented
@@ -183,13 +183,39 @@ def test_full_definition_includes_prompts_revision_and_comment_flag(client: Test
 
 
 def test_full_definition_uses_the_from_alias_for_branches(client: TestClient) -> None:
-    body = client.get("/pipelines/support-router/definition").json()
-    assert "from" in body["definition"]["branches"][0]
+    body = client.get("/pipelines/support-router").json()
+    branch = body["definition"]["branches"][0]
+    assert branch["from"] == "classify"
+    routes = {r["to"]: r for r in branch["routes"]}
+    assert routes["refund_flow"]["when"] == '"REFUND" in output'
+    assert routes["general_flow"]["default"] is True
+
+
+def test_full_definition_carries_loops(client: TestClient) -> None:
+    loop = client.get("/pipelines/iterative-refinement").json()["definition"]["loops"][0]
+    assert (loop["from"], loop["back_to"], loop["exit_to"]) == ("critique", "generate", "END")
+
+
+def test_a_pipeline_reads_as_what_a_save_accepts(client: TestClient) -> None:
+    """GET and PUT /pipelines/{name} speak the same representation: what you
+    read is what you send back, with its revision."""
+    loaded = client.get("/pipelines/consensus-qa").json()
+    saved = client.put(
+        "/pipelines/consensus-qa",
+        json={"definition": loaded["definition"], "base_revision": loaded["revision"]},
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["definition"] == loaded["definition"]
+    assert saved.json()["revision"] == loaded["revision"]  # nothing changed on disk
+
+
+def test_the_separate_definition_path_is_gone(client: TestClient) -> None:
+    assert client.get("/pipelines/consensus-qa/definition").status_code == 404
 
 
 @pytest.mark.parametrize("name", ["missing", "..%2F..%2Fetc%2Fpasswd", "a.b"])
 def test_unknown_or_unsafe_names_are_404(client: TestClient, name: str) -> None:
-    assert client.get(f"/pipelines/{name}/definition").status_code == 404
+    assert client.get(f"/pipelines/{name}").status_code == 404
 
 
 def test_models_lists_installed_ollama_models_and_cloud_allowlist(client: TestClient) -> None:
@@ -275,9 +301,7 @@ def test_create_writes_the_file_and_runs_use_it_immediately(
     assert on_disk["nodes"][1]["system_prompt"] == "You are an editor."
     assert on_disk["nodes"][1]["layout"] == {"x": 300.0, "y": 40.0}
     assert "type" not in on_disk["nodes"][0]  # defaults stay out of the file
-    assert (
-        response.json()["revision"] == client.get("/pipelines/fresh/definition").json()["revision"]
-    )
+    assert response.json()["revision"] == client.get("/pipelines/fresh").json()["revision"]
 
     class _Echo:
         async def generate(self, prompt: str, system: str | None = None) -> str:
@@ -332,7 +356,7 @@ def test_models_already_in_the_stored_pipeline_can_be_resaved(client: TestClient
     """consensus-qa uses llama3/gemma3/qwen3-coder. Even with Ollama down,
     editing only a prompt re-saves identities that were already on the
     server — that's not new client input."""
-    loaded = client.get("/pipelines/consensus-qa/definition").json()
+    loaded = client.get("/pipelines/consensus-qa").json()
     _use_catalog(client, _ollama_down)
     definition = loaded["definition"]
     definition["nodes"][0]["prompt_template"] = "Answer briefly: {{ input }}"
@@ -513,7 +537,7 @@ def test_delete_moves_the_file_aside_and_drops_it_from_listings(
     assert (dirs[0] / body["recoverable_as"]).is_file()  # recoverable
     names = [p["name"] for p in client.get("/pipelines").json()["pipelines"]]
     assert "fresh" not in names
-    assert client.get("/pipelines/fresh/definition").status_code == 404
+    assert client.get("/pipelines/fresh").status_code == 404
     assert client.post("/ask", json={"prompt": "x", "pipeline_name": "fresh"}).status_code == 404
 
 
@@ -584,7 +608,7 @@ def test_saving_unchanged_keeps_the_file_byte_identical(
 ) -> None:
     path = dirs[0] / f"{name}.yaml"
     before = path.read_text()
-    loaded = client.get(f"/pipelines/{name}/definition").json()
+    loaded = client.get(f"/pipelines/{name}").json()
     saved = client.put(
         f"/pipelines/{name}",
         json={"definition": loaded["definition"], "base_revision": loaded["revision"]},
@@ -598,7 +622,7 @@ def test_editing_one_prompt_changes_only_that_line(
 ) -> None:
     path = dirs[0] / "consensus-qa.yaml"
     before = path.read_text()
-    loaded = client.get("/pipelines/consensus-qa/definition").json()
+    loaded = client.get("/pipelines/consensus-qa").json()
     definition = loaded["definition"]
     definition["nodes"][0]["prompt_template"] = "Answer briefly: {{ input }}"
     saved = client.put(
@@ -620,7 +644,7 @@ def test_structural_edits_keep_every_other_comment(
 ) -> None:
     path = dirs[0] / "consensus-qa.yaml"
     before = path.read_text()
-    loaded = client.get("/pipelines/consensus-qa/definition").json()
+    loaded = client.get("/pipelines/consensus-qa").json()
     definition = loaded["definition"]
     # Change a setting the file leaves implicit, add a node, add Ollama options.
     definition["execution"]["max_retries"] = 3
@@ -651,7 +675,7 @@ def test_structural_edits_keep_every_other_comment(
     assert "prompt_template: |" in after  # new multi-line prompt as a literal block
 
     # Removing a node keeps the comments of the nodes that remain.
-    loaded = client.get("/pipelines/consensus-qa/definition").json()
+    loaded = client.get("/pipelines/consensus-qa").json()
     definition = loaded["definition"]
     definition["nodes"] = [n for n in definition["nodes"] if n["id"] != "audit"]
     client.put(
@@ -670,7 +694,7 @@ def test_falls_back_to_canonical_when_the_merge_would_change_meaning(
         store_module, "_preserving_yaml", lambda original, old_full, full, canon: original
     )
     path = dirs[0] / "consensus-qa.yaml"
-    loaded = client.get("/pipelines/consensus-qa/definition").json()
+    loaded = client.get("/pipelines/consensus-qa").json()
     definition = loaded["definition"]
     definition["nodes"][0]["prompt_template"] = "Changed: {{ input }}"
     saved = client.put(

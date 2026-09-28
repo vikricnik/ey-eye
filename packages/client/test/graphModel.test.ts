@@ -28,6 +28,22 @@ const complete = (id: string): AskStreamEvent => ({
 });
 
 describe("detailFromDefinition", () => {
+  it("labels a node that inherits the pipeline's default model", () => {
+    const inherits: PipelineDefinition = {
+      name: "d",
+      defaults: { model: { provider: "ollama", model: "llama3" } },
+      nodes: [
+        { id: "draft", prompt_template: "{{ input }}" },
+        { id: "polish", depends_on: ["draft"], prompt_template: "", model: { provider: "ollama", model: "gemma3" } },
+      ],
+      output_node: "polish",
+    };
+    assert.deepEqual(
+      detailFromDefinition(inherits).nodes.map((n) => n.model),
+      ["ollama:llama3 (default)", "ollama:gemma3"]
+    );
+  });
+
   it("feeds drafts through the same layout as stored pipelines", () => {
     const graph = buildGraphModel(detailFromDefinition(def));
     assert.deepEqual(graph.nodes.map((n) => [n.id, n.level, n.isOutputCandidate]), [

@@ -6,6 +6,7 @@ import {
   PipelineApiError,
   buildGraphModel,
   createGraphViewState,
+  detailFromDefinition,
   appendNodeText,
   applyStreamEvent,
   applyStreamError,
@@ -32,6 +33,7 @@ import type {
   GraphModel,
   GraphViewState,
   NodeOutput,
+  PipelineDetail,
 } from "@llm-pipeline/client";
 
 const BASE_URL = process.env.PIPELINE_BASE_URL ?? "http://localhost:8000";
@@ -76,6 +78,12 @@ interface LastRun {
   outputs: Record<string, string>;
 }
 
+/** A pipeline's structure, derived from its stored definition — the same
+ * way the web client and the edit commands' drafts get theirs. */
+async function fetchDetail(client: PipelineClient, name: string): Promise<PipelineDetail> {
+  return detailFromDefinition((await client.getPipeline(name)).definition);
+}
+
 /** Fetches a pipeline's structure and builds its GraphModel — cached by
  * the caller so a streaming run doesn't need to re-fetch it (User Story
  * 3's independent test explicitly requires this). Returns undefined (and
@@ -85,8 +93,7 @@ interface LastRun {
  * back to having no diagram to show. */
 async function loadGraph(client: PipelineClient, name: string): Promise<GraphModel | undefined> {
   try {
-    const detail = await client.getPipelineDetail(name);
-    return buildGraphModel(detail);
+    return buildGraphModel(await fetchDetail(client, name));
   } catch (err) {
     printError(err);
     return undefined;
@@ -270,7 +277,7 @@ async function main(): Promise<void> {
       const message = words.join(" ");
       try {
         const definition =
-          editCtx.session?.draft ?? (await client.getPipelineDefinition(activePipeline)).definition;
+          editCtx.session?.draft ?? (await client.getPipeline(activePipeline)).definition;
         const preview = await client.previewPrompt({
           definition,
           node_id: node,
@@ -298,8 +305,7 @@ async function main(): Promise<void> {
 
     if (trimmed === "/pipeline") {
       try {
-        const detail = await client.getPipelineDetail(activePipeline);
-        console.log(formatPipelineDetail(detail));
+        console.log(formatPipelineDetail(await fetchDetail(client, activePipeline)));
         console.log();
       } catch (err) {
         printError(err);
@@ -323,7 +329,7 @@ async function main(): Promise<void> {
       try {
         // Confirm the pipeline actually exists before switching — fails
         // clearly now rather than on the next prompt.
-        const detail = await client.getPipelineDetail(requestedName);
+        const detail = await fetchDetail(client, requestedName);
         activePipeline = requestedName;
         activeGraph = buildGraphModel(detail);
         history.length = 0; // different pipeline = different context; don't carry old turns forward

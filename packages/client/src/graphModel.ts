@@ -23,10 +23,9 @@ export function displayModel(definition: PipelineDefinition, node: PipelineDefin
 }
 
 /**
- * The PipelineDetail view of a full definition — lets an editor's draft
- * (which may not be saved yet, and has no /pipelines/{name} response) go
- * through the same buildGraphModel() as a stored pipeline, so layout
- * levels and live run status work identically for both.
+ * The PipelineDetail view of a full definition — a stored pipeline's (from
+ * getPipeline()) or an editor's unsaved draft, so both go through the same
+ * buildGraphModel() and layout levels and live run status work identically.
  */
 export function detailFromDefinition(definition: PipelineDefinition): PipelineDetail {
   const outputs = definition.output_node;
@@ -58,11 +57,10 @@ export function detailFromDefinition(definition: PipelineDefinition): PipelineDe
 
 /**
  * Builds the classified, layered GraphModel a pipeline's structure
- * renders as, from the same PipelineDetail the CLI and web clients already
- * fetch via GET /pipelines/{name}. Pure function: same input always
- * produces the same output. Shared by cli/src/graphRenderer.ts and
- * the web editor so both surfaces render identical structure; the
- * topology rules it applies live in topology.ts.
+ * renders as, from its PipelineDetail (see detailFromDefinition). Pure
+ * function: same input always produces the same output. Shared by
+ * cli/src/graphRenderer.ts and the web editor so both surfaces render
+ * identical structure; the topology rules it applies live in topology.ts.
  */
 export function buildGraphModel(detail: PipelineDetail): GraphModel {
   // The shared topology rules (topology.ts): no plain depends_on-based

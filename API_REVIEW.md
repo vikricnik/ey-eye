@@ -46,7 +46,7 @@ problems are where the parts meet:
 | [API-001](#api-001-v1-means-openai-compatible-not-api-version-1) | CRITICAL | `/v1/` means "OpenAI-compatible", not "API version 1" — ✅ fixed |
 | [API-002](#api-002-errors-have-no-machine-readable-code) | WARNING | Errors have no machine-readable code — ✅ fixed |
 | [API-003](#api-003-status-codes-disagree-for-the-same-kind-of-failure) | WARNING | Status codes disagree for the same kind of failure — ✅ fixed |
-| [API-004](#api-004-get-pipelinesname-doesnt-return-what-put-accepts) | WARNING | `GET /pipelines/{name}` doesn't return what `PUT` accepts |
+| [API-004](#api-004-get-pipelinesname-doesnt-return-what-put-accepts) | WARNING | `GET /pipelines/{name}` doesn't return what `PUT` accepts — ✅ fixed |
 | [API-005](#api-005-optimistic-concurrency-is-spelled-three-different-ways) | WARNING | Optimistic concurrency is spelled three different ways |
 | [API-006](#api-006-rpc-style-endpoints-with-the-pipeline-named-in-the-body) | WARNING | RPC-style endpoints, with the pipeline named in the body |
 | [API-007](#api-007-the-contract-documentation-contradicts-actual-behaviour) | WARNING | The contract documentation contradicts actual behaviour |
@@ -194,6 +194,15 @@ working around them.
 ### API-004: `GET /pipelines/{name}` doesn't return what `PUT` accepts
 
 - **Severity**: WARNING
+- **Status**: ✅ Fixed (2026-09-28), taking the "drop it" option below.
+  `GET /pipelines/{name}` returns `{definition, revision, has_comments}`,
+  what `PUT` takes back. `/pipelines/{name}/definition` is gone, and so is
+  the server-side derived view (`PipelineDetailResponse`, and `_model_label`,
+  which duplicated the client's `displayModel`). The client has one
+  `getPipeline()` in place of `getPipelineDetail()` and
+  `getPipelineDefinition()`. The CLI now derives the structure with
+  `detailFromDefinition()`, as the web app already did, so stored pipelines
+  and unsaved drafts are drawn by the same code.
 - **Principle**: Uniform resource representation; names reveal intent
 - **File(s)**:
   - [health.py:65-127](llm_pipeline/llm_pipeline/routers/health.py#L65-L127)
@@ -285,7 +294,9 @@ working around them.
     But `node_token` events exist, and `NodeTokenEvent` describes itself as
     token-level streaming. Someone following the `askStream()` doc would never
     handle `node_token`.
-  - **`PipelineNodeInfo.model`:** documented as a "provider:model identity
+  - **`PipelineNodeInfo.model`:** *(resolved by API-004: the server no
+    longer sends it, and the client type now documents it as a display
+    label)* documented as a "provider:model identity
     string", but for nodes that inherit the default model, `_model_label`
     appends ` (default)`. Code that splits on `:` or matches against `/models`
     fails for exactly those nodes.

@@ -314,7 +314,7 @@ async function defaultModel(ctx: EditContext): Promise<NodeModelConfig> {
   const inUse = ctx.session?.draft.nodes.find((n) => n.model)?.model;
   if (inUse) return { ...inUse };
   try {
-    const active = await ctx.client.getPipelineDefinition(ctx.activePipeline());
+    const active = await ctx.client.getPipeline(ctx.activePipeline());
     const model = active.definition.nodes.find((n) => n.model)?.model;
     if (model) return { provider: model.provider, model: model.model, temperature: model.temperature ?? 0.2 };
   } catch {
@@ -346,7 +346,7 @@ function describeServerError(err: unknown): string {
 // ---------------------------------------------------------------------------
 
 async function loadForEditing(ctx: EditContext, name: string): Promise<void> {
-  const loaded = await ctx.client.getPipelineDefinition(name);
+  const loaded = await ctx.client.getPipeline(name);
   ctx.session = {
     draft: loaded.definition,
     baseRevision: loaded.revision,
@@ -455,7 +455,7 @@ async function handleNodeCommand(ctx: EditContext, args: string[]): Promise<void
 /** The definition tests run against: the draft while editing, else the
  * active pipeline as saved. */
 async function testedDefinition(ctx: EditContext): Promise<PipelineDefinition> {
-  return ctx.session?.draft ?? (await ctx.client.getPipelineDefinition(ctx.activePipeline())).definition;
+  return ctx.session?.draft ?? (await ctx.client.getPipeline(ctx.activePipeline())).definition;
 }
 
 const EXPECTATION_PREFIX: Record<string, ExpectationKind> = {
@@ -900,7 +900,7 @@ export async function handleEditCommand(ctx: EditContext, line: string): Promise
         const { definition } = await ctx.client.validatePipeline({ yaml: readFileSync(file, "utf8") });
         let baseRevision: string | null = null;
         try {
-          const existing = await ctx.client.getPipelineDefinition(definition.name);
+          const existing = await ctx.client.getPipeline(definition.name);
           baseRevision = existing.revision;
           console.log(chalk.yellow(`! a pipeline named "${definition.name}" exists — /save will replace it`));
         } catch {
@@ -915,7 +915,7 @@ export async function handleEditCommand(ctx: EditContext, line: string): Promise
       case "/export": {
         const file = args[0];
         if (!file) throw new DraftError("usage: /export <file.yaml>");
-        const definition = ctx.session?.draft ?? (await ctx.client.getPipelineDefinition(ctx.activePipeline())).definition;
+        const definition = ctx.session?.draft ?? (await ctx.client.getPipeline(ctx.activePipeline())).definition;
         const { yaml } = await ctx.client.validatePipeline({ definition });
         writeFileSync(file, yaml);
         note(`wrote "${definition.name}" to ${file}`);

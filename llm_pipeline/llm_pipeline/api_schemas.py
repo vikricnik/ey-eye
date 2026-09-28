@@ -10,7 +10,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 # Shared with history.py, which doesn't import this wire contract.
 from llm_pipeline.conversation import ConversationTurn as ConversationTurn
@@ -160,7 +160,7 @@ class StreamDoneEvent(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Pipeline listing / introspection response models
+# Pipeline listing response models
 # ---------------------------------------------------------------------------
 
 
@@ -185,47 +185,6 @@ class HealthResponse(BaseModel):
 
 class PipelinesListResponse(BaseModel):
     pipelines: list[PipelineSummary]
-
-
-class PipelineNodeInfo(BaseModel):
-    id: str
-    type: str
-    depends_on: list[str]
-    model: str  # "provider:model" identity string
-
-
-class PipelineBranchRouteInfo(BaseModel):
-    to: str | list[str]  # as written: one node, or several started together
-    when: str | None  # None for the branch's default route
-    default: bool
-
-
-class PipelineBranchInfo(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    id: str
-    from_: str = Field(alias="from")  # "from" is a reserved word in Python
-    routes: list[PipelineBranchRouteInfo]
-
-
-class PipelineLoopInfo(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    id: str
-    from_: str = Field(alias="from")
-    back_to: str
-    exit_to: str
-    max_iterations: int
-    on_max_iterations: Literal["proceed", "fail"]
-
-
-class PipelineDetailResponse(BaseModel):
-    name: str
-    description: str
-    output_node_candidates: list[str]
-    nodes: list[PipelineNodeInfo]
-    branches: list[PipelineBranchInfo]
-    loops: list[PipelineLoopInfo]
 
 
 # ---------------------------------------------------------------------------

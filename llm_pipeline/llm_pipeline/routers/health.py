@@ -1,35 +1,23 @@
+"""
+GET /health and GET /pipelines — the pipeline listing. Reading one pipeline
+(GET /pipelines/{name}) lives with saving it, in editing.py: both speak the
+same representation.
+"""
+
 from fastapi import APIRouter, Depends
 
-from llm_pipeline.api_error import ApiError
 from llm_pipeline.api_schemas import (
-    ErrorCode,
     HealthResponse,
-    PipelineBranchInfo,
-    PipelineBranchRouteInfo,
-    PipelineDetailResponse,
-    PipelineLoopInfo,
-    PipelineNodeInfo,
     PipelinesListResponse,
     PipelineSummary,
 )
 from llm_pipeline.auth import require_api_key
 from llm_pipeline.error_handling import ERROR_RESPONSES
-from llm_pipeline.errors import PipelineNotFoundError
-from llm_pipeline.model_catalog import model_identity
-from llm_pipeline.pipeline_config import NodeConfig, PipelineDefinition, list_available_pipelines
-from llm_pipeline.pipeline_config.effective import effective_node
-from llm_pipeline.pipeline_loader import PipelineCache, get_pipeline_cache
+from llm_pipeline.pipeline_config import list_available_pipelines
 from llm_pipeline.rate_limit import enforce_rate_limit
 from llm_pipeline.settings import settings
 
 router = APIRouter()
-
-
-def _model_label(definition: PipelineDefinition, node: NodeConfig) -> str:
-    """ "provider:model" the node runs with, "(default)" when it inherits the
-    pipeline's default model — the same label as the client's displayModel."""
-    identity = model_identity(effective_node(definition, node).model)
-    return identity if node.model is not None else f"{identity} (default)"
 
 
 def _summaries() -> list[PipelineSummary]:
@@ -62,68 +50,3 @@ async def health() -> HealthResponse:
 )
 async def list_pipelines() -> PipelinesListResponse:
     return PipelinesListResponse(pipelines=_summaries())
-
-
-@router.get(
-    "/pipelines/{name}",
-    response_model=PipelineDetailResponse,
-    dependencies=[Depends(require_api_key), Depends(enforce_rate_limit)],
-    responses={k: ERROR_RESPONSES[k] for k in (401, 404, 422, 429)},
-)
-async def get_pipeline_definition(
-    name: str, cache: PipelineCache = Depends(get_pipeline_cache)
-) -> PipelineDetailResponse:
-    """Returns the full parsed definition — nodes, edges, models — so a
-    client can render the DAG shape (e.g. a picker showing what a pipeline
-    actually does) before running it."""
-    try:
-        definition, _ = cache.get(name)
-    except PipelineNotFoundError:
-        raise ApiError(ErrorCode.PIPELINE_NOT_FOUND, f"No pipeline named '{name}'") from None
-
-    return PipelineDetailResponse(
-        name=definition.name,
-        description=definition.description,
-        output_node_candidates=definition.output_node_candidates,
-        nodes=[
-            PipelineNodeInfo(
-                id=n.id,
-                type=n.type,
-                depends_on=n.depends_on,
-                model=_model_label(definition, n),
-            )
-            for n in definition.nodes
-        ],
-        branches=[
-            # model_validate() with a plain dict, not keyword arguments:
-            # `from` is a reserved word (can't be a Python kwarg at all), and
-            # pydantic's alias-based synthesized __init__ signature — which
-            # pyright reads literally — only recognizes the alias "from" as
-            # a keyword name, not the populate_by_name-permitted "from_".
-            # A dict keyed by the alias sidesteps that mismatch entirely.
-            PipelineBranchInfo.model_validate(
-                {
-                    "id": b.id,
-                    "from": b.from_,
-                    "routes": [
-                        PipelineBranchRouteInfo(to=r.to, when=r.when, default=r.default)
-                        for r in b.routes
-                    ],
-                }
-            )
-            for b in definition.branches
-        ],
-        loops=[
-            PipelineLoopInfo.model_validate(
-                {
-                    "id": loop.id,
-                    "from": loop.from_,
-                    "back_to": loop.back_to,
-                    "exit_to": loop.exit_to,
-                    "max_iterations": loop.max_iterations,
-                    "on_max_iterations": loop.on_max_iterations,
-                }
-            )
-            for loop in definition.loops
-        ],
-    )

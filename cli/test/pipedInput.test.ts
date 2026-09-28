@@ -30,12 +30,13 @@ before(async () => {
       }
       if (req.url === "/pipelines/p") {
         return json({
-          name: "p",
-          description: "",
-          output_node_candidates: ["a"],
-          nodes: [{ id: "a", type: "llm_call", depends_on: [], model: "ollama:m" }],
-          branches: [],
-          loops: [],
+          definition: {
+            name: "p",
+            nodes: [{ id: "a", prompt_template: "{{ input }}", model: { provider: "ollama", model: "m" } }],
+            output_node: "a",
+          },
+          revision: "0000000000000000",
+          has_comments: false,
         });
       }
       if (req.url === "/ask") {

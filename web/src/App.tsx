@@ -247,7 +247,7 @@ export function App() {
 
   const openPipeline = useCallback(async (name: string) => {
     try {
-      const loaded = await client.getPipelineDefinition(name);
+      const loaded = await client.getPipeline(name);
       loadDoc(loaded.definition, loaded.revision, true);
       setLoadError(null);
       // Pick up where the last conversation with this pipeline left off.
@@ -641,7 +641,7 @@ export function App() {
           confirmLabel: "Import",
         });
         if (!replace) return;
-        baseRevision = (await client.getPipelineDefinition(definition.name)).revision;
+        baseRevision = (await client.getPipeline(definition.name)).revision;
       }
       loadDoc(definition, baseRevision, false);
       notify("info", `imported "${definition.name}" — not saved yet`);

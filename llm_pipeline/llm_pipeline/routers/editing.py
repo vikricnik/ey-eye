@@ -1,7 +1,8 @@
 """
-Endpoints for editor clients (the web builder and the CLI's edit
-commands): the models they may select, full pipeline definitions,
-validation/import/export, saving, and node presets.
+Endpoints for reading and editing pipelines (the web builder and the CLI):
+the models an editor may select, reading a pipeline, validation/import/
+export, saving, and node presets. GET and PUT /pipelines/{name} speak the
+same representation — what you read is what you save back.
 
 Reads are available whenever the client is authenticated. Every write is
 additionally gated by `pipeline_editing_enabled` (off by default) — see
@@ -132,15 +133,17 @@ async def get_ollama_model_limits(
 
 
 @router.get(
-    "/pipelines/{name}/definition",
+    "/pipelines/{name}",
     response_model=PipelineDefinitionResponse,
     responses={k: ERROR_RESPONSES[k] for k in (401, 404, 422, 429)},
 )
-async def get_pipeline_full_definition(
+async def get_pipeline(
     name: str, store: PipelineStore = Depends(get_pipeline_store)
 ) -> PipelineDefinitionResponse:
     """The complete definition — prompts, options, layout — plus the
-    revision to send back when saving."""
+    revision to send back as `base_revision` when saving it with PUT. A
+    client that only draws the pipeline derives that from the definition
+    (the client package's detailFromDefinition)."""
     try:
         stored = store.read_pipeline(name)
     except PipelineNotFoundError:

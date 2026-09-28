@@ -52,7 +52,8 @@ pipeline_config/            YAML schema + validation
 └── loader.py                     reads/lists pipeline YAML files from disk
 
 routers/                    FastAPI route handlers
-├── health.py                 GET /health, /pipelines, /pipelines/{name}
+├── health.py                 GET /health, /pipelines
+├── editing.py                GET/PUT/DELETE /pipelines/{name}, models, presets, …
 └── ask.py                      POST /ask + prompt/history validation
 
 safe_eval.py                Sandboxed expression language for `when`/`exit_when` —
@@ -521,23 +522,30 @@ See root `docker-compose.yml` for the full env var wiring.
 Same `available_pipelines` list, standalone.
 
 ### `GET /pipelines/{name}`
-Returns the parsed DAG shape — nodes, models, dependencies, branches, and
-loops — so a client can render or introspect a pipeline before running it:
+Returns the pipeline as stored — its complete definition (nodes, prompts,
+models, branches, loops, layout), in exactly the shape of its YAML file,
+plus the `revision` to send back as `base_revision` when saving it with
+`PUT /pipelines/{name}`. What you read is what you save:
 ```json
 {
-  "name": "support-router",
-  "description": "...",
-  "output_node_candidates": ["refund_flow", "tech_support_flow", "general_flow"],
-  "nodes": [
-    { "id": "classify", "type": "llm_call", "depends_on": [], "model": "ollama:llama3.2:3b" },
-    { "id": "refund_flow", "type": "llm_call", "depends_on": [], "model": "ollama:llama3" }
-  ],
-  "branches": [
-    { "id": "route_by_intent", "from": "classify", "routes": ["refund_flow", "tech_support_flow", "general_flow"] }
-  ],
-  "loops": []
+  "definition": {
+    "name": "support-router",
+    "description": "...",
+    "nodes": [
+      { "id": "classify", "depends_on": [], "model": { "provider": "ollama", "model": "llama3.2:3b", "temperature": 0.0 }, "prompt_template": "..." }
+    ],
+    "branches": [
+      { "id": "route_by_intent", "from": "classify", "routes": [{ "when": "\"REFUND\" in output", "to": "refund_flow" }, { "default": true, "to": "general_flow" }] }
+    ],
+    "output_node": ["refund_flow", "tech_support_flow", "general_flow"]
+  },
+  "revision": "3f2a9c01b7de4e55",
+  "has_comments": true
 }
 ```
+A client that draws the pipeline derives its structure from this definition
+(`detailFromDefinition()` in the shared client package) — the same way it
+draws an unsaved draft.
 
 ### `POST /ask`
 
@@ -726,7 +734,7 @@ Set `API_KEYS`, or list the actual client origins (e.g.
 |---|---|
 | `GET /models` | Models an editor may pick: every model installed on `OLLAMA_BASE_URL`, plus the cloud models listed in `EDITOR_CLOUD_MODELS` (`provider:model`, comma-separated). `?refresh=true` skips the short cache. |
 | `GET /models/ollama/{name}` | An installed Ollama model's limits — max context length, parameter size, quantization, family — for editor hints. 404 when it isn't installed or Ollama can't be reached. |
-| `GET /pipelines/{name}/definition` | The full definition (prompts, options, layout) plus its `revision` and whether the file has YAML comments (`has_comments`). |
+| `GET /pipelines/{name}` | The full definition (prompts, options, layout) plus its `revision` and whether the file has YAML comments (`has_comments`) — what `PUT` takes back. |
 | `POST /pipelines/validate` | Body `{"definition": {...}}` or `{"yaml": "..."}`. Validates without saving and returns `{definition, yaml, model_issues, warnings}` — the same call serves live validation, import (YAML in) and export (canonical YAML out). `warnings` flags settings beyond what a model supports (e.g. `num_ctx` above its maximum context) but never blocks a save. A 422 names the offending node in `details.node_id`. |
 | `PUT /pipelines/{name}` | Body `{"definition": {...}, "base_revision": "..."}`. `base_revision: null` creates (409 if it exists); otherwise it must match the file on disk (409 if someone saved in between). Writes `pipelines/<name>.yaml` atomically; the next run uses it. |
 | `DELETE /pipelines/{name}?revision=…` | Moves the file to `pipelines/.deleted/<name>.<timestamp>.yaml` — recoverable by moving it back. `revision` (optional) refuses the delete if the file changed since loaded; the server's `DEFAULT_PIPELINE_NAME` can't be deleted (409). |

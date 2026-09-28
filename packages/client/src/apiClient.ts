@@ -14,7 +14,6 @@ import type {
   NodePreset,
   PipelineDefinition,
   PipelineDefinitionResponse,
-  PipelineDetail,
   PipelinesListResponse,
   PresetResponse,
   PreviewPromptRequest,
@@ -197,8 +196,12 @@ export class PipelineClient {
     return this.get<PipelinesListResponse>("/pipelines");
   }
 
-  async getPipelineDetail(name: string): Promise<PipelineDetail> {
-    return this.get<PipelineDetail>(`/pipelines/${encodeURIComponent(name)}`);
+  /** A pipeline as stored: its complete definition (prompts, options,
+   * layout) and the revision to pass back to savePipeline() — the same
+   * representation a save takes. To draw it, derive the structure with
+   * detailFromDefinition(). */
+  async getPipeline(name: string): Promise<PipelineDefinitionResponse> {
+    return this.get<PipelineDefinitionResponse>(`/pipelines/${encodeURIComponent(name)}`);
   }
 
   // ---- editing ---------------------------------------------------------
@@ -214,14 +217,6 @@ export class PipelineClient {
   async getModelLimits(ollamaModel: string): Promise<ModelLimits> {
     const path = ollamaModel.split("/").map(encodeURIComponent).join("/");
     return this.get<ModelLimits>(`/models/ollama/${path}`);
-  }
-
-  /** The complete definition (prompts, options, layout) plus the revision
-   * to pass back to savePipeline(). */
-  async getPipelineDefinition(name: string): Promise<PipelineDefinitionResponse> {
-    return this.get<PipelineDefinitionResponse>(
-      `/pipelines/${encodeURIComponent(name)}/definition`
-    );
   }
 
   /** Validates without saving. Pass a definition (live validation, export

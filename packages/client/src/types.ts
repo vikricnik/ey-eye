@@ -141,10 +141,18 @@ export interface PipelineSummary {
   filename: string;
 }
 
+// ---------------------------------------------------------------------------
+// Pipeline structure — what a client draws, derived from a definition by
+// graphModel.ts's detailFromDefinition(). Not sent by the server: GET
+// /pipelines/{name} returns the definition itself (PipelineDefinitionResponse).
+// ---------------------------------------------------------------------------
+
 export interface PipelineNodeInfo {
   id: string;
   type: string;
   depends_on: string[];
+  /** A display label, not an identity: "provider:model", plus " (default)"
+   * when the node inherits the pipeline's default model (displayModel()). */
   model: string;
 }
 
@@ -524,7 +532,7 @@ export interface ApiErrorBody {
 
 // ---------------------------------------------------------------------------
 // Graph model — the shared, structural representation of a pipeline's DAG
-// shape, built once from PipelineDetail by graphModel.ts's buildGraphModel()
+// shape, built from a PipelineDetail by graphModel.ts's buildGraphModel()
 // and rendered by both cli (as text) and web (as SVG). See
 // specs/001-visual-dag-graph/data-model.md for the full field-by-field
 // rationale; kept here rather than duplicated per-consumer for the same
