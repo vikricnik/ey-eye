@@ -21,7 +21,7 @@ from llm_pipeline.main import app
 from llm_pipeline.model_catalog import CatalogModel, ModelCatalog
 from llm_pipeline.pipeline_config import PipelineDefinition
 from llm_pipeline.pipeline_config.templates import render
-from llm_pipeline.providers import ModelSpec
+from llm_pipeline.providers import Generation, ModelSpec
 from llm_pipeline.settings import settings
 
 # Asks a run to stream its progress as Server-Sent Events.
@@ -41,9 +41,9 @@ class _Recorder:
         recorder = self
 
         class _Provider:
-            async def generate(self, prompt: str, system: str | None = None) -> str:
+            async def generate(self, prompt: str, system: str | None = None) -> Generation:
                 recorder.calls.append((spec, prompt, system))
-                return recorder.answers.get(spec.model, f"<{spec.model}>")
+                return Generation(recorder.answers.get(spec.model, f"<{spec.model}>"))
 
         return _Provider()
 
@@ -329,12 +329,12 @@ def test_max_concurrency_limits_parallel_model_calls(
         state = {"now": 0, "peak": 0}
 
         class _Slow:
-            async def generate(self, prompt: str, system: str | None = None) -> str:
+            async def generate(self, prompt: str, system: str | None = None) -> Generation:
                 state["now"] += 1
                 state["peak"] = max(state["peak"], state["now"])
                 await asyncio.sleep(0.05)
                 state["now"] -= 1
-                return "ok"
+                return Generation("ok")
 
         monkeypatch.setattr(node_types_module, "get_provider", lambda spec: _Slow())
         assert client.post(f"/pipelines/{name}/runs", json={"prompt": "q"}).status_code == 200

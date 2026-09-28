@@ -12,7 +12,7 @@ import llm_pipeline.rate_limit as rate_limit_module
 from llm_pipeline.dag_builder.loops import make_loop_failed_node
 from llm_pipeline.errors import PipelineExecutionError
 from llm_pipeline.main import app
-from llm_pipeline.providers import LLMProvider, ModelSpec
+from llm_pipeline.providers import Generation, LLMProvider, ModelSpec
 from llm_pipeline.routers.runs import extract_stream_part, message_text
 from llm_pipeline.settings import settings
 from llm_pipeline.state import PipelineState
@@ -67,12 +67,12 @@ class _EchoProvider:
     def __init__(self, tag: str) -> None:
         self.tag = tag
 
-    async def generate(self, prompt: str, system: str | None = None) -> str:
-        return f"[{self.tag}]:{prompt}"
+    async def generate(self, prompt: str, system: str | None = None) -> Generation:
+        return Generation(f"[{self.tag}]:{prompt}")
 
 
 class _FailingProvider:
-    async def generate(self, prompt: str, system: str | None = None) -> str:
+    async def generate(self, prompt: str, system: str | None = None) -> Generation:
         raise RuntimeError("simulated failure")
 
 
@@ -349,14 +349,14 @@ class _BarrierProvider:
         self.arrived = 0
         self.all_arrived: asyncio.Event | None = None
 
-    async def generate(self, prompt: str, system: str | None = None) -> str:
+    async def generate(self, prompt: str, system: str | None = None) -> Generation:
         if self.all_arrived is None:
             self.all_arrived = asyncio.Event()
         self.arrived += 1
         if self.arrived >= self.parties:
             self.all_arrived.set()
         await asyncio.wait_for(self.all_arrived.wait(), timeout=5)
-        return "ok"
+        return Generation("ok")
 
 
 def test_stream_parallel_roots_all_start_before_any_completes(
@@ -400,8 +400,8 @@ async def test_loop_node_emits_node_start_on_every_iteration(
     responses = iter(["REVISE: a", "REVISE: b", "APPROVE"])
 
     class _Critique:
-        async def generate(self, prompt: str, system: str | None = None) -> str:
-            return next(responses)
+        async def generate(self, prompt: str, system: str | None = None) -> Generation:
+            return Generation(next(responses))
 
     critique = _Critique()
 
@@ -431,9 +431,9 @@ class _SystemRecordingProvider:
     def __init__(self) -> None:
         self.systems: list[str | None] = []
 
-    async def generate(self, prompt: str, system: str | None = None) -> str:
+    async def generate(self, prompt: str, system: str | None = None) -> Generation:
         self.systems.append(system)
-        return "ok"
+        return Generation("ok")
 
 
 @pytest.mark.asyncio
@@ -482,10 +482,10 @@ class _StreamingChatProvider:
     def __init__(self, text: str) -> None:
         self.text = text
 
-    async def generate(self, prompt: str, system: str | None = None) -> str:
+    async def generate(self, prompt: str, system: str | None = None) -> Generation:
         llm = GenericFakeChatModel(messages=iter([AIMessage(content=self.text)]))
         result = await llm.ainvoke([("human", prompt)])
-        return str(result.content)
+        return Generation(str(result.content))
 
 
 def test_stream_emits_tokens_per_node_between_start_and_complete(
@@ -533,11 +533,11 @@ async def test_retry_is_announced_as_a_new_start(monkeypatch: pytest.MonkeyPatch
     class _FailsOnce:
         calls = 0
 
-        async def generate(self, prompt: str, system: str | None = None) -> str:
+        async def generate(self, prompt: str, system: str | None = None) -> Generation:
             _FailsOnce.calls += 1
             if _FailsOnce.calls == 1:
                 raise RuntimeError("transient")
-            return "ok"
+            return Generation("ok")
 
     monkeypatch.setattr(node_types_module, "get_provider", lambda spec: _FailsOnce())
     definition = PipelineDefinition.model_validate(

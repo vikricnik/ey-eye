@@ -7,6 +7,7 @@ prefers `text/event-stream` (see wants_event_stream).
 import logging
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import aclosing
+from dataclasses import dataclass
 from typing import cast
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -38,7 +39,7 @@ from llm_pipeline.pipeline_config.effective import effective_model
 from llm_pipeline.pipeline_config.schema import DEFAULT_TEMPERATURE
 from llm_pipeline.pipeline_config.templates import render
 from llm_pipeline.pipeline_loader import PipelineCache, get_pipeline_cache
-from llm_pipeline.providers import ModelSpec, generate_with_retry, get_provider
+from llm_pipeline.providers import ModelSpec, RetryPolicy, generate_with_retry, get_provider
 from llm_pipeline.rate_limit import enforce_rate_limit
 from llm_pipeline.rerun import replay_outputs
 from llm_pipeline.settings import settings
@@ -49,18 +50,18 @@ logger: logging.Logger = logging.getLogger("llm_pipeline")
 router = APIRouter()
 
 
-def _validate_prompt_and_history(req: RunRequest) -> None:
-    if not req.prompt.strip():
+def _validate_prompt_and_history(run_request: RunRequest) -> None:
+    if not run_request.prompt.strip():
         raise ApiError(ErrorCode.INPUT_INVALID, "prompt cannot be empty")
 
-    if len(req.prompt) > settings.max_prompt_length:
+    if len(run_request.prompt) > settings.max_prompt_length:
         raise ApiError(
             ErrorCode.INPUT_TOO_LARGE,
-            f"prompt exceeds max_prompt_length ({len(req.prompt)} > "
+            f"prompt exceeds max_prompt_length ({len(run_request.prompt)} > "
             f"{settings.max_prompt_length} characters)",
         )
 
-    for i, turn in enumerate(req.history):
+    for i, turn in enumerate(run_request.history):
         if len(turn.prompt) > settings.max_history_turn_length:
             raise ApiError(
                 ErrorCode.INPUT_TOO_LARGE,
@@ -101,9 +102,7 @@ def _summarizer(definition: PipelineDefinition, cache: PipelineCache) -> Summari
             get_provider(spec),
             render(config.prompt, {"history": history}),
             spec,
-            execution.model_timeout_seconds,
-            max_attempts=execution.max_retries + 1,
-            backoff_base_seconds=execution.retry_backoff_seconds,
+            RetryPolicy.from_execution(execution),
             circuit_breaker=cache.circuit_breaker,
         )
         return generation.text
@@ -129,25 +128,32 @@ def _remembered(
     }
 
 
-async def prepare_run(
-    name: str, req: RunRequest, cache: PipelineCache
-) -> tuple[PipelineDefinition, CompiledStateGraph, PipelineState]:
+@dataclass(frozen=True)
+class PreparedRun:
+    """A run ready to start: the pipeline, compiled, and its first state."""
+
+    definition: PipelineDefinition
+    graph: CompiledStateGraph
+    initial_state: PipelineState
+
+
+async def prepare_run(name: str, run_request: RunRequest, cache: PipelineCache) -> PreparedRun:
     """Shared setup for a run, answered or streamed: validates the request,
     resolves pipeline `name`, and builds the initial LangGraph state. Every
     error raised here is an ApiError with the correct status and code —
     this always runs BEFORE any response has been sent (streaming or not),
     so raising here is always safe. Once a run starts actually streaming,
     that safety no longer holds — see pipeline_events' docstring."""
-    _validate_prompt_and_history(req)
+    _validate_prompt_and_history(run_request)
 
     try:
         definition, graph = cache.get(name)
     except PipelineNotFoundError as e:
         raise ApiError(ErrorCode.PIPELINE_NOT_FOUND, str(e)) from e
 
-    replay = _replay(req, definition)
+    replay = _replay(run_request, definition)
     prepared = await prepare_input(
-        req.prompt, req.history, definition, _summarizer(definition, cache)
+        run_request.prompt, run_request.history, definition, _summarizer(definition, cache)
     )
 
     initial_state: PipelineState = {
@@ -159,25 +165,26 @@ async def prepare_run(
     }
     if replay:
         initial_state["replay"] = replay
-    return definition, graph, initial_state
+    return PreparedRun(definition, graph, initial_state)
 
 
-def _replay(req: RunRequest, definition: PipelineDefinition) -> dict[str, str]:
+def _replay(run_request: RunRequest, definition: PipelineDefinition) -> dict[str, str]:
     """A re-run's reused outputs (see rerun.py) — empty for a normal run."""
-    if req.rerun is None:
+    if run_request.rerun is None:
         return {}
-    if not any(n.id == req.rerun.from_node for n in definition.nodes):
+    if not any(n.id == run_request.rerun.from_node for n in definition.nodes):
         raise ApiError(
             ErrorCode.NODE_NOT_FOUND,
-            f"can't re-run from '{req.rerun.from_node}': no such node in '{definition.name}'",
+            f"can't re-run from '{run_request.rerun.from_node}': "
+            f"no such node in '{definition.name}'",
         )
-    for node_id, text in req.rerun.outputs.items():
+    for node_id, text in run_request.rerun.outputs.items():
         if len(text) > settings.max_history_turn_length:
             raise ApiError(
                 ErrorCode.INPUT_TOO_LARGE,
                 f"rerun.outputs.{node_id} exceeds max_history_turn_length",
             )
-    return replay_outputs(definition, req.rerun.from_node, req.rerun.outputs)
+    return replay_outputs(definition, run_request.rerun.from_node, run_request.rerun.outputs)
 
 
 # An unexpected failure is a bug: its text stays in the server log (found
@@ -215,12 +222,13 @@ def _resolve_output_node(
 
 
 async def run_pipeline(
-    name: str, req: RunRequest, cache: PipelineCache, request: Request
+    name: str, run_request: RunRequest, cache: PipelineCache, request: Request
 ) -> RunResponse:
     """One whole run, answered when it finishes — a run that isn't
     streamed, here or through the OpenAI-compatible endpoint. Stopped if the
     client disconnects (see disconnects.py). Raises ApiError."""
-    definition, graph, initial_state = await prepare_run(name, req, cache)
+    run = await prepare_run(name, run_request, cache)
+    definition = run.definition
 
     try:
         # graph.ainvoke's declared return type is generic (LangGraph doesn't
@@ -230,7 +238,7 @@ async def run_pipeline(
         final_state: PipelineState = cast(
             PipelineState,
             await cancel_on_disconnect(
-                request, graph.ainvoke(initial_state, config=_run_config(definition))
+                request, run.graph.ainvoke(run.initial_state, config=_run_config(definition))
             ),
         )
     except HTTPException:
@@ -319,10 +327,7 @@ def message_text(message: object) -> str:
 
 
 async def pipeline_events(
-    request: Request,
-    definition: PipelineDefinition,
-    graph: CompiledStateGraph,
-    initial_state: PipelineState,
+    request: Request, run: PreparedRun
 ) -> AsyncIterator[tuple[str, BaseModel]]:
     """Streams a run via LangGraph's own astream(), in three stream modes:
 
@@ -349,6 +354,7 @@ async def pipeline_events(
     have returned as an HTTP error, and the generator then simply stops (ending
     the stream) rather than propagating the exception further.
     """
+    definition = run.definition
     node_outputs: dict[str, NodeResult] = {}
     completed: dict[str, NodeOutput] = {}  # what node_complete sent, reused by `done`
     loop_counts: dict[str, int] = {}
@@ -362,8 +368,8 @@ async def pipeline_events(
         # than whenever the abandoned generator gets garbage-collected.
         steps = cast(
             AsyncGenerator[object, None],
-            graph.astream(
-                initial_state,
+            run.graph.astream(
+                run.initial_state,
                 config=_run_config(definition),
                 stream_mode=["updates", "custom", "messages"],
             ),
@@ -474,14 +480,9 @@ async def pipeline_events(
     )
 
 
-async def _stream_pipeline_run(
-    request: Request,
-    definition: PipelineDefinition,
-    graph: CompiledStateGraph,
-    initial_state: PipelineState,
-) -> AsyncGenerator[str, None]:
+async def _stream_pipeline_run(request: Request, run: PreparedRun) -> AsyncGenerator[str, None]:
     """pipeline_events as Server-Sent Events."""
-    async for event_type, data in pipeline_events(request, definition, graph, initial_state):
+    async for event_type, data in pipeline_events(request, run):
         yield sse_event(event_type, data)
 
 
@@ -536,19 +537,17 @@ def wants_event_stream(request: Request) -> bool:
 )
 async def create_run(
     name: str,
-    req: RunRequest,
+    body: RunRequest,
     request: Request,
     cache: PipelineCache = Depends(get_pipeline_cache),
 ) -> RunResponse | StreamingResponse:
     """Runs pipeline `name` on `prompt` — answered when it finishes, or
     streamed as it runs when the client prefers `text/event-stream`."""
     if not wants_event_stream(request):
-        return await run_pipeline(name, req, cache, request)
-    definition, graph, initial_state = await prepare_run(name, req, cache)
+        return await run_pipeline(name, body, cache, request)
+    run = await prepare_run(name, body, cache)
     return StreamingResponse(
-        until_disconnected(
-            request, _stream_pipeline_run(request, definition, graph, initial_state)
-        ),
+        until_disconnected(request, _stream_pipeline_run(request, run)),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

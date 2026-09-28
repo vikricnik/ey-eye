@@ -60,14 +60,14 @@ TESTS: dict[str, Any] = {
 
 def _provider_for(spec: ModelSpec) -> Any:
     class _Provider:
-        async def generate(self, prompt: str, system: str | None = None) -> str | Generation:
+        async def generate(self, prompt: str, system: str | None = None) -> Generation:
             if spec.model == "judge":
                 # The requirement itself names Paris — look at the answer.
-                return (
+                return Generation(
                     "PASS\nIt says Paris." if "Answer: The capital" in prompt else "FAIL\nNo Paris."
                 )
             if spec.model == "small":
-                return "Berlin, obviously."
+                return Generation("Berlin, obviously.")
             return Generation(
                 "The capital of France is Paris.", Usage(prompt_tokens=20, completion_tokens=8)
             )
@@ -258,7 +258,7 @@ def test_a_failing_run_is_reported_per_case(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     class _Down:
-        async def generate(self, prompt: str, system: str | None = None) -> str:
+        async def generate(self, prompt: str, system: str | None = None) -> Generation:
             raise ConnectionError("ollama down")
 
     monkeypatch.setattr(node_types_module, "get_provider", lambda spec: _Down())

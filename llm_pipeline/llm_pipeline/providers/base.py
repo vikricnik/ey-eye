@@ -106,11 +106,6 @@ class Generation:
     usage: Usage | None = None
 
 
-def as_generation(result: "str | Generation") -> Generation:
-    """Adapters may return plain text; everything downstream sees a Generation."""
-    return result if isinstance(result, Generation) else Generation(result)
-
-
 def generation_from_message(message: object) -> Generation:
     """A Generation from a LangChain chat model's reply: its text, the token
     counts LangChain normalizes into `usage_metadata`, and — for Ollama —
@@ -135,6 +130,40 @@ def generation_from_message(message: object) -> Generation:
     return Generation(str(content), usage if usage != Usage() else None)
 
 
+class RetrySettings(Protocol):
+    """A pipeline's `execution` block (pipeline_config.ExecutionConfig), as
+    far as retrying goes — a protocol, so this layer doesn't import the
+    definition model."""
+
+    @property
+    def model_timeout_seconds(self) -> float: ...
+    @property
+    def max_retries(self) -> int: ...
+    @property
+    def retry_backoff_seconds(self) -> float: ...
+
+
+@dataclass(frozen=True)
+class RetryPolicy:
+    """How a model call is attempted: at most `max_attempts` tries in all,
+    each with a hard timeout, waiting backoff_base_seconds * 2**n before
+    retry n."""
+
+    timeout_seconds: float
+    max_attempts: int = 2
+    backoff_base_seconds: float = 1.0
+
+    @classmethod
+    def from_execution(cls, execution: RetrySettings) -> "RetryPolicy":
+        """A pipeline's policy: its `max_retries` are the attempts after the
+        first."""
+        return cls(
+            timeout_seconds=execution.model_timeout_seconds,
+            max_attempts=execution.max_retries + 1,
+            backoff_base_seconds=execution.retry_backoff_seconds,
+        )
+
+
 @runtime_checkable
 class LLMProvider(Protocol):
     """The only interface the rest of the pipeline depends on. Any backend
@@ -143,11 +172,11 @@ class LLMProvider(Protocol):
     these, and the individual adapter modules (ollama.py, openai.py, ...)
     for how each backend is wrapped to satisfy it."""
 
-    async def generate(self, prompt: str, system: str | None = None) -> str | Generation:
+    async def generate(self, prompt: str, system: str | None = None) -> Generation:
         """`system`, when given, is sent as a real system message — not
         concatenated into the prompt — so chat-tuned models apply it the
-        way they were trained to. Return a Generation to report token
-        usage; plain text is fine for backends that report none."""
+        way they were trained to. The Generation carries the reply, and the
+        token usage when the backend reports it (usage=None otherwise)."""
         ...
 
 

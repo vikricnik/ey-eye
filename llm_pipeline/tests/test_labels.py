@@ -10,6 +10,7 @@ from llm_pipeline.dag_builder import NodeServices, build_graph
 from llm_pipeline.dag_builder.labels import match_label
 from llm_pipeline.errors import PipelineExecutionError
 from llm_pipeline.pipeline_config import PipelineDefinition
+from llm_pipeline.providers import Generation
 
 LABELS = ["REFUND", "TECHNICAL", "GENERAL"]
 
@@ -75,8 +76,10 @@ class _Answers:
     def __init__(self, classifier_answer: str) -> None:
         self.classifier_answer = classifier_answer
 
-    async def generate(self, prompt: str, system: str | None = None) -> str:
-        return self.classifier_answer if prompt.startswith("classify") else f"out({prompt})"
+    async def generate(self, prompt: str, system: str | None = None) -> Generation:
+        return Generation(
+            self.classifier_answer if prompt.startswith("classify") else f"out({prompt})"
+        )
 
 
 async def _run(definition: PipelineDefinition, provider: _Answers) -> dict[str, Any]:

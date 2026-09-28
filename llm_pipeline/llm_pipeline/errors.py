@@ -1,3 +1,6 @@
+from typing import NamedTuple
+
+
 class PipelineExecutionError(Exception):
     """Raised when a pipeline run can't produce a usable result — e.g. the
     output_node's dependencies all failed. Distinct from ProviderError (one
@@ -31,17 +34,25 @@ class PipelineDefinitionError(Exception):
     """Raised when a pipeline YAML file fails schema/DAG validation."""
 
 
+class ValidationProblem(NamedTuple):
+    """One problem pydantic reported about a submitted definition or preset."""
+
+    location: str  # dotted path, e.g. "nodes.0.model"
+    message: str
+    type: str  # pydantic's error type, e.g. "missing"
+
+
 class DefinitionInvalidError(Exception):
     """A client-submitted pipeline or preset failed validation. `node_id`
     names the node an editor should highlight, when the failure is
-    attributable to one; `issues` lists every (location, message) pydantic
-    reported, for clients that want the full picture."""
+    attributable to one; `issues` lists every problem pydantic reported, for
+    clients that want the full picture."""
 
     def __init__(
         self,
         message: str,
         node_id: str | None = None,
-        issues: list[tuple[str, str, str]] | None = None,
+        issues: list[ValidationProblem] | None = None,
     ) -> None:
         super().__init__(message)
         self.node_id = node_id

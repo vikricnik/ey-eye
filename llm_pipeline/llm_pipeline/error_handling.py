@@ -163,8 +163,8 @@ def register_exception_handlers(app: FastAPI) -> None:
         (pyright false positive — see http_exception_handler's docstring.)"""
         details: dict[str, object] = {"node_id": exc.node_id} if exc.node_id else {}
         validations = [
-            ValidationIssue(field=location, message=message, type=error_type)
-            for location, message, error_type in exc.issues
+            ValidationIssue(field=problem.location, message=problem.message, type=problem.type)
+            for problem in exc.issues
         ]
         return _respond(
             build_error_response(

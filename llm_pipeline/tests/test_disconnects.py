@@ -13,7 +13,8 @@ import llm_pipeline.disconnects as disconnects_module
 from llm_pipeline.dag_builder import build_graph
 from llm_pipeline.disconnects import cancel_on_disconnect, until_disconnected
 from llm_pipeline.pipeline_config import PipelineDefinition
-from llm_pipeline.routers.runs import pipeline_events
+from llm_pipeline.providers import Generation
+from llm_pipeline.routers.runs import PreparedRun, pipeline_events
 from llm_pipeline.state import PipelineState
 
 
@@ -100,8 +101,8 @@ async def test_leaving_mid_run_cancels_the_model_call(monkeypatch: pytest.Monkey
     hanging = _Hanging()
 
     class _Provider:
-        async def generate(self, prompt: str, system: str | None = None) -> str:
-            return await hanging.run()
+        async def generate(self, prompt: str, system: str | None = None) -> Generation:
+            return Generation(await hanging.run())
 
     monkeypatch.setattr(node_types_module, "get_provider", lambda spec: _Provider())
     definition = PipelineDefinition.model_validate(
@@ -128,9 +129,8 @@ async def test_leaving_mid_run_cancels_the_model_call(monkeypatch: pytest.Monkey
     request = cast(Request, client)
 
     async def sse() -> AsyncGenerator[str, None]:
-        async for kind, _data in pipeline_events(
-            request, definition, build_graph(definition), state
-        ):
+        run = PreparedRun(definition, build_graph(definition), state)
+        async for kind, _data in pipeline_events(request, run):
             yield kind
 
     stream = until_disconnected(request, sse())

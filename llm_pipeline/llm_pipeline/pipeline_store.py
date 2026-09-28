@@ -50,6 +50,7 @@ from llm_pipeline.errors import (
     PipelineNotFoundError,
     ProtectedPipelineError,
     RevisionConflictError,
+    ValidationProblem,
 )
 from llm_pipeline.model_catalog import ModelCatalog, ModelNotAllowedError, ModelUse, model_identity
 from llm_pipeline.pipeline_config import NodePreset, PipelineDefinition, is_safe_name
@@ -317,11 +318,14 @@ def _describe_validation_error(e: ValidationError, raw: object) -> DefinitionInv
     possible, the id of the node at fault — from a PipelineValidationError
     raised by validation.py, or from a `nodes.<index>...` error location."""
     errors = e.errors()
-    issues: list[tuple[str, str, str]] = []
-    for err in errors:
-        location = ".".join(str(part) for part in err["loc"])
-        message = err["msg"].removeprefix("Value error, ")
-        issues.append((location, message, err["type"]))
+    issues = [
+        ValidationProblem(
+            location=".".join(str(part) for part in err["loc"]),
+            message=err["msg"].removeprefix("Value error, "),
+            type=err["type"],
+        )
+        for err in errors
+    ]
 
     first = errors[0]
     ctx_error = first.get("ctx", {}).get("error")

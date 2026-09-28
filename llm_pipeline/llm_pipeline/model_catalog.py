@@ -71,6 +71,13 @@ class ModelLimits:
     family: str | None = None
 
 
+class LimitWarning(NamedTuple):
+    """A setting beyond what a model supports — advisory, never blocking."""
+
+    node_id: str | None  # the node an editor should highlight, if any
+    message: str
+
+
 class ModelUse(NamedTuple):
     """One place a definition calls a model, for allowlist checks and hints."""
 
@@ -200,11 +207,11 @@ class ModelCatalog:
         self._limits[name] = (now, found)
         return found
 
-    async def limit_warnings(self, models: Iterable[ModelUse]) -> list[tuple[str | None, str]]:
+    async def limit_warnings(self, models: Iterable[ModelUse]) -> list[LimitWarning]:
         """Settings that exceed what a model supports — currently a
         `num_ctx` above the model's maximum context length. Warnings, not
         errors: Ollama accepts the value, but the model wasn't trained for it."""
-        warnings: list[tuple[str | None, str]] = []
+        warnings: list[LimitWarning] = []
         for node_id, model, where in models:
             num_ctx = model.options.num_ctx if model.options else None
             if model.provider != ProviderType.OLLAMA or num_ctx is None:
@@ -212,7 +219,7 @@ class ModelCatalog:
             found = await self.limits(model.model)
             if found and found.context_length and num_ctx > found.context_length:
                 warnings.append(
-                    (
+                    LimitWarning(
                         node_id,
                         f"{where}: num_ctx {num_ctx:,} exceeds {model.model}'s maximum context "
                         f"of {found.context_length:,} tokens",

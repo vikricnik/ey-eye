@@ -7,7 +7,7 @@ import yaml
 from llm_pipeline.dag_builder import NodeServices, build_graph
 from llm_pipeline.errors import PipelineExecutionError
 from llm_pipeline.pipeline_config import PipelineDefinition, load_pipeline_definition
-from llm_pipeline.providers import LLMProvider, ModelSpec
+from llm_pipeline.providers import Generation, LLMProvider, ModelSpec
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "valid"
 
@@ -19,8 +19,8 @@ class _EchoProvider:
     def __init__(self, tag: str) -> None:
         self.tag = tag
 
-    async def generate(self, prompt: str, system: str | None = None) -> str:
-        return f"[{self.tag}]:{prompt}"
+    async def generate(self, prompt: str, system: str | None = None) -> Generation:
+        return Generation(f"[{self.tag}]:{prompt}")
 
 
 def _answered_by(provider: LLMProvider) -> NodeServices:
@@ -29,7 +29,7 @@ def _answered_by(provider: LLMProvider) -> NodeServices:
 
 
 class _FailingProvider:
-    async def generate(self, prompt: str, system: str | None = None) -> str:
+    async def generate(self, prompt: str, system: str | None = None) -> Generation:
         raise RuntimeError("simulated failure")
 
 
@@ -43,11 +43,11 @@ class _SequencedProvider:
         self.responses = responses
         self.call_count = 0
 
-    async def generate(self, prompt: str, system: str | None = None) -> str:
+    async def generate(self, prompt: str, system: str | None = None) -> Generation:
         idx = min(self.call_count, len(self.responses) - 1)
         response = self.responses[idx]
         self.call_count += 1
-        return response
+        return Generation(response)
 
 
 @pytest.mark.asyncio
@@ -129,8 +129,8 @@ async def test_branch_only_runs_the_matching_route() -> None:
     definition = load_pipeline_definition(FIXTURES_DIR / "simple_branch.yaml")
 
     class _ClassifierProvider:
-        async def generate(self, prompt: str, system: str | None = None) -> str:
-            return "A"  # matches the `"A" in output` route
+        async def generate(self, prompt: str, system: str | None = None) -> Generation:
+            return Generation("A")  # matches the `"A" in output` route
 
     graph = build_graph(definition, _answered_by(_ClassifierProvider()))
     result = await graph.ainvoke(
@@ -149,8 +149,8 @@ async def test_branch_falls_through_to_default_route() -> None:
     definition = load_pipeline_definition(FIXTURES_DIR / "simple_branch.yaml")
 
     class _ClassifierProvider:
-        async def generate(self, prompt: str, system: str | None = None) -> str:
-            return "neither letter matches"  # doesn't contain "A"
+        async def generate(self, prompt: str, system: str | None = None) -> Generation:
+            return Generation("neither letter matches")  # doesn't contain "A"
 
     graph = build_graph(definition, _answered_by(_ClassifierProvider()))
     result = await graph.ainvoke(
@@ -275,9 +275,9 @@ class _RecordingProvider:
     def __init__(self) -> None:
         self.prompts: list[str] = []
 
-    async def generate(self, prompt: str, system: str | None = None) -> str:
+    async def generate(self, prompt: str, system: str | None = None) -> Generation:
         self.prompts.append(prompt)
-        return f"out({prompt})"
+        return Generation(f"out({prompt})")
 
 
 @pytest.mark.asyncio
@@ -360,12 +360,12 @@ class _CritiqueProvider:
         self.prompts: list[str] = []
         self.critiques = 0
 
-    async def generate(self, prompt: str, system: str | None = None) -> str:
+    async def generate(self, prompt: str, system: str | None = None) -> Generation:
         self.prompts.append(prompt)
         if prompt.startswith("critique"):
             self.critiques += 1
-            return "REVISE" if self.critiques == 1 else "APPROVE"
-        return f"out({prompt})"
+            return Generation("REVISE" if self.critiques == 1 else "APPROVE")
+        return Generation(f"out({prompt})")
 
 
 _REVISE_LOOP = {

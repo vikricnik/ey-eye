@@ -18,6 +18,7 @@ from llm_pipeline.model_catalog import CatalogModel, ModelCatalog, ModelLimits
 from llm_pipeline.pipeline_config import load_pipeline_definition
 from llm_pipeline.pipeline_loader import PipelineCache
 from llm_pipeline.pipeline_store import definition_to_yaml, parse_definition_yaml
+from llm_pipeline.providers import Generation
 from llm_pipeline.settings import settings
 
 SHIPPED_PIPELINES = Path(__file__).parent.parent / "pipelines"
@@ -333,8 +334,8 @@ def test_create_writes_the_file_and_runs_use_it_immediately(
     assert response.json()["revision"] == client.get("/pipelines/fresh").json()["revision"]
 
     class _Echo:
-        async def generate(self, prompt: str, system: str | None = None) -> str:
-            return f"<{system}>{prompt}"
+        async def generate(self, prompt: str, system: str | None = None) -> Generation:
+            return Generation(f"<{system}>{prompt}")
 
     monkeypatch.setattr(node_types_module, "get_provider", lambda spec: _Echo())
     answer = client.post("/pipelines/fresh/runs", json={"prompt": "hi"}).json()

@@ -55,7 +55,7 @@ problems are where the parts meet:
 | [API-010](#api-010-wire-types-are-untyped-on-the-server-and-hand-copied-under-different-names-in-typescript) | WARNING | Wire types are untyped on the server and hand-copied under different names in TypeScript — ✅ fixed |
 | [API-011](#api-011-health-is-public-but-returns-what-pipelines-requires-a-key-for) | WARNING | `/health` is public but returns what `/pipelines` requires a key for — ✅ fixed |
 | [API-012](#api-012-the-template-variable--input--quietly-includes-the-conversation) | WARNING | The template variable `{{ input }}` quietly includes the conversation — ✅ fixed |
-| [API-013](#api-013-python-signatures-rely-on-positional-tuples-and-long-parameter-lists) | SUGGESTION | Python signatures rely on positional tuples and long parameter lists |
+| [API-013](#api-013-python-signatures-rely-on-positional-tuples-and-long-parameter-lists) | SUGGESTION | Python signatures rely on positional tuples and long parameter lists — ✅ fixed |
 | [API-014](#api-014-one-concept-has-three-names-and-several-cli-commands-differ-by-one-keystroke) | SUGGESTION | One concept has three names, and several CLI commands differ by one keystroke |
 | [API-015](#api-015-yaml-schema-naming) | SUGGESTION | YAML schema naming |
 | [API-016](#api-016-validate-takes-two-mutually-exclusive-fields-and-checks-at-runtime) | SUGGESTION | `validate` takes two mutually exclusive fields and checks at runtime |
@@ -573,6 +573,24 @@ working around them.
 ### API-013: Python signatures rely on positional tuples and long parameter lists
 
 - **Severity**: SUGGESTION
+- **Status**: ✅ Fixed (2026-09-28).
+  - `generate_with_retry(provider, prompt, spec, policy, *, circuit_breaker,
+    system, on_retry)` takes a `RetryPolicy`. It had grown to 9 parameters.
+    Callers build it with `RetryPolicy.from_execution(definition.execution)`,
+    which lives in `providers/base.py` and reads the execution block through
+    a structural protocol, so the provider layer still doesn't import the
+    definition model.
+  - `prepare_run()` returns a `PreparedRun`, and `pipeline_events(request,
+    run)` takes it whole.
+  - A route's body parameter is `body` and the internal `RunRequest` is
+    `run_request`, so nothing takes both a `req` and a `request`.
+  - Named tuples replace bare ones: `PipelineCache.get()` →
+    `LoadedPipeline(definition, graph)`, `DefinitionInvalidError.issues` →
+    `ValidationProblem(location, message, type)` (its docstring's "pairs" was
+    wrong), `limit_warnings()` → `LimitWarning(node_id, message)`.
+  - `LLMProvider.generate()` always returns a `Generation`. Every real
+    adapter already did; `as_generation` is gone, and the 29 test fakes were
+    rewritten to match.
 - **Principle**: Parameter objects; return named types
 - **File(s)**:
   - [resilience.py:122](llm_pipeline/llm_pipeline/providers/resilience.py#L122)

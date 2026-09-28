@@ -13,7 +13,7 @@ import llm_pipeline.dag_builder.node_types as node_types_module
 import llm_pipeline.rate_limit as rate_limit_module
 from llm_pipeline.main import app
 from llm_pipeline.pipeline_config import load_pipeline_definition
-from llm_pipeline.providers import ModelSpec
+from llm_pipeline.providers import Generation, ModelSpec
 from llm_pipeline.rerun import downstream, replay_outputs
 from llm_pipeline.settings import settings
 
@@ -36,10 +36,12 @@ class _Calls:
         calls = self
 
         class _Provider:
-            async def generate(self, prompt: str, system: str | None = None) -> str:
+            async def generate(self, prompt: str, system: str | None = None) -> Generation:
                 calls.prompts.setdefault(key, []).append(prompt)
                 queue = calls.answers.get(key, [])
-                return queue.pop(0) if len(queue) > 1 else (queue[0] if queue else f"<{key[0]}>")
+                return Generation(
+                    queue.pop(0) if len(queue) > 1 else (queue[0] if queue else f"<{key[0]}>")
+                )
 
         return _Provider()
 

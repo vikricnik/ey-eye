@@ -199,18 +199,18 @@ async def get_pipeline(
     responses={k: ERROR_RESPONSES[k] for k in (401, 422, 429)},
 )
 async def validate_pipeline(
-    req: ValidatePipelineRequest, store: PipelineStore = Depends(get_pipeline_store)
+    body: ValidatePipelineRequest, store: PipelineStore = Depends(get_pipeline_store)
 ) -> ValidatePipelineResponse:
     """Validates without saving. Accepts a JSON definition or YAML text and
     returns both forms — so the same call serves live validation, import
     (YAML in) and export (canonical YAML out). Never writes anything, so
     it doesn't need editing to be enabled."""
-    if (req.definition is None) == (req.yaml is None):
+    if (body.definition is None) == (body.yaml is None):
         raise ApiError(ErrorCode.REQUEST_INVALID, "send exactly one of 'definition' or 'yaml'")
     definition = (
-        parse_definition(req.definition)
-        if req.definition is not None
-        else parse_definition_yaml(req.yaml or "")
+        parse_definition(body.definition)
+        if body.definition is not None
+        else parse_definition_yaml(body.yaml or "")
     )
     issues = await store.model_issues(definition.name, definition)
     warnings = await store.catalog.limit_warnings(effective_model_uses(definition))
@@ -218,9 +218,7 @@ async def validate_pipeline(
         definition=definition_to_json(definition),
         yaml=definition_to_yaml(definition),
         model_issues=[DefinitionIssue(node_id=i.node_id, message=str(i)) for i in issues],
-        warnings=[
-            DefinitionIssue(node_id=node_id, message=message) for node_id, message in warnings
-        ],
+        warnings=[DefinitionIssue(node_id=w.node_id, message=w.message) for w in warnings],
     )
 
 
@@ -231,15 +229,15 @@ async def validate_pipeline(
     dependencies=[Depends(require_editing_enabled)],
     responses={k: ERROR_RESPONSES[k] for k in (401, 403, 404, 422, 429)},
 )
-async def preview_node_prompt(req: PreviewPromptRequest) -> PreviewPromptResponse:
+async def preview_node_prompt(body: PreviewPromptRequest) -> PreviewPromptResponse:
     """The prompt and system prompt a node would receive — see preview.py."""
-    definition = parse_definition(req.definition)
+    definition = parse_definition(body.definition)
     try:
         preview = await preview_prompt(
-            definition, req.node_id, req.prompt, req.history, req.outputs
+            definition, body.node_id, body.prompt, body.history, body.outputs
         )
     except KeyError as e:
-        raise ApiError(ErrorCode.NODE_NOT_FOUND, f"no node '{req.node_id}'") from e
+        raise ApiError(ErrorCode.NODE_NOT_FOUND, f"no node '{body.node_id}'") from e
     except Exception as e:  # the sandbox's SecurityError, undefined variables, …
         raise ApiError(
             ErrorCode.TEMPLATE_RENDER_FAILED, f"the prompt can't be rendered: {e}"
@@ -278,34 +276,34 @@ def _with_models(
     },
 )
 async def run_pipeline_tests(
-    req: RunTestsRequest,
+    body: RunTestsRequest,
     request: Request,
     store: PipelineStore = Depends(get_pipeline_store),
     cache: PipelineCache = Depends(get_pipeline_cache),
 ) -> StreamingResponse:
     """Runs a definition's test cases, and each variant's — see evaluation.py."""
-    base = parse_definition(req.definition)
+    base = parse_definition(body.definition)
     cases = base.tests.cases
-    if req.cases is not None:
+    if body.cases is not None:
         by_name = {case.name: case for case in cases}
-        unknown = [name for name in req.cases if name not in by_name]
+        unknown = [name for name in body.cases if name not in by_name]
         if unknown:
             raise ApiError(ErrorCode.TEST_CASE_NOT_FOUND, f"no test case named '{unknown[0]}'")
-        cases = [by_name[name] for name in req.cases]
+        cases = [by_name[name] for name in body.cases]
     cases = cases + [
         EvalCase(name=f"message {i}", input=text)
-        for i, text in enumerate((t for t in req.inputs if t.strip()), start=1)
+        for i, text in enumerate((t for t in body.inputs if t.strip()), start=1)
     ]
     if not cases:
         raise ApiError(
             ErrorCode.REQUEST_INVALID,
             "no test cases to run — add some, or send a message to try",
         )
-    labels = ["current", *(v.label for v in req.variants)]
+    labels = ["current", *(v.label for v in body.variants)]
     if len(set(labels)) != len(labels):
         raise ApiError(ErrorCode.REQUEST_INVALID, "each variant needs its own label")
 
-    definitions = [base, *(_with_models(base, v.models) for v in req.variants)]
+    definitions = [base, *(_with_models(base, v.models) for v in body.variants)]
     for definition in definitions:
         issues = await store.model_issues(base.name, definition)
         if issues:
@@ -336,7 +334,7 @@ async def run_pipeline_tests(
 )
 async def save_pipeline(
     name: str,
-    req: SavePipelineRequest,
+    body: SavePipelineRequest,
     response: Response,
     precondition: Precondition = Depends(write_precondition),
     store: PipelineStore = Depends(get_pipeline_store),
@@ -351,7 +349,7 @@ async def save_pipeline(
             "say whether this save creates or updates: send If-None-Match: * to create "
             "the pipeline, or If-Match with the ETag (revision) you loaded to update it",
         )
-    stored = await store.save_pipeline(name, req.definition, precondition)
+    stored = await store.save_pipeline(name, body.definition, precondition)
     response.headers["ETag"] = _etag(stored.revision)
     return SavePipelineResponse(
         definition=definition_to_json(stored.definition),
@@ -427,14 +425,14 @@ async def get_preset(
 )
 async def save_preset(
     name: str,
-    req: SavePresetRequest,
+    body: SavePresetRequest,
     response: Response,
     precondition: Precondition = Depends(write_precondition),
     store: PipelineStore = Depends(get_pipeline_store),
 ) -> PresetResponse:
     """Creates or replaces presets/<name>.yaml — last write wins, unless you
     send If-Match (the ETag you loaded) or If-None-Match: * (create only)."""
-    stored = await store.save_preset(name, req.preset, precondition)
+    stored = await store.save_preset(name, body.preset, precondition)
     response.headers["ETag"] = _etag(stored.revision)
     return PresetResponse(
         preset=stored.preset.model_dump(mode="json", exclude_none=True), revision=stored.revision

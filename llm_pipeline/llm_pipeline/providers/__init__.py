@@ -22,6 +22,7 @@ from llm_pipeline.providers.base import (
     OllamaOptions,
     ProviderError,
     ProviderType,
+    RetryPolicy,
     Usage,
 )
 
@@ -68,6 +69,7 @@ __all__ = [
     "OllamaOptions",
     "ProviderError",
     "ProviderType",
+    "RetryPolicy",
     "Usage",
     "clear_provider_cache",
     "generate_with_retry",

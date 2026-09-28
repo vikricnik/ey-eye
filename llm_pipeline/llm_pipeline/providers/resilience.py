@@ -16,7 +16,7 @@ from llm_pipeline.providers.base import (
     LLMProvider,
     ModelSpec,
     ProviderError,
-    as_generation,
+    RetryPolicy,
 )
 from llm_pipeline.settings import settings
 
@@ -33,10 +33,8 @@ async def generate_with_timeout(
     have to know the difference between "OpenAI raised an API error" and
     "Ollama hung" — they just catch ProviderError."""
     try:
-        return as_generation(
-            await asyncio.wait_for(
-                provider.generate(prompt, system=system), timeout=timeout_seconds
-            )
+        return await asyncio.wait_for(
+            provider.generate(prompt, system=system), timeout=timeout_seconds
         )
     except TimeoutError as e:
         raise ProviderError(spec.identity, e) from e
@@ -123,9 +121,8 @@ async def generate_with_retry(
     provider: LLMProvider,
     prompt: str,
     spec: ModelSpec,
-    timeout_seconds: float,
-    max_attempts: int = 2,
-    backoff_base_seconds: float = 1.0,
+    policy: RetryPolicy,
+    *,
     circuit_breaker: CircuitBreaker | None = None,
     system: str | None = None,
     on_retry: Callable[[int], None] | None = None,
@@ -147,7 +144,7 @@ async def generate_with_retry(
     consuming a retry attempt or paying the timeout cost again.
 
     Retries apply only to ProviderError (transient failures) and never
-    exceed max_attempts total, including the first try. `on_retry(n)` is
+    exceed policy.max_attempts total, including the first try. `on_retry(n)` is
     called just before attempt n (n >= 2) — streaming callers use it to tell
     clients to discard partial output from the failed attempt.
     """
@@ -163,20 +160,20 @@ async def generate_with_retry(
         )
 
     last_error: ProviderError | None = None
-    for attempt in range(max_attempts):
+    for attempt in range(policy.max_attempts):
         if attempt > 0 and on_retry is not None:
             on_retry(attempt + 1)
         try:
             result = await generate_with_timeout(
-                provider, prompt, spec, timeout_seconds, system=system
+                provider, prompt, spec, policy.timeout_seconds, system=system
             )
             breaker.record_success(spec.identity)
             return result
         except ProviderError as e:
             last_error = e
             breaker.record_failure(spec.identity)
-            if attempt < max_attempts - 1:
-                await asyncio.sleep(backoff_base_seconds * (2**attempt))
+            if attempt < policy.max_attempts - 1:
+                await asyncio.sleep(policy.backoff_base_seconds * (2**attempt))
 
     assert last_error is not None
     raise last_error

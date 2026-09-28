@@ -95,9 +95,9 @@ class _StreamingProvider:
     def __init__(self, text: str) -> None:
         self.text = text
 
-    async def generate(self, prompt: str, system: str | None = None) -> str:
+    async def generate(self, prompt: str, system: str | None = None) -> Generation:
         llm = GenericFakeChatModel(messages=iter([AIMessage(content=self.text)]))
-        return str((await llm.ainvoke([("human", prompt)])).content)
+        return Generation(str((await llm.ainvoke([("human", prompt)])).content))
 
 
 def test_the_output_node_streams_live(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -149,7 +149,7 @@ def test_a_failure_while_streaming_is_an_error_event(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     class _Down:
-        async def generate(self, prompt: str, system: str | None = None) -> str:
+        async def generate(self, prompt: str, system: str | None = None) -> Generation:
             raise ConnectionError("ollama down")
 
     monkeypatch.setattr(node_types_module, "get_provider", lambda spec: _Down())

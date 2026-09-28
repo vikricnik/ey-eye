@@ -2,13 +2,26 @@ import time
 
 import pytest
 
+from llm_pipeline.pipeline_config import ExecutionConfig
 from llm_pipeline.providers import (
     CircuitBreaker,
+    Generation,
     ModelSpec,
     ProviderError,
     ProviderType,
+    RetryPolicy,
     generate_with_retry,
 )
+
+# Two attempts, barely waiting in between.
+_QUICK_RETRY = RetryPolicy(timeout_seconds=5.0, max_attempts=2, backoff_base_seconds=0.01)
+
+
+def test_a_pipelines_retries_are_attempts_after_the_first() -> None:
+    execution = ExecutionConfig(model_timeout_seconds=30, max_retries=2, retry_backoff_seconds=0.5)
+    assert RetryPolicy.from_execution(execution) == RetryPolicy(
+        timeout_seconds=30, max_attempts=3, backoff_base_seconds=0.5
+    )
 
 
 def test_circuit_starts_closed() -> None:
@@ -57,15 +70,15 @@ class _FlakyProvider:
         self.success_message = success_message
         self.call_count = 0
 
-    async def generate(self, prompt: str, system: str | None = None) -> str:
+    async def generate(self, prompt: str, system: str | None = None) -> Generation:
         self.call_count += 1
         if self.call_count <= self.fail_times:
             raise RuntimeError("transient failure")
-        return self.success_message
+        return Generation(self.success_message)
 
 
 class _AlwaysFailingProvider:
-    async def generate(self, prompt: str, system: str | None = None) -> str:
+    async def generate(self, prompt: str, system: str | None = None) -> Generation:
         raise RuntimeError("permanent failure")
 
 
@@ -74,9 +87,7 @@ async def test_retry_recovers_from_transient_failure() -> None:
     provider = _FlakyProvider(fail_times=1)  # fails once, then succeeds
     spec = ModelSpec(ProviderType.OLLAMA, "retry-test-model-1")
 
-    result = await generate_with_retry(
-        provider, "prompt", spec, timeout_seconds=5.0, max_attempts=2, backoff_base_seconds=0.01
-    )
+    result = await generate_with_retry(provider, "prompt", spec, _QUICK_RETRY)
     assert result.text == "ok"
     assert provider.call_count == 2  # first attempt failed, second succeeded
 
@@ -87,7 +98,5 @@ async def test_retry_gives_up_after_max_attempts() -> None:
     spec = ModelSpec(ProviderType.OLLAMA, "retry-test-model-2")
 
     with pytest.raises(ProviderError):
-        await generate_with_retry(
-            provider, "prompt", spec, timeout_seconds=5.0, max_attempts=2, backoff_base_seconds=0.01
-        )
+        await generate_with_retry(provider, "prompt", spec, _QUICK_RETRY)
     # exactly max_attempts calls were made, not more

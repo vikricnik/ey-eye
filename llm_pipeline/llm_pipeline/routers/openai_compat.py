@@ -287,12 +287,12 @@ async def chat_completions(
     cache: PipelineCache = Depends(get_pipeline_cache),
 ) -> ChatCompletion | StreamingResponse:
     prompt, history = conversation(body.messages)
-    req = RunRequest(prompt=prompt, history=history)
+    run_request = RunRequest(prompt=prompt, history=history)
     completion_id = f"chatcmpl-{uuid.uuid4().hex}"
     created = int(time.time())
 
     if not body.stream:
-        answer = await run_pipeline(body.model, req, cache, request)
+        answer = await run_pipeline(body.model, run_request, cache, request)
         return ChatCompletion(
             id=completion_id,
             created=created,
@@ -301,7 +301,7 @@ async def chat_completions(
             usage=total_usage(answer.node_outputs.values()),
         )
 
-    definition, graph, initial_state = await prepare_run(body.model, req, cache)
+    run = await prepare_run(body.model, run_request, cache)
     include_usage = body.stream_options is not None and body.stream_options.include_usage
 
     def chunk(delta: Delta, finish: bool = False) -> str:
@@ -314,10 +314,10 @@ async def chat_completions(
         return f"data: {data.model_dump_json(exclude_none=True)}\n\n"
 
     async def stream() -> AsyncGenerator[str, None]:
-        live = live_output_node(definition)
+        live = live_output_node(run.definition)
         streamed = False
         yield chunk(Delta(role="assistant", content=""))
-        async for _kind, data in pipeline_events(request, definition, graph, initial_state):
+        async for _kind, data in pipeline_events(request, run):
             if isinstance(data, NodeTokenEvent) and data.node_id == live:
                 streamed = True
                 yield chunk(Delta(content=data.text))

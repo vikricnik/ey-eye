@@ -47,9 +47,9 @@ PIPELINE: dict[str, Any] = {
 
 def _provider_for(spec: ModelSpec) -> Any:
     class _Provider:
-        async def generate(self, prompt: str, system: str | None = None) -> str | Generation:
+        async def generate(self, prompt: str, system: str | None = None) -> Generation:
             if spec.model == "silent":
-                return "plain text, no usage"  # backends may report nothing
+                return Generation("plain text, no usage")  # backends may report nothing
             return Generation(
                 f"<{spec.model}>",
                 Usage(prompt_tokens=3900, completion_tokens=100, generation_ms=2000.0),

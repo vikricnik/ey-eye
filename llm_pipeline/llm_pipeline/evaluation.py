@@ -37,7 +37,7 @@ from llm_pipeline.pipeline_config import EvalCase, EvalExpectation, EvalJudge, P
 from llm_pipeline.pipeline_config.effective import effective_model
 from llm_pipeline.pipeline_config.schema import DEFAULT_TEMPERATURE
 from llm_pipeline.pipeline_config.templates import render
-from llm_pipeline.providers import ModelSpec, generate_with_retry, get_provider
+from llm_pipeline.providers import ModelSpec, RetryPolicy, generate_with_retry, get_provider
 from llm_pipeline.providers.resilience import CircuitBreaker
 from llm_pipeline.safe_eval import evaluate_condition
 from llm_pipeline.state import NodeResult, PipelineState
@@ -78,9 +78,7 @@ def make_judge(
             get_provider(spec),
             prompt,
             spec,
-            execution.model_timeout_seconds,
-            max_attempts=execution.max_retries + 1,
-            backoff_base_seconds=execution.retry_backoff_seconds,
+            RetryPolicy.from_execution(execution),
             circuit_breaker=circuit_breaker,
         )
         return generation.text

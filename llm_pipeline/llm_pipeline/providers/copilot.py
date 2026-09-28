@@ -1,4 +1,4 @@
-from llm_pipeline.providers.base import ModelSpec
+from llm_pipeline.providers.base import Generation, ModelSpec
 
 
 class CopilotProvider:
@@ -15,7 +15,7 @@ class CopilotProvider:
     def __init__(self, spec: ModelSpec) -> None:
         self._spec = spec
 
-    async def generate(self, prompt: str, system: str | None = None) -> str:
+    async def generate(self, prompt: str, system: str | None = None) -> Generation:
         raise NotImplementedError(
             "CopilotProvider is a placeholder — no public general-purpose completion "
             "API exists for Copilot today. Implement generate() if you have access to "

@@ -15,6 +15,7 @@ no shared global to leak through.
 """
 
 from pathlib import Path
+from typing import NamedTuple
 
 from fastapi import Request
 from langgraph.graph.state import CompiledStateGraph
@@ -31,6 +32,13 @@ from llm_pipeline.providers.resilience import CircuitBreaker
 
 # (mtime_ns, size) of the file a cache entry was built from.
 _FileStamp = tuple[int, int]
+
+
+class LoadedPipeline(NamedTuple):
+    """A pipeline as loaded from its file, and compiled ready to run."""
+
+    definition: PipelineDefinition
+    graph: CompiledStateGraph
 
 
 class PipelineCache:
@@ -63,9 +71,9 @@ class PipelineCache:
         # Handed to every node this cache builds (see node_types.ContextProbe).
         self.context_probe = context_probe
         self._provider_factory = provider_factory
-        self._cache: dict[str, tuple[_FileStamp, PipelineDefinition, CompiledStateGraph]] = {}
+        self._cache: dict[str, tuple[_FileStamp, LoadedPipeline]] = {}
 
-    def get(self, name: str) -> tuple[PipelineDefinition, CompiledStateGraph]:
+    def get(self, name: str) -> LoadedPipeline:
         """Returns the compiled pipeline, rebuilding it whenever the file on
         disk has changed since it was cached (checked by mtime + size — one
         stat() per call). That keeps every worker process current after an
@@ -84,12 +92,12 @@ class PipelineCache:
 
         cached = self._cache.get(name)
         if cached is not None and cached[0] == stamp:
-            return cached[1], cached[2]
+            return cached[1]
 
         definition = load_pipeline_definition(yaml_path)
-        graph = build_graph(definition, self.node_services)
-        self._cache[name] = (stamp, definition, graph)
-        return definition, graph
+        loaded = LoadedPipeline(definition, build_graph(definition, self.node_services))
+        self._cache[name] = (stamp, loaded)
+        return loaded
 
     @property
     def node_services(self) -> NodeServices:

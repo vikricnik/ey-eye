@@ -30,6 +30,7 @@ from llm_pipeline.providers import (
     ModelSpec,
     ProviderError,
     ProviderType,
+    RetryPolicy,
     Usage,
     generate_with_retry,
     get_provider,
@@ -249,9 +250,7 @@ def build_llm_call_node(
                 provider,
                 prompt,
                 spec,
-                execution.model_timeout_seconds,
-                max_attempts=execution.max_retries + 1,
-                backoff_base_seconds=execution.retry_backoff_seconds,
+                RetryPolicy.from_execution(execution),
                 circuit_breaker=services.circuit_breaker,
                 system=effective.system_prompt,
                 # A retry restarts the model's output from scratch, so it is

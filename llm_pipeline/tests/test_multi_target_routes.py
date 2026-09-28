@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from llm_pipeline.dag_builder import NodeServices, build_graph
 from llm_pipeline.pipeline_config import PipelineDefinition, Topology
 from llm_pipeline.pipeline_store import definition_to_yaml, parse_definition_yaml
+from llm_pipeline.providers import Generation
 from llm_pipeline.rerun import downstream
 
 
@@ -47,9 +48,11 @@ class _Answers:
         self.classifier_answer = classifier_answer
         self.prompts: list[str] = []
 
-    async def generate(self, prompt: str, system: str | None = None) -> str:
+    async def generate(self, prompt: str, system: str | None = None) -> Generation:
         self.prompts.append(prompt)
-        return self.classifier_answer if prompt.startswith("classify") else f"out({prompt})"
+        return Generation(
+            self.classifier_answer if prompt.startswith("classify") else f"out({prompt})"
+        )
 
 
 async def _run(definition: PipelineDefinition, provider: _Answers) -> dict[str, Any]:
