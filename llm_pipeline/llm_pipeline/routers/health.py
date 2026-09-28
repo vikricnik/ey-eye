@@ -79,7 +79,7 @@ async def get_pipeline_definition(
     try:
         definition, _ = cache.get(name)
     except PipelineNotFoundError:
-        raise ApiError(404, ErrorCode.PIPELINE_NOT_FOUND, f"No pipeline named '{name}'") from None
+        raise ApiError(ErrorCode.PIPELINE_NOT_FOUND, f"No pipeline named '{name}'") from None
 
     return PipelineDetailResponse(
         name=definition.name,

@@ -175,7 +175,7 @@ def test_rerun_from_an_unknown_node_is_rejected(client: TestClient) -> None:
         "/ask",
         json={"prompt": "q", "pipeline_name": "consensus-qa", "rerun": {"from_node": "nope"}},
     )
-    assert response.status_code == 400
+    assert response.status_code == 404
     assert response.json()["code"] == "NODE_NOT_FOUND"
     assert "no such node" in response.json()["message"]
 

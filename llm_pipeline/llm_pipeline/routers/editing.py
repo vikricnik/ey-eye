@@ -40,7 +40,7 @@ from llm_pipeline.auth import require_api_key
 from llm_pipeline.dag_builder import build_graph
 from llm_pipeline.disconnects import until_disconnected
 from llm_pipeline.error_handling import ERROR_RESPONSES
-from llm_pipeline.errors import DefinitionInvalidError, PipelineNotFoundError
+from llm_pipeline.errors import PipelineNotFoundError
 from llm_pipeline.evaluation import Variant, make_judge, run_tests
 from llm_pipeline.pipeline_config import EvalCase, PipelineDefinition
 from llm_pipeline.pipeline_loader import PipelineCache, get_pipeline_cache
@@ -64,14 +64,13 @@ router = APIRouter(dependencies=[Depends(require_api_key), Depends(enforce_rate_
 async def require_editing_enabled() -> None:
     if not settings.pipeline_editing_enabled:
         raise ApiError(
-            403,
             ErrorCode.EDITING_DISABLED,
             "Pipeline editing is disabled on this server — set "
             "PIPELINE_EDITING_ENABLED=true to allow saving from clients",
         )
     reason = settings.editing_block_reason
     if reason is not None:
-        raise ApiError(403, ErrorCode.EDITING_DISABLED, f"Pipeline {reason}")
+        raise ApiError(ErrorCode.EDITING_DISABLED, f"Pipeline {reason}")
 
 
 @router.get(
@@ -120,7 +119,6 @@ async def get_ollama_model_limits(
     found = await store.catalog.limits(name)
     if found is None:
         raise ApiError(
-            404,
             ErrorCode.MODEL_NOT_FOUND,
             f"No details for Ollama model '{name}' (not installed, or Ollama unreachable)",
         )
@@ -146,7 +144,7 @@ async def get_pipeline_full_definition(
     try:
         stored = store.read_pipeline(name)
     except PipelineNotFoundError:
-        raise ApiError(404, ErrorCode.PIPELINE_NOT_FOUND, f"No pipeline named '{name}'") from None
+        raise ApiError(ErrorCode.PIPELINE_NOT_FOUND, f"No pipeline named '{name}'") from None
     return PipelineDefinitionResponse(
         definition=definition_to_json(stored.definition),
         revision=stored.revision,
@@ -157,7 +155,7 @@ async def get_pipeline_full_definition(
 @router.post(
     "/pipelines/validate",
     response_model=ValidatePipelineResponse,
-    responses={k: ERROR_RESPONSES[k] for k in (400, 401, 422, 429)},
+    responses={k: ERROR_RESPONSES[k] for k in (401, 422, 429)},
 )
 async def validate_pipeline(
     req: ValidatePipelineRequest, store: PipelineStore = Depends(get_pipeline_store)
@@ -167,7 +165,7 @@ async def validate_pipeline(
     (YAML in) and export (canonical YAML out). Never writes anything, so
     it doesn't need editing to be enabled."""
     if (req.definition is None) == (req.yaml is None):
-        raise ApiError(400, ErrorCode.REQUEST_INVALID, "send exactly one of 'definition' or 'yaml'")
+        raise ApiError(ErrorCode.REQUEST_INVALID, "send exactly one of 'definition' or 'yaml'")
     definition = (
         parse_definition(req.definition)
         if req.definition is not None
@@ -198,10 +196,10 @@ async def preview_node_prompt(req: PreviewPromptRequest) -> PreviewPromptRespons
             definition, req.node_id, req.prompt, req.history, req.outputs
         )
     except KeyError as e:
-        raise ApiError(404, ErrorCode.NODE_NOT_FOUND, f"no node '{req.node_id}'") from e
+        raise ApiError(ErrorCode.NODE_NOT_FOUND, f"no node '{req.node_id}'") from e
     except Exception as e:  # the sandbox's SecurityError, undefined variables, …
         raise ApiError(
-            422, ErrorCode.TEMPLATE_RENDER_FAILED, f"the prompt can't be rendered: {e}"
+            ErrorCode.TEMPLATE_RENDER_FAILED, f"the prompt can't be rendered: {e}"
         ) from e
     return PreviewPromptResponse(
         prompt=preview.prompt, system=preview.system, missing=preview.missing
@@ -217,7 +215,9 @@ def _with_models(
     nodes = {node["id"]: node for node in data["nodes"]}
     for node_id, model in models.items():
         if node_id not in nodes:
-            raise DefinitionInvalidError(f"variant: no node '{node_id}' in '{base.name}'", node_id)
+            raise ApiError(
+                ErrorCode.NODE_NOT_FOUND, f"variant: no node '{node_id}' in '{base.name}'"
+            )
         nodes[node_id]["model"] = model
     return parse_definition(data)
 
@@ -227,7 +227,7 @@ def _with_models(
     # Runs models and templates a client chose: the same trust as saving.
     dependencies=[Depends(require_editing_enabled)],
     responses={
-        **{k: ERROR_RESPONSES[k] for k in (400, 401, 403, 404, 422, 429)},
+        **{k: ERROR_RESPONSES[k] for k in (401, 403, 404, 422, 429)},
         200: {
             "content": {"text/event-stream": {}},
             "description": "case_start / case_result per case and variant, then tests_done",
@@ -247,7 +247,7 @@ async def run_pipeline_tests(
         by_name = {case.name: case for case in cases}
         unknown = [name for name in req.cases if name not in by_name]
         if unknown:
-            raise ApiError(404, ErrorCode.TEST_CASE_NOT_FOUND, f"no test case named '{unknown[0]}'")
+            raise ApiError(ErrorCode.TEST_CASE_NOT_FOUND, f"no test case named '{unknown[0]}'")
         cases = [by_name[name] for name in req.cases]
     cases = cases + [
         EvalCase(name=f"message {i}", input=text)
@@ -255,13 +255,12 @@ async def run_pipeline_tests(
     ]
     if not cases:
         raise ApiError(
-            400,
             ErrorCode.REQUEST_INVALID,
             "no test cases to run — add some, or send a message to try",
         )
     labels = ["current", *(v.label for v in req.variants)]
     if len(set(labels)) != len(labels):
-        raise ApiError(400, ErrorCode.REQUEST_INVALID, "each variant needs its own label")
+        raise ApiError(ErrorCode.REQUEST_INVALID, "each variant needs its own label")
 
     definitions = [base, *(_with_models(base, v.models) for v in req.variants)]
     for definition in definitions:
@@ -323,7 +322,7 @@ async def delete_pipeline(
     try:
         moved = await store.delete_pipeline(name, revision)
     except PipelineNotFoundError:
-        raise ApiError(404, ErrorCode.PIPELINE_NOT_FOUND, f"No pipeline named '{name}'") from None
+        raise ApiError(ErrorCode.PIPELINE_NOT_FOUND, f"No pipeline named '{name}'") from None
     return DeletedResponse(name=name, recoverable_as=moved)
 
 
@@ -349,7 +348,7 @@ async def get_preset(
     try:
         stored = store.read_preset(name)
     except FileNotFoundError:
-        raise ApiError(404, ErrorCode.PRESET_NOT_FOUND, f"No preset named '{name}'") from None
+        raise ApiError(ErrorCode.PRESET_NOT_FOUND, f"No preset named '{name}'") from None
     return PresetResponse(
         preset=stored.preset.model_dump(mode="json", exclude_none=True), revision=stored.revision
     )
@@ -383,5 +382,5 @@ async def delete_preset(
     try:
         moved = await store.delete_preset(name)
     except FileNotFoundError:
-        raise ApiError(404, ErrorCode.PRESET_NOT_FOUND, f"No preset named '{name}'") from None
+        raise ApiError(ErrorCode.PRESET_NOT_FOUND, f"No preset named '{name}'") from None
     return DeletedResponse(name=name, recoverable_as=moved)

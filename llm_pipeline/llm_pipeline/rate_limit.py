@@ -33,7 +33,7 @@ class RateLimiter:
         self._requests: dict[str, deque[float]] = defaultdict(deque)
 
     def check(self, client_id: str) -> None:
-        """Raises ApiError(429) if client_id is over the limit;
+        """Raises ApiError(RATE_LIMITED) if client_id is over the limit;
         otherwise records this request and returns."""
         now = time.monotonic()
         history = self._requests[client_id]
@@ -44,7 +44,6 @@ class RateLimiter:
         if len(history) >= self.requests_per_window:
             retry_after = self.window_seconds - (now - history[0])
             raise ApiError(
-                429,
                 ErrorCode.RATE_LIMITED,
                 (
                     f"Rate limit exceeded: {self.requests_per_window} requests per "

@@ -805,15 +805,19 @@ helper:
 | `details` | Extra structured context: `retry_after_seconds` for rate limits, `node_id` (or `loop_id`) when a node is at fault; `{}` otherwise |
 | `validations` | One entry per field problem, **only** non-empty for `422` schema validation errors — each entry is `{"field": ..., "message": ..., "type": ...}` |
 
-The codes (`ErrorCode` in `api_schemas.py`). New codes may be added, so a
-client should handle a code it doesn't know by its `status`.
+The codes (`ErrorCode` in `api_schemas.py`). **Each code always comes with
+the same status** (`STATUS_BY_CODE` in `api_error.py` — `ApiError` takes its
+status from there, so no endpoint can send a different one). A request that
+names something that doesn't exist gets a `404` whether the name is in the
+path or the body, as OpenAI's API does for an unknown `model`. New codes may
+be added, so a client should handle a code it doesn't know by its `status`.
 
 | `code` | Status | When |
 |---|---|---|
-| `REQUEST_INVALID` | `422` / `400` | The request body fails schema validation (`validations` lists each problem), or asks for something contradictory (e.g. both `definition` and `yaml`) |
+| `REQUEST_INVALID` | `422` | The request body fails schema validation (`validations` lists each problem), or asks for something contradictory (e.g. both `definition` and `yaml`) |
 | `UNAUTHENTICATED` | `401` | Missing or unknown API key (when `API_KEYS` is set) |
 | `RATE_LIMITED` | `429` | Rate limit exceeded — `Retry-After` header, mirrored in `details.retry_after_seconds` |
-| `INTERNAL_ERROR` | `500` (`502` during a run) | A genuinely unexpected exception (a bug) — quote `exceptionUID` when reporting it |
+| `INTERNAL_ERROR` | `500` | A genuinely unexpected exception (a bug) — `message` stays generic; quote `exceptionUID` when reporting it, the server log has the rest |
 | `NAME_INVALID` | `400` | A pipeline or preset name that isn't filename-safe (`^[a-zA-Z0-9_-]+$`) |
 | `PIPELINE_NOT_FOUND` | `404` | No pipeline with that name |
 | `PRESET_NOT_FOUND` | `404` | No preset with that name |
@@ -826,10 +830,10 @@ client should handle a code it doesn't know by its `status`.
 | `PIPELINE_PROTECTED` | `409` | Deleting the server's default pipeline |
 | `INPUT_INVALID` | `400` | An empty prompt, or an OpenAI chat that doesn't end with the user's message |
 | `INPUT_TOO_LARGE` | `400` | The prompt, a history turn or a re-run's outputs exceed the configured length caps |
-| `NODE_NOT_FOUND` | `400` / `404` | `rerun.from_node`, or a prompt preview's `node_id`, isn't in the pipeline |
+| `NODE_NOT_FOUND` | `404` | `rerun.from_node`, a prompt preview's `node_id`, or a test variant's node isn't in the pipeline |
 | `TEST_CASE_NOT_FOUND` | `404` | A test run names a case the definition doesn't have |
 | `TEMPLATE_RENDER_FAILED` | `422` | A prompt preview's template can't be rendered |
-| `PIPELINE_RUN_FAILED` | `503` / `502` | A node fails after retries are exhausted, a loop hits `max_iterations` with `on_max_iterations: fail` (`details` names the node or loop), or no `output_node` candidate produced a result |
+| `PIPELINE_RUN_FAILED` | `502` | A node fails — its model call after retries are exhausted, or its prompt can't be rendered — or a loop hits `max_iterations` with `on_max_iterations: fail` (`details` names the node or loop), or no `output_node` candidate produced a result |
 | `REQUEST_CANCELLED` | `499` | The client disconnected mid-run — logged only, nobody receives it |
 
 `pipeline_name` is validated against a strict filename-safe pattern

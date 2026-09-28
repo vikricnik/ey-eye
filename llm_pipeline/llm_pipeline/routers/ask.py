@@ -45,11 +45,10 @@ router = APIRouter()
 
 def _validate_prompt_and_history(req: AskRequest) -> None:
     if not req.prompt.strip():
-        raise ApiError(400, ErrorCode.INPUT_INVALID, "prompt cannot be empty")
+        raise ApiError(ErrorCode.INPUT_INVALID, "prompt cannot be empty")
 
     if len(req.prompt) > settings.max_prompt_length:
         raise ApiError(
-            400,
             ErrorCode.INPUT_TOO_LARGE,
             f"prompt exceeds max_prompt_length ({len(req.prompt)} > "
             f"{settings.max_prompt_length} characters)",
@@ -58,20 +57,17 @@ def _validate_prompt_and_history(req: AskRequest) -> None:
     for i, turn in enumerate(req.history):
         if len(turn.prompt) > settings.max_history_turn_length:
             raise ApiError(
-                400,
                 ErrorCode.INPUT_TOO_LARGE,
                 f"history[{i}].prompt exceeds max_history_turn_length",
             )
         if len(turn.final_answer) > settings.max_history_turn_length:
             raise ApiError(
-                400,
                 ErrorCode.INPUT_TOO_LARGE,
                 f"history[{i}].final_answer exceeds max_history_turn_length",
             )
         for node_id, text in turn.outputs.items():
             if len(text) > settings.max_history_turn_length:
                 raise ApiError(
-                    400,
                     ErrorCode.INPUT_TOO_LARGE,
                     f"history[{i}].outputs.{node_id} exceeds max_history_turn_length",
                 )
@@ -142,7 +138,7 @@ async def prepare_ask(
     try:
         definition, graph = cache.get(req.pipeline_name)
     except PipelineNotFoundError as e:
-        raise ApiError(404, ErrorCode.PIPELINE_NOT_FOUND, str(e)) from e
+        raise ApiError(ErrorCode.PIPELINE_NOT_FOUND, str(e)) from e
 
     replay = _replay(req, definition)
     prepared = await prepare_input(
@@ -167,18 +163,34 @@ def _replay(req: AskRequest, definition: PipelineDefinition) -> dict[str, str]:
         return {}
     if not any(n.id == req.rerun.from_node for n in definition.nodes):
         raise ApiError(
-            400,
             ErrorCode.NODE_NOT_FOUND,
             f"can't re-run from '{req.rerun.from_node}': no such node in '{definition.name}'",
         )
     for node_id, text in req.rerun.outputs.items():
         if len(text) > settings.max_history_turn_length:
             raise ApiError(
-                400,
                 ErrorCode.INPUT_TOO_LARGE,
                 f"rerun.outputs.{node_id} exceeds max_history_turn_length",
             )
     return replay_outputs(definition, req.rerun.from_node, req.rerun.outputs)
+
+
+# An unexpected failure is a bug: its text stays in the server log (found
+# by exceptionUID), not in the response.
+UNEXPECTED_RUN_FAILURE = "Internal server error while running the pipeline"
+
+
+def _failure_details(e: PipelineExecutionError) -> dict[str, object]:
+    """Which node or loop a failed run is attributable to, when known — so
+    a live-status client (the visual DAG graph) can mark that specific one
+    instead of only knowing the run as a whole failed. See
+    PipelineExecutionError's docstring and
+    specs/001-visual-dag-graph/contracts/pipeline-detail-api.md."""
+    if e.node_id is not None:
+        return {"node_id": e.node_id}
+    if e.loop_id is not None:
+        return {"loop_id": e.loop_id}
+    return {}
 
 
 def node_dtos(node_outputs: dict[str, NodeResult]) -> dict[str, NodeOutputDTO]:
@@ -203,7 +215,7 @@ def _resolve_output_node(
     "/ask",
     response_model=AskResponse,
     dependencies=[Depends(require_api_key), Depends(enforce_rate_limit)],
-    responses={k: ERROR_RESPONSES[k] for k in (400, 401, 404, 422, 429, 502, 503)},
+    responses={k: ERROR_RESPONSES[k] for k in (400, 401, 404, 422, 429, 500, 502)},
 )
 async def ask(
     req: AskRequest,
@@ -234,17 +246,16 @@ async def run_ask(req: AskRequest, cache: PipelineCache, request: Request) -> As
         raise  # the client disconnected
     except PipelineExecutionError as e:
         logger.exception(f"Pipeline '{req.pipeline_name}' run failed")
-        raise ApiError(503, ErrorCode.PIPELINE_RUN_FAILED, str(e)) from e
+        raise ApiError(ErrorCode.PIPELINE_RUN_FAILED, str(e), details=_failure_details(e)) from e
     except Exception as e:
         logger.exception(f"Pipeline '{req.pipeline_name}' run failed unexpectedly")
-        raise ApiError(502, ErrorCode.INTERNAL_ERROR, f"Pipeline error: {e}") from e
+        raise ApiError(ErrorCode.INTERNAL_ERROR, UNEXPECTED_RUN_FAILURE) from e
 
     node_outputs = final_state["node_outputs"]
     resolved_output_node = _resolve_output_node(definition, node_outputs)
 
     if resolved_output_node is None:
         raise ApiError(
-            502,
             ErrorCode.PIPELINE_RUN_FAILED,
             f"Pipeline completed but none of its output_node candidates "
             f"({', '.join(definition.output_node_candidates)}) produced a result",
@@ -432,29 +443,18 @@ async def pipeline_events(
                     # `{}` update) carries no client-visible information — skip.
     except PipelineExecutionError as e:
         logger.exception(f"Pipeline '{req.pipeline_name}' stream failed")
-        # Lets a live-status client (the visual DAG graph) mark the
-        # SPECIFIC node/loop this failure is attributable to, when known —
-        # see PipelineExecutionError's docstring and
-        # specs/001-visual-dag-graph/contracts/pipeline-detail-api.md.
-        details: dict[str, object] = {}
-        if e.node_id is not None:
-            details["node_id"] = e.node_id
-        elif e.loop_id is not None:
-            details["loop_id"] = e.loop_id
         yield (
             "error",
             build_error_response(
-                request, 503, str(e), code=ErrorCode.PIPELINE_RUN_FAILED, details=details
+                request, ErrorCode.PIPELINE_RUN_FAILED, str(e), details=_failure_details(e)
             ),
         )
         return
-    except Exception as e:
+    except Exception:
         logger.exception(f"Pipeline '{req.pipeline_name}' stream failed unexpectedly")
         yield (
             "error",
-            build_error_response(
-                request, 502, f"Pipeline error: {e}", code=ErrorCode.INTERNAL_ERROR
-            ),
+            build_error_response(request, ErrorCode.INTERNAL_ERROR, UNEXPECTED_RUN_FAILURE),
         )
         return
 
@@ -464,10 +464,9 @@ async def pipeline_events(
             "error",
             build_error_response(
                 request,
-                502,
+                ErrorCode.PIPELINE_RUN_FAILED,
                 f"Pipeline completed but none of its output_node candidates "
                 f"({', '.join(definition.output_node_candidates)}) produced a result",
-                code=ErrorCode.PIPELINE_RUN_FAILED,
             ),
         )
         return

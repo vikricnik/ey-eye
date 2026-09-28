@@ -45,7 +45,7 @@ problems are where the parts meet:
 |----|----------|-------|
 | [API-001](#api-001-v1-means-openai-compatible-not-api-version-1) | CRITICAL | `/v1/` means "OpenAI-compatible", not "API version 1" — ✅ fixed |
 | [API-002](#api-002-errors-have-no-machine-readable-code) | WARNING | Errors have no machine-readable code — ✅ fixed |
-| [API-003](#api-003-status-codes-disagree-for-the-same-kind-of-failure) | WARNING | Status codes disagree for the same kind of failure |
+| [API-003](#api-003-status-codes-disagree-for-the-same-kind-of-failure) | WARNING | Status codes disagree for the same kind of failure — ✅ fixed |
 | [API-004](#api-004-get-pipelinesname-doesnt-return-what-put-accepts) | WARNING | `GET /pipelines/{name}` doesn't return what `PUT` accepts |
 | [API-005](#api-005-optimistic-concurrency-is-spelled-three-different-ways) | WARNING | Optimistic concurrency is spelled three different ways |
 | [API-006](#api-006-rpc-style-endpoints-with-the-pipeline-named-in-the-body) | WARNING | RPC-style endpoints, with the pipeline named in the body |
@@ -142,6 +142,22 @@ working around them.
 ### API-003: Status codes disagree for the same kind of failure
 
 - **Severity**: WARNING
+- **Status**: ✅ Fixed (2026-09-28), with one change from the recommendation
+  below. Each `ErrorCode` now has exactly one status, in `STATUS_BY_CODE`
+  (`api_error.py`), and `ApiError` takes its status from it, so a raise site
+  can't pick a different one. Unknown references are **404**
+  (`NODE_NOT_FOUND`, `TEST_CASE_NOT_FOUND`), not the 422 recommended below:
+  `/ask` already returns 404 for an unknown `pipeline_name` in its body, and
+  the OpenAI-compatible endpoint must return 404 for an unknown `model`, as
+  OpenAI does. With `code` (API-002), a 404 can no longer be mistaken for a
+  missing endpoint. The other changes:
+  - `PIPELINE_RUN_FAILED` is 502.
+  - Unexpected failures are 500 `INTERNAL_ERROR` with a generic message,
+    and no longer echo exception text.
+  - `REQUEST_INVALID` is always 422.
+  - A node whose template the sandbox refuses now fails as that node
+    (`PIPELINE_RUN_FAILED`, `details.node_id`), not as an unexpected error.
+  - `/ask` now includes `details.node_id` / `loop_id` like the stream does.
 - **Principle**: HTTP conventions; least surprise
 - **File(s)**:
   - [editing.py:198-201](llm_pipeline/llm_pipeline/routers/editing.py#L198-L201)

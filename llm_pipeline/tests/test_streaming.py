@@ -188,7 +188,7 @@ def test_stream_provider_failure_yields_error_event_with_200_status(
         json={"prompt": "hello", "pipeline_name": "simple-local", "history": []},
     )
 
-    assert response.status_code == 200  # NOT 503, even though the pipeline failed
+    assert response.status_code == 200  # NOT 502, even though the pipeline failed
     events = _parse_sse_events(response.text)
 
     # The node genuinely started, retried once (simple-local keeps the
@@ -210,7 +210,7 @@ def test_stream_provider_failure_yields_error_event_with_200_status(
         "details",
         "validations",
     }
-    assert data["status"] == 503
+    assert data["status"] == 502
     assert data["code"] == "PIPELINE_RUN_FAILED"
     # FR-012 (visual DAG graph): a live-status client needs to know WHICH
     # node failed, not just that the run as a whole did — simple-local has

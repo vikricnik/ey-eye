@@ -1,4 +1,5 @@
 import ast
+import json
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -8,6 +9,9 @@ from fastapi.testclient import TestClient
 
 import llm_pipeline
 import llm_pipeline.rate_limit as rate_limit_module
+import llm_pipeline.routers.ask as ask_module
+from llm_pipeline.api_error import STATUS_BY_CODE
+from llm_pipeline.api_schemas import ErrorCode
 from llm_pipeline.error_handling import register_exception_handlers
 from llm_pipeline.main import app
 from llm_pipeline.settings import settings
@@ -202,6 +206,35 @@ def test_the_api_raises_coded_errors_not_bare_http_exceptions() -> None:
             if name == "HTTPException":
                 bare.append(f"{path.relative_to(package)}:{node.lineno}")
     assert bare == []
+
+
+def test_every_code_always_comes_with_the_same_status() -> None:
+    """A client that knows the code knows the status: ApiError takes its
+    status from this table, so the two can't disagree at a raise site."""
+    assert set(STATUS_BY_CODE) == set(ErrorCode)
+    assert all(400 <= status <= 599 for status in STATUS_BY_CODE.values())
+
+
+def test_an_unexpected_failure_during_a_run_is_a_500_that_keeps_its_details_private(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def broken(definition: object) -> None:
+        raise RuntimeError("secret internals")
+
+    monkeypatch.setattr(ask_module, "_run_config", broken)
+    run = {"prompt": "hi", "pipeline_name": "simple-local", "history": []}
+
+    answered = client.post("/ask", json=run)
+    assert answered.status_code == 500
+    _assert_matches_error_shape(answered.json())
+    assert answered.json()["code"] == "INTERNAL_ERROR"
+    assert "secret internals" not in answered.text
+
+    streamed = client.post("/ask/stream", json=run)
+    error_block = next(b for b in streamed.text.split("\n\n") if b.startswith("event: error"))
+    event = json.loads(error_block.split("data: ", 1)[1])
+    assert event["status"] == 500 and event["code"] == "INTERNAL_ERROR"
+    assert "secret internals" not in streamed.text
 
 
 def test_exception_uid_is_consistent_within_one_request(client: TestClient) -> None:

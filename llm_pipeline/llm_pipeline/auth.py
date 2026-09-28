@@ -65,7 +65,6 @@ async def require_api_key(
     presented = _extract_key(authorization, x_api_key)
     if presented is None:
         raise ApiError(
-            401,
             ErrorCode.UNAUTHENTICATED,
             "Missing API key — provide 'Authorization: Bearer <key>' or 'X-API-Key: <key>'",
         )
@@ -74,4 +73,4 @@ async def require_api_key(
         if secrets.compare_digest(presented, valid_key):
             return
 
-    raise ApiError(401, ErrorCode.UNAUTHENTICATED, "Invalid API key")
+    raise ApiError(ErrorCode.UNAUTHENTICATED, "Invalid API key")

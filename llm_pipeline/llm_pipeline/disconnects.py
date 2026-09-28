@@ -36,7 +36,7 @@ async def cancel_on_disconnect(request: Request, work: Awaitable[T]) -> T:
                 task.cancel()
                 with suppress(asyncio.CancelledError):
                     await task
-                raise ApiError(499, ErrorCode.REQUEST_CANCELLED, "the client closed the request")
+                raise ApiError(ErrorCode.REQUEST_CANCELLED, "the client closed the request")
         return task.result()
     finally:
         task.cancel()  # a no-op once done; stops the work if this handler was cancelled

@@ -107,11 +107,11 @@ class OpenAIErrorRoute(APIRoute):
             except HTTPException as exc:
                 body = error_response_from_http_exception(request, exc)
                 return JSONResponse(
-                    openai_error(body), status_code=exc.status_code, headers=exc.headers
+                    openai_error(body), status_code=body.status, headers=exc.headers
                 )
             except RequestValidationError as exc:
                 body = error_response_from_validation_error(request, exc)
-                return JSONResponse(openai_error(body), status_code=422)
+                return JSONResponse(openai_error(body), status_code=body.status)
 
         return handle_with_openai_errors
 
@@ -228,7 +228,7 @@ def conversation(messages: list[ChatMessage]) -> tuple[str, list[ConversationTur
     answers the user message(s) before it; system messages are dropped."""
     exchange = [m for m in messages if m.role in ("user", "assistant")]
     if not exchange or exchange[-1].role != "user":
-        raise ApiError(400, ErrorCode.INPUT_INVALID, "the last message must be the user's")
+        raise ApiError(ErrorCode.INPUT_INVALID, "the last message must be the user's")
 
     history: list[ConversationTurn] = []
     asked: list[str] = []

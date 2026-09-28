@@ -316,7 +316,7 @@ pipeline tiers anymore, since a pipeline's shape is whatever its YAML defines.
 
 ## Error handling
 
-Every server error — 400/401/404/422/429/502/503, and even a genuine
+Every server error — 400/401/403/404/409/422/429/502, and even a genuine
 unhandled 500 — comes back as one consistent structured object. When a
 request fails, the transcript shows the error message plus a small
 "reference id" line (the server's `exceptionUID`, same value as its logged

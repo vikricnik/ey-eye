@@ -213,7 +213,7 @@ def test_a_variant_may_only_use_allowed_models(client: TestClient) -> None:
 
 def test_test_run_problems(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     nothing = client.post("/pipelines/test", json={"definition": _definition()})
-    assert nothing.status_code == 400
+    assert nothing.status_code == 422
     assert nothing.json()["code"] == "REQUEST_INVALID"
     unknown = client.post(
         "/pipelines/test", json={"definition": _definition(TESTS), "cases": ["nope"]}
@@ -229,7 +229,7 @@ def test_test_run_problems(client: TestClient, monkeypatch: pytest.MonkeyPatch) 
             ],
         },
     )
-    assert same_label.status_code == 400
+    assert same_label.status_code == 422
     assert same_label.json()["code"] == "REQUEST_INVALID"
     no_node = client.post(
         "/pipelines/test",
@@ -240,8 +240,8 @@ def test_test_run_problems(client: TestClient, monkeypatch: pytest.MonkeyPatch) 
             ],
         },
     )
-    assert no_node.status_code == 422
-    assert no_node.json()["code"] == "DEFINITION_INVALID"
+    assert no_node.status_code == 404
+    assert no_node.json()["code"] == "NODE_NOT_FOUND"
     monkeypatch.setattr(settings, "pipeline_editing_enabled", False)
     assert (
         client.post("/pipelines/test", json={"definition": _definition(TESTS)}).status_code == 403

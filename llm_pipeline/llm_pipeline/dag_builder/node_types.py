@@ -15,7 +15,7 @@ from collections.abc import Awaitable, Callable, Hashable
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from jinja2 import UndefinedError
+from jinja2 import TemplateError, UndefinedError
 from langgraph.types import StreamWriter
 
 from llm_pipeline.dag_builder.labels import match_label
@@ -120,8 +120,9 @@ def render_node_prompt(node_cfg: NodeConfig, effective: EffectiveNode, state: Pi
 
 
 def _render_or_fail(node_cfg: NodeConfig, effective: EffectiveNode, state: PipelineState) -> str:
-    """The node's prompt; an output the template needs but that didn't run
-    on this path fails the run naming the node."""
+    """The node's prompt. A template that can't be rendered — an output it
+    needs didn't run on this path, or the sandbox refused it — fails the
+    run naming the node."""
     try:
         return render_node_prompt(node_cfg, effective, state)
     except UndefinedError as e:
@@ -132,6 +133,10 @@ def _render_or_fail(node_cfg: NodeConfig, effective: EffectiveNode, state: Pipel
             f"Node '{node_cfg.id}': its prompt uses output that isn't available on "
             f"this run ({e.message}) — wrap it in {{% if <node> is defined %}}",
             node_id=node_cfg.id,
+        ) from e
+    except TemplateError as e:  # e.g. the sandbox's SecurityError
+        raise PipelineExecutionError(
+            f"Node '{node_cfg.id}': its prompt can't be rendered: {e}", node_id=node_cfg.id
         ) from e
 
 

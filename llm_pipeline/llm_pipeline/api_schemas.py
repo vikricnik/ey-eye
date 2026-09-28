@@ -433,8 +433,9 @@ class ErrorCode(StrEnum):
     """What went wrong, for clients to act on. `status` alone can't tell
     apart failures that share one — a 409 is a pipeline changed since it
     was loaded, a taken name, or the protected default pipeline. Set where
-    the error is raised. Codes may be added over time, so a client should
-    handle a code it doesn't know by its `status`."""
+    the error is raised, and always sent with the same status
+    (api_error.STATUS_BY_CODE). Codes may be added over time, so a client
+    should handle a code it doesn't know by its `status`."""
 
     # -- any endpoint
     REQUEST_INVALID = "REQUEST_INVALID"  # malformed or contradictory request; see `validations`

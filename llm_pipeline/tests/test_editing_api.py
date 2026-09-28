@@ -256,9 +256,9 @@ def test_validate_reports_model_issues_as_warnings(client: TestClient) -> None:
 
 def test_validate_rejects_bad_yaml_and_needs_exactly_one_input(client: TestClient) -> None:
     assert client.post("/pipelines/validate", json={"yaml": "nodes: [unclosed"}).status_code == 422
-    assert client.post("/pipelines/validate", json={}).status_code == 400
+    assert client.post("/pipelines/validate", json={}).status_code == 422
     both = {"definition": _pipeline(), "yaml": "x: 1"}
-    assert client.post("/pipelines/validate", json=both).status_code == 400
+    assert client.post("/pipelines/validate", json=both).status_code == 422
 
 
 # -- saving ------------------------------------------------------------------

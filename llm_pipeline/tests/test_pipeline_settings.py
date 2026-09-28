@@ -364,4 +364,8 @@ def test_an_injected_node_template_fails_the_node_instead_of_running(
     monkeypatch.setattr(node_types_module, "get_provider", recorder.provider_for)
     response = client.post("/ask", json={"prompt": "x", "pipeline_name": "evil"})
     assert response.status_code == 502
+    # A template the sandbox refuses fails its node, like any node failure —
+    # not an internal error, and named so an editor can point at it.
+    assert response.json()["code"] == "PIPELINE_RUN_FAILED"
+    assert response.json()["details"] == {"node_id": "a"}
     assert recorder.calls == []  # the model was never called with the payload

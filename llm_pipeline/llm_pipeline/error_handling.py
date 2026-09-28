@@ -14,6 +14,7 @@ shape by where it is mounted.
 """
 
 import logging
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from http import HTTPStatus
 
@@ -21,7 +22,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from llm_pipeline.api_error import ApiError
+from llm_pipeline.api_error import STATUS_BY_CODE, ApiError
 from llm_pipeline.api_schemas import ErrorCode, ErrorResponse, ValidationIssue
 from llm_pipeline.errors import (
     DefinitionInvalidError,
@@ -45,15 +46,19 @@ def _reason_phrase(status_code: int) -> str:
 
 def build_error_response(
     request: Request,
-    status_code: int,
+    code: ErrorCode,
     message: str,
     *,
-    code: ErrorCode,
     details: dict[str, object] | None = None,
     validations: list[ValidationIssue] | None = None,
+    status_code: int | None = None,
 ) -> ErrorResponse:
     """The one place every error field gets populated, so all the handlers
-    registered below produce byte-for-byte the same shape."""
+    registered below produce byte-for-byte the same shape. The status is the
+    code's (STATUS_BY_CODE); `status_code` overrides it only for an
+    HTTPException this API didn't raise, which has a status of its own."""
+    if status_code is None:
+        status_code = STATUS_BY_CODE[code]
     return ErrorResponse(
         timestamp=datetime.now(UTC),
         status=status_code,
@@ -72,17 +77,19 @@ def error_response_from_http_exception(request: Request, exc: HTTPException) -> 
     one piece of already-structured extra data a plain HTTPException
     carries. The header itself still has to be forwarded by the caller.
 
-    This API raises ApiError, which names its code. A bare HTTPException
-    (from a library, say) only gets a generic code from its status."""
+    This API raises ApiError, which names its code and may carry details. A
+    bare HTTPException (from a library, say) keeps its own status and only
+    gets a generic code."""
     details: dict[str, object] = {}
     if exc.headers and "Retry-After" in exc.headers:
         details["retry_after_seconds"] = exc.headers["Retry-After"]
     if isinstance(exc, ApiError):
-        code = exc.code
-    else:
-        code = ErrorCode.INTERNAL_ERROR if exc.status_code >= 500 else ErrorCode.REQUEST_INVALID
+        return build_error_response(
+            request, exc.code, str(exc.detail), details={**exc.details, **details}
+        )
+    code = ErrorCode.INTERNAL_ERROR if exc.status_code >= 500 else ErrorCode.REQUEST_INVALID
     return build_error_response(
-        request, exc.status_code, str(exc.detail), code=code, details=details
+        request, code, str(exc.detail), details=details, status_code=exc.status_code
     )
 
 
@@ -102,11 +109,15 @@ def error_response_from_validation_error(
         for e in exc.errors()
     ]
     return build_error_response(
-        request,
-        422,
-        "Request validation failed",
-        code=ErrorCode.REQUEST_INVALID,
-        validations=validations,
+        request, ErrorCode.REQUEST_INVALID, "Request validation failed", validations=validations
+    )
+
+
+def _respond(body: ErrorResponse, headers: Mapping[str, str] | None = None) -> JSONResponse:
+    return JSONResponse(
+        status_code=body.status,
+        content=body.model_dump(mode="json"),  # mode="json": datetime -> ISO string
+        headers=headers,
     )
 
 
@@ -129,12 +140,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         referenced again in this function's body. Same false-positive category
         as the pytest autouse fixtures elsewhere in this codebase; the
         decorator's registration side effect IS the usage.)"""
-        body = error_response_from_http_exception(request, exc)
-        return JSONResponse(
-            status_code=exc.status_code,
-            content=body.model_dump(mode="json"),  # mode="json": datetime -> ISO string
-            headers=exc.headers,
-        )
+        return _respond(error_response_from_http_exception(request, exc), exc.headers)
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(  # pyright: ignore[reportUnusedFunction]
@@ -144,8 +150,7 @@ def register_exception_handlers(app: FastAPI) -> None:
 
         (pyright false positive — see http_exception_handler's docstring above
         for why.)"""
-        body = error_response_from_validation_error(request, exc)
-        return JSONResponse(status_code=422, content=body.model_dump(mode="json"))
+        return _respond(error_response_from_validation_error(request, exc))
 
     @app.exception_handler(DefinitionInvalidError)
     async def definition_invalid_handler(  # pyright: ignore[reportUnusedFunction]
@@ -161,15 +166,15 @@ def register_exception_handlers(app: FastAPI) -> None:
             ValidationIssue(field=location, message=message, type=error_type)
             for location, message, error_type in exc.issues
         ]
-        body = build_error_response(
-            request,
-            422,
-            str(exc),
-            code=ErrorCode.DEFINITION_INVALID,
-            details=details,
-            validations=validations,
+        return _respond(
+            build_error_response(
+                request,
+                ErrorCode.DEFINITION_INVALID,
+                str(exc),
+                details=details,
+                validations=validations,
+            )
         )
-        return JSONResponse(status_code=422, content=body.model_dump(mode="json"))
 
     @app.exception_handler(ModelNotAllowedError)
     async def model_not_allowed_handler(  # pyright: ignore[reportUnusedFunction]
@@ -177,10 +182,9 @@ def register_exception_handlers(app: FastAPI) -> None:
     ) -> JSONResponse:
         """(pyright false positive — see http_exception_handler's docstring.)"""
         details: dict[str, object] = {"node_id": exc.node_id} if exc.node_id else {}
-        body = build_error_response(
-            request, 422, str(exc), code=ErrorCode.MODEL_NOT_ALLOWED, details=details
+        return _respond(
+            build_error_response(request, ErrorCode.MODEL_NOT_ALLOWED, str(exc), details=details)
         )
-        return JSONResponse(status_code=422, content=body.model_dump(mode="json"))
 
     @app.exception_handler(RevisionConflictError)
     @app.exception_handler(ProtectedPipelineError)
@@ -194,16 +198,14 @@ def register_exception_handlers(app: FastAPI) -> None:
             code = ErrorCode.PIPELINE_PROTECTED
         else:
             code = ErrorCode.REVISION_CONFLICT
-        body = build_error_response(request, 409, str(exc), code=code)
-        return JSONResponse(status_code=409, content=body.model_dump(mode="json"))
+        return _respond(build_error_response(request, code, str(exc)))
 
     @app.exception_handler(InvalidNameError)
     async def invalid_name_handler(  # pyright: ignore[reportUnusedFunction]
         request: Request, exc: InvalidNameError
     ) -> JSONResponse:
         """(pyright false positive — see http_exception_handler's docstring.)"""
-        body = build_error_response(request, 400, str(exc), code=ErrorCode.NAME_INVALID)
-        return JSONResponse(status_code=400, content=body.model_dump(mode="json"))
+        return _respond(build_error_response(request, ErrorCode.NAME_INVALID, str(exc)))
 
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(  # pyright: ignore[reportUnusedFunction]
@@ -218,23 +220,22 @@ def register_exception_handlers(app: FastAPI) -> None:
         (pyright false positive — see http_exception_handler's docstring above
         for why.)"""
         logger.exception("Unhandled exception")
-        body = build_error_response(
-            request, 500, "Internal server error", code=ErrorCode.INTERNAL_ERROR
+        return _respond(
+            build_error_response(request, ErrorCode.INTERNAL_ERROR, "Internal server error")
         )
-        return JSONResponse(status_code=500, content=body.model_dump(mode="json"))
 
 
 # Documents the error shape in OpenAPI for every status code an endpoint can
-# actually raise — purely descriptive.
+# actually raise — purely descriptive. Each status's codes are in
+# STATUS_BY_CODE; `code` says which one it is.
 ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
-    400: {"model": ErrorResponse, "description": "Invalid input"},
+    400: {"model": ErrorResponse, "description": "Unusable input or name"},
     401: {"model": ErrorResponse, "description": "Missing or invalid API key"},
     403: {"model": ErrorResponse, "description": "Pipeline editing is disabled"},
-    404: {"model": ErrorResponse, "description": "Pipeline not found"},
-    409: {"model": ErrorResponse, "description": "Changed since loaded, or already exists"},
-    422: {"model": ErrorResponse, "description": "Request body failed validation"},
+    404: {"model": ErrorResponse, "description": "A pipeline, node, preset, … that doesn't exist"},
+    409: {"model": ErrorResponse, "description": "Changed since loaded, name taken, or protected"},
+    422: {"model": ErrorResponse, "description": "Request or submitted definition is invalid"},
     429: {"model": ErrorResponse, "description": "Rate limit exceeded"},
-    502: {"model": ErrorResponse, "description": "Unexpected pipeline error"},
-    503: {"model": ErrorResponse, "description": "Pipeline tier fully failed"},
-    500: {"model": ErrorResponse, "description": "Unhandled server error"},
+    500: {"model": ErrorResponse, "description": "Unexpected server error"},
+    502: {"model": ErrorResponse, "description": "The pipeline run failed"},
 }

@@ -482,8 +482,8 @@ export interface ValidationIssue {
 /** What went wrong — the server's ErrorCode (api_schemas.py), for code
  * that must act differently per failure. `status` alone can't tell apart
  * failures that share one (409: changed since loaded, name taken, or the
- * protected default pipeline). The server may add codes; treat one you
- * don't know by its status. */
+ * protected default pipeline); each code always comes with the same
+ * status. The server may add codes; treat one you don't know by its status. */
 export type ErrorCode =
   | "REQUEST_INVALID"
   | "UNAUTHENTICATED"
