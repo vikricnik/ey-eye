@@ -2,7 +2,7 @@ import chalk from "chalk";
 import { buildGraphModel, describeUsage } from "@llm-pipeline/client";
 import type {
   RunResponse,
-  HealthResponse,
+  ServerInfoResponse,
   NodeOutput,
   PipelineDetail,
   PreviewPromptResponse,
@@ -19,16 +19,16 @@ export function formatDuration(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
-export function formatHealth(health: HealthResponse): string {
+export function formatServerInfo(info: ServerInfoResponse, pipelines: PipelineSummary[]): string {
+  const editing = info.editing_enabled
+    ? chalk.green("on")
+    : chalk.yellow(`off${info.editing_disabled_reason ? ` — ${info.editing_disabled_reason}` : ""}`);
   const lines: string[] = [
     chalk.bold.cyan("Pipeline server"),
-    `${chalk.gray("pipelines dir:")}        ${chalk.yellow(health.pipelines_dir)}`,
-    `${chalk.gray("default pipeline:")}     ${chalk.yellow(health.default_pipeline_name)}`,
+    `${chalk.gray("default pipeline:")}     ${chalk.yellow(info.default_pipeline_name)}`,
+    `${chalk.gray("editing:")}              ${editing}`,
     "",
-    chalk.bold.cyan(`Available pipelines (${health.available_pipelines.length})`),
-    ...health.available_pipelines.map(
-      (p) => `  ${chalk.blue(p.name)} — ${chalk.gray(p.description || "no description")}`
-    ),
+    formatPipelineList(pipelines),
   ];
   return lines.join("\n");
 }

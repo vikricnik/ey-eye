@@ -79,11 +79,6 @@
       "passed"
     ],
     "HealthResponse": [
-      "available_pipelines",
-      "default_pipeline_name",
-      "editing_disabled_reason",
-      "editing_enabled",
-      "pipelines_dir",
       "status"
     ],
     "HistoryConfig": [
@@ -295,6 +290,11 @@
     ],
     "SavePresetRequest": [
       "preset"
+    ],
+    "ServerInfoResponse": [
+      "default_pipeline_name",
+      "editing_disabled_reason",
+      "editing_enabled"
     ],
     "StreamDoneEvent": [
       "final_answer",

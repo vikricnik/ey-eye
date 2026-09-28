@@ -16,7 +16,7 @@ import {
 import {
   formatRunResponse,
   formatPreview,
-  formatHealth,
+  formatServerInfo,
   formatPipelineList,
   formatPipelineDetail,
   contextWarnings,
@@ -114,9 +114,9 @@ async function main(): Promise<void> {
   console.log(chalk.gray('type "/help" for commands, "/exit" to quit\n'));
 
   try {
-    const health = await client.checkHealth();
-    activePipeline = health.default_pipeline_name;
-    console.log(formatHealth(health));
+    const [info, { pipelines }] = await Promise.all([client.getServerInfo(), client.listPipelines()]);
+    activePipeline = info.default_pipeline_name;
+    console.log(formatServerInfo(info, pipelines));
     console.log();
     console.log(chalk.gray(`Using pipeline "${activePipeline}" — switch with /use <name>\n`));
     activeGraph = await loadGraph(client, activePipeline);
@@ -161,7 +161,7 @@ async function main(): Promise<void> {
     stoppable,
     session: undefined,
     activePipeline: () => activePipeline,
-    defaultPipeline: async () => (await client.checkHealth()).default_pipeline_name,
+    defaultPipeline: async () => (await client.getServerInfo()).default_pipeline_name,
     switchPipeline: async (name: string) => {
       if (name !== activePipeline) {
         history.length = 0;
@@ -229,8 +229,8 @@ async function main(): Promise<void> {
 
     if (trimmed === "/health") {
       try {
-        const health = await client.checkHealth();
-        console.log(formatHealth(health));
+        const [info, { pipelines }] = await Promise.all([client.getServerInfo(), client.listPipelines()]);
+        console.log(formatServerInfo(info, pipelines));
         console.log();
       } catch (err) {
         printError(err);

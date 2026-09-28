@@ -196,16 +196,20 @@ export interface PipelineDetail {
   loops: PipelineLoopInfo[];
 }
 
+/** GET /health — open, for load balancers: only whether the server is up. */
 export interface HealthResponse {
-  status: string;
-  pipelines_dir: string;
+  status: "ok";
+}
+
+/** GET /server-info — what a client needs to start. The pipelines
+ * themselves are GET /pipelines. */
+export interface ServerInfoResponse {
+  /** The pipeline to open first; it can't be deleted. */
   default_pipeline_name: string;
-  available_pipelines: PipelineSummary[];
-  /** Whether saving pipelines/presets is enabled on this server. Absent on
-   * servers that predate editing — treat as false. */
-  editing_enabled?: boolean;
+  /** Whether saving pipelines/presets is enabled on this server. */
+  editing_enabled: boolean;
   /** Why editing is off even though the server was asked to enable it. */
-  editing_disabled_reason?: string | null;
+  editing_disabled_reason: string | null;
 }
 
 export interface PipelinesListResponse {

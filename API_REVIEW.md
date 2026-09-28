@@ -53,7 +53,7 @@ problems are where the parts meet:
 | [API-008](#api-008-pipelineclient-method-signatures-make-incorrect-calls-easy) | WARNING | `PipelineClient` method signatures make incorrect calls easy — ✅ fixed |
 | [API-009](#api-009-the-draftops-field-setters-use-string-paths-with-unknown-values) | WARNING | The `draftOps` field setters use string paths with `unknown` values — ✅ fixed |
 | [API-010](#api-010-wire-types-are-untyped-on-the-server-and-hand-copied-under-different-names-in-typescript) | WARNING | Wire types are untyped on the server and hand-copied under different names in TypeScript — ✅ fixed |
-| [API-011](#api-011-health-is-public-but-returns-what-pipelines-requires-a-key-for) | WARNING | `/health` is public but returns what `/pipelines` requires a key for |
+| [API-011](#api-011-health-is-public-but-returns-what-pipelines-requires-a-key-for) | WARNING | `/health` is public but returns what `/pipelines` requires a key for — ✅ fixed |
 | [API-012](#api-012-the-template-variable--input--quietly-includes-the-conversation) | WARNING | The template variable `{{ input }}` quietly includes the conversation |
 | [API-013](#api-013-python-signatures-rely-on-positional-tuples-and-long-parameter-lists) | SUGGESTION | Python signatures rely on positional tuples and long parameter lists |
 | [API-014](#api-014-one-concept-has-three-names-and-several-cli-commands-differ-by-one-keystroke) | SUGGESTION | One concept has three names, and several CLI commands differ by one keystroke |
@@ -508,6 +508,16 @@ working around them.
 ### API-011: `/health` is public but returns what `/pipelines` requires a key for
 
 - **Severity**: WARNING
+- **Status**: ✅ Fixed (2026-09-28).
+  - `GET /health` returns `{"status": "ok"}` and nothing else.
+  - The authenticated `GET /server-info` returns `default_pipeline_name`,
+    `editing_enabled` and `editing_disabled_reason`.
+  - The pipeline list comes only from `GET /pipelines`, and `pipelines_dir`
+    is no longer sent anywhere.
+  - The web app starts from and polls `/server-info`. Its online indicator
+    uses API-008's `ServerUnreachableError`, so a refused API key no longer
+    reads as "server offline". The CLI's startup and `/health` command show
+    `/server-info` plus the pipeline list.
 - **Principle**: Consistent access contract; keep public surfaces minimal
 - **File(s)**:
   - [health.py:41-62](llm_pipeline/llm_pipeline/routers/health.py#L41-L62)

@@ -506,20 +506,34 @@ See root `docker-compose.yml` for the full env var wiring.
 ## API
 
 ### `GET /health`
+Open to anyone — load balancers and orchestrators probe it without
+credentials — so it says only that the server is up:
+```json
+{ "status": "ok" }
+```
+
+### `GET /server-info`
+What a client needs to start (requires an API key like every endpoint but
+`/health`): the pipeline to open first, and whether this server allows
+editing — and if it was asked to but refuses, why.
 ```json
 {
-  "status": "ok",
-  "pipelines_dir": "pipelines",
   "default_pipeline_name": "simple-local",
-  "available_pipelines": [
+  "editing_enabled": false,
+  "editing_disabled_reason": null
+}
+```
+
+### `GET /pipelines`
+The pipelines the server can run (a file that fails validation is left out):
+```json
+{
+  "pipelines": [
     { "name": "simple-local", "description": "...", "filename": "simple-local.yaml" },
     { "name": "consensus-qa", "description": "...", "filename": "consensus-qa.yaml" }
   ]
 }
 ```
-
-### `GET /pipelines`
-Same `available_pipelines` list, standalone.
 
 ### `GET /pipelines/{name}`
 Returns the pipeline as stored — its complete definition (nodes, prompts,
@@ -727,7 +741,7 @@ default**: set `PIPELINE_EDITING_ENABLED=true` to allow it, and set
 `API_KEYS` too on anything reachable beyond localhost — saving rewrites
 files in `PIPELINES_DIR`.
 
-Editing is **refused** (writes return 403, `/health` reports
+Editing is **refused** (writes return 403, `/server-info` reports
 `editing_enabled: false` with an `editing_disabled_reason`) when
 `CORS_ALLOWED_ORIGINS` is `*` and no `API_KEYS` are set: in that setup any
 website open in your browser could send write requests to the server.

@@ -121,7 +121,7 @@ def test_saving_is_forbidden_when_editing_is_disabled(
     assert not (dirs[0] / "fresh.yaml").exists()
     # Reads and validation stay available.
     assert client.post("/drafts/validation", json={"definition": _pipeline()}).status_code == 200
-    assert client.get("/health").json()["editing_enabled"] is False
+    assert client.get("/server-info").json()["editing_enabled"] is False
 
 
 def test_editing_endpoints_require_an_api_key_when_auth_is_on(
@@ -154,9 +154,9 @@ def test_wildcard_cors_without_api_key_blocks_editing(
     assert "CORS_ALLOWED_ORIGINS" in response.json()["message"]
     assert not (dirs[0] / "fresh.yaml").exists()
 
-    health = client.get("/health").json()
-    assert health["editing_enabled"] is False
-    assert "API_KEYS" in health["editing_disabled_reason"]
+    info = client.get("/server-info").json()
+    assert info["editing_enabled"] is False
+    assert "API_KEYS" in info["editing_disabled_reason"]
 
 
 def test_wildcard_cors_is_fine_once_an_api_key_is_required(
@@ -170,9 +170,9 @@ def test_wildcard_cors_is_fine_once_an_api_key_is_required(
         headers={**CREATE, "X-API-Key": "secret"},
     )
     assert response.status_code == 200
-    health = client.get("/health").json()
-    assert health["editing_enabled"] is True
-    assert health["editing_disabled_reason"] is None
+    info = client.get("/server-info", headers={"X-API-Key": "secret"}).json()
+    assert info["editing_enabled"] is True
+    assert info["editing_disabled_reason"] is None
 
 
 def test_explicit_origins_allow_editing_without_a_key(client: TestClient) -> None:
@@ -180,7 +180,7 @@ def test_explicit_origins_allow_editing_without_a_key(client: TestClient) -> Non
         client.put("/pipelines/fresh", json={"definition": _pipeline()}, headers=CREATE).status_code
         == 200
     )
-    assert client.get("/health").json()["editing_enabled"] is True
+    assert client.get("/server-info").json()["editing_enabled"] is True
 
 
 # -- reading ---------------------------------------------------------------

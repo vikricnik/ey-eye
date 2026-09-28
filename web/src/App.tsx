@@ -3,6 +3,7 @@ import {
   DraftError,
   PRESET_NAME_PATTERN,
   PipelineApiError,
+  ServerUnreachableError,
   RequestCancelledError,
   addNode,
   appendRunLog,
@@ -25,7 +26,7 @@ import {
 import type {
   ConversationTurn,
   GraphViewState,
-  HealthResponse,
+  ServerInfoResponse,
   ModelsResponse,
   NodeModelConfig,
   NodeOutput,
@@ -91,7 +92,7 @@ function download(filename: string, text: string): void {
 }
 
 export function App() {
-  const [health, setHealth] = useState<HealthResponse | null>(null);
+  const [serverInfo, setServerInfo] = useState<ServerInfoResponse | null>(null);
   const [online, setOnline] = useState<boolean | null>(null);
   const [pipelines, setPipelines] = useState<PipelineSummary[]>([]);
   const [doc, setDoc] = useState<EditorDoc | null>(null);
@@ -143,7 +144,7 @@ export function App() {
     setDoc(next);
   }, []);
 
-  const editable = health?.editing_enabled === true && online !== false;
+  const editable = serverInfo?.editing_enabled === true && online !== false;
 
   const notify = useCallback((kind: Notice["kind"], text: string, action?: Notice["action"]) => {
     setNotice(action ? { kind, text, action } : { kind, text });
@@ -261,32 +262,37 @@ export function App() {
   useEffect(() => {
     void (async () => {
       try {
-        const h = await client.checkHealth();
-        setHealth(h);
+        const info = await client.getServerInfo();
+        setServerInfo(info);
         setOnline(true);
         const { pipelines: list } = await client.listPipelines();
         setPipelines(list);
-        const first = list.some((p) => p.name === h.default_pipeline_name) ? h.default_pipeline_name : list[0]?.name;
+        const first = list.some((p) => p.name === info.default_pipeline_name) ? info.default_pipeline_name : list[0]?.name;
         if (first) await openPipeline(first);
-      } catch {
-        setOnline(false);
-        setLoadError(`can't reach the pipeline server at ${BASE_URL}`);
+      } catch (err) {
+        // Only a server we can't reach is offline — a refused API key isn't.
+        const unreachable = err instanceof ServerUnreachableError;
+        setOnline(!unreachable);
+        setLoadError(
+          unreachable ? `can't reach the pipeline server at ${BASE_URL}` : `couldn't load the pipelines: ${errorText(err)}`
+        );
       }
       void refreshModels();
       void refreshPresets();
     })();
   }, [openPipeline, refreshModels, refreshPresets]);
 
-  // Self-scheduling health poll (never overlapping, unlike setInterval).
+  // Self-scheduling server poll (never overlapping, unlike setInterval): is
+  // it reachable, and does it still allow editing?
   useEffect(() => {
     let stopped = false;
     let timer: number | undefined;
     const tick = async () => {
       try {
-        setHealth(await client.checkHealth());
+        setServerInfo(await client.getServerInfo());
         setOnline(true);
-      } catch {
-        setOnline(false);
+      } catch (err) {
+        setOnline(!(err instanceof ServerUnreachableError));
       }
       if (!stopped) timer = window.setTimeout(() => void tick(), 15000);
     };
@@ -581,7 +587,7 @@ export function App() {
     const current = docRef.current;
     if (!current) return;
     const name = current.definition.name;
-    const fallback = health?.default_pipeline_name ?? pipelines[0]?.name;
+    const fallback = serverInfo?.default_pipeline_name ?? pipelines[0]?.name;
     if (current.baseRevision === null) {
       // Never saved: "delete" just discards the draft.
       if (await confirmDiscard()) {
@@ -1032,9 +1038,9 @@ export function App() {
             type="button"
             className="ghost danger-text"
             onClick={() => void deletePipeline()}
-            disabled={!editable || !doc || doc.definition.name === health?.default_pipeline_name}
+            disabled={!editable || !doc || doc.definition.name === serverInfo?.default_pipeline_name}
             title={
-              doc?.definition.name === health?.default_pipeline_name
+              doc?.definition.name === serverInfo?.default_pipeline_name
                 ? "The server's default pipeline can't be deleted"
                 : "Delete this pipeline (recoverable)"
             }
@@ -1055,7 +1061,7 @@ export function App() {
           <DisplayMenu settings={display.settings} onChange={display.update} />
           <div className="status" title={online ? "server online" : "server offline"}>
             <span className={`status-dot ${online ? "online" : online === false ? "offline" : ""}`} />
-            {health && !health.editing_enabled && <span className="chip-status">read-only</span>}
+            {serverInfo && !serverInfo.editing_enabled && <span className="chip-status">read-only</span>}
           </div>
         </div>
       </header>
@@ -1080,10 +1086,10 @@ export function App() {
           </button>
         </div>
       )}
-      {health && !health.editing_enabled && (
+      {serverInfo && !serverInfo.editing_enabled && (
         <div className="notice info subtle">
-          {health.editing_disabled_reason ? (
-            <>Read-only: {health.editing_disabled_reason}</>
+          {serverInfo.editing_disabled_reason ? (
+            <>Read-only: {serverInfo.editing_disabled_reason}</>
           ) : (
             <>
               Read-only: this server has editing disabled. Set <code>PIPELINE_EDITING_ENABLED=true</code> on the server

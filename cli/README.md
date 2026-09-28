@@ -45,8 +45,9 @@ printf '/use consensus-qa\nWhen did the Berlin Wall fall?\n' | npm start
 
 ## Usage
 
-On startup, the CLI shows server info and picks up the server's configured
-`default_pipeline_name`. Type a prompt and press Enter to run it through the
+On startup, the CLI shows server info (`GET /server-info`: the default
+pipeline and whether editing is on) and the pipelines it can run, and picks
+up the server's configured `default_pipeline_name`. Type a prompt and press Enter to run it through the
 active pipeline. Prior turns in the session are sent as conversation context
 automatically.
 
@@ -55,7 +56,7 @@ automatically.
 | Command | Description |
 |---|---|
 | `/help` | show available commands |
-| `/health` | show server info: pipelines directory, default pipeline, all available pipelines |
+| `/health` | show server info: default pipeline, whether editing is on (and if not, why), all available pipelines |
 | `/pipelines` | list every pipeline the server can run |
 | `/pipeline` | show the **active** pipeline's DAG as a box-drawing diagram — every node with its model, plain `depends_on` edges, and branch/loop edges each rendered visually distinct and labeled (condition/"default" for branches, max iterations for loops) |
 | `/use <name>` | switch to a different pipeline (confirms it exists first; clears conversation history since a different DAG likely has different context semantics) |

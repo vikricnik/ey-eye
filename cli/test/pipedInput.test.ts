@@ -25,8 +25,11 @@ before(async () => {
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(data));
       };
-      if (req.url === "/health") {
-        return json({ status: "ok", pipelines_dir: "pipelines", default_pipeline_name: "p", available_pipelines: [] });
+      if (req.url === "/server-info") {
+        return json({ default_pipeline_name: "p", editing_enabled: false, editing_disabled_reason: null });
+      }
+      if (req.url === "/pipelines") {
+        return json({ pipelines: [{ name: "p", description: "", filename: "p.yaml" }] });
       }
       if (req.url === "/pipelines/p") {
         return json({

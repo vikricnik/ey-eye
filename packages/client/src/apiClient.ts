@@ -6,6 +6,7 @@ import type {
   RequestOptions,
   AskStreamEvent,
   HealthResponse,
+  ServerInfoResponse,
   ModelLimitsResponse,
   ModelsResponse,
   NodePreset,
@@ -245,8 +246,15 @@ export class PipelineClient {
     }
   }
 
+  /** Whether the server is up — the open endpoint load balancers probe. */
   async checkHealth(): Promise<HealthResponse> {
     return this.get<HealthResponse>("/health");
+  }
+
+  /** What a client needs to start: the default pipeline, and whether this
+   * server allows editing (and if not, why). */
+  async getServerInfo(): Promise<ServerInfoResponse> {
+    return this.get<ServerInfoResponse>("/server-info");
   }
 
   async listPipelines(): Promise<PipelinesListResponse> {

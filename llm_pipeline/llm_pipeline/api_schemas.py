@@ -207,10 +207,18 @@ class PipelineSummary(BaseModel):
 
 
 class HealthResponse(BaseModel):
-    status: str
-    pipelines_dir: str
+    """GET /health — open to anyone, for load balancers and orchestrators,
+    so it says nothing but that the server is up."""
+
+    status: Literal["ok"] = "ok"
+
+
+class ServerInfoResponse(BaseModel):
+    """GET /server-info — what a client needs to start. The pipelines
+    themselves are GET /pipelines."""
+
+    # The pipeline clients open first; it can't be deleted.
     default_pipeline_name: str
-    available_pipelines: list[PipelineSummary]
     # Whether saving/deleting pipelines and presets is actually allowed —
     # clients show pipelines read-only when this is false.
     editing_enabled: bool = False
