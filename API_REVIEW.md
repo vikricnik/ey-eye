@@ -50,8 +50,8 @@ problems are where the parts meet:
 | [API-005](#api-005-optimistic-concurrency-is-spelled-three-different-ways) | WARNING | Optimistic concurrency is spelled three different ways — ✅ fixed |
 | [API-006](#api-006-rpc-style-endpoints-with-the-pipeline-named-in-the-body) | WARNING | RPC-style endpoints, with the pipeline named in the body — ✅ fixed |
 | [API-007](#api-007-the-contract-documentation-contradicts-actual-behaviour) | WARNING | The contract documentation contradicts actual behaviour — ✅ fixed |
-| [API-008](#api-008-pipelineclient-method-signatures-make-incorrect-calls-easy) | WARNING | `PipelineClient` method signatures make incorrect calls easy |
-| [API-009](#api-009-the-draftops-field-setters-use-string-paths-with-unknown-values) | WARNING | The `draftOps` field setters use string paths with `unknown` values |
+| [API-008](#api-008-pipelineclient-method-signatures-make-incorrect-calls-easy) | WARNING | `PipelineClient` method signatures make incorrect calls easy — ✅ fixed |
+| [API-009](#api-009-the-draftops-field-setters-use-string-paths-with-unknown-values) | WARNING | The `draftOps` field setters use string paths with `unknown` values — ✅ fixed |
 | [API-010](#api-010-wire-types-are-untyped-on-the-server-and-hand-copied-under-different-names-in-typescript) | WARNING | Wire types are untyped on the server and hand-copied under different names in TypeScript |
 | [API-011](#api-011-health-is-public-but-returns-what-pipelines-requires-a-key-for) | WARNING | `/health` is public but returns what `/pipelines` requires a key for |
 | [API-012](#api-012-the-template-variable--input--quietly-includes-the-conversation) | WARNING | The template variable `{{ input }}` quietly includes the conversation |
@@ -349,6 +349,20 @@ working around them.
 ### API-008: `PipelineClient` method signatures make incorrect calls easy
 
 - **Severity**: WARNING
+- **Status**: ✅ Fixed (2026-09-28).
+  - `ask({pipeline, prompt, history?, rerun?}, {signal})`, and the same for
+    `askStream`. The body is built field by field, so nothing else a
+    caller's object carries is sent.
+  - `createPipeline(def)` and `updatePipeline(def, {baseRevision})` replace
+    `savePipeline(def, null | rev)`.
+  - `listModels({refresh: true})`.
+  - `ServerUnreachableError` (a `PipelineApiError` subclass, so existing
+    catches keep working) replaces "no `statusCode` means unreachable".
+  - The three copies of the fetch/error code in `request`, `ask` and
+    `postStream` are now one `send()`.
+  - The error's constructor and the stream's `serverMessage` were already
+    fixed by API-002. Its field names (`statusCode`, `exceptionUID`) are
+    unchanged; `exceptionUID` is API-018.
 - **Principle**: Parameter objects; no boolean or `null` mode flags; consistency
 - **File(s)**:
   - [apiClient.ts:37-56](packages/client/src/apiClient.ts#L37-L56)
@@ -381,6 +395,28 @@ working around them.
 ### API-009: The `draftOps` field setters use string paths with `unknown` values
 
 - **Severity**: WARNING
+- **Status**: ✅ Fixed (2026-09-28).
+  - `setNodeField` / `setPipelineField` (string paths, `unknown` values) are
+    replaced by typed operations:
+    - `setNodeProperty(def, id, key, value)`: `key` excludes `id` (that's
+      `renameNode`) and `model`, and a required field like `prompt_template`
+      can't be cleared.
+    - `setNodeModel(def, id, model | undefined)`, where `undefined` means
+      inherit the default, and `updateNodeModel(def, id, change)`, which
+      refuses a node with no model of its own.
+    - `setPipelineSetting(def, section, key, value)`.
+    - `setTestJudge(def, model | undefined)`, no longer `""`.
+    - Pure helpers `modelWithIdentity` and `modelWithOption`.
+  - A test pins five kinds of misuse as compile errors via
+    `@ts-expect-error`.
+  - The aliases, `coerceFieldValue`, the `unset`/`default` words and the path
+    interpreter moved to a new `cli/src/fieldPaths.ts`. It now also refuses
+    fields nodes don't have, instead of writing them.
+  - The web Inspector calls the typed operations directly, and the Ollama
+    options form's `onChange` is typed per option. Checked in the browser:
+    node temperature/history/reasoning/option edits and pipeline
+    history/defaults edits all update the draft, and the server validates
+    each one.
 - **Principle**: Make invalid states unrepresentable; avoid magic strings
 - **File(s)**:
   - [draftOps.ts:366-374](packages/client/src/draftOps.ts#L366-L374)

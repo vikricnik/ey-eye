@@ -21,7 +21,13 @@ export interface RunRequest {
   rerun?: RerunRequest;
 }
 
-export interface AskOptions {
+/** What ask() and askStream() run: a pipeline, and the message for it. */
+export interface AskInput {
+  /** The pipeline to run — sent in the path, not the body. */
+  pipeline: string;
+  prompt: string;
+  /** The conversation so far, oldest turn first. Default: none. */
+  history?: ConversationTurn[];
   /** Re-run the run these outputs came from, starting at one node. */
   rerun?: RerunRequest;
 }
@@ -436,7 +442,7 @@ export interface ModelsResponse {
 
 export interface PipelineDefinitionResponse {
   definition: PipelineDefinition;
-  /** Also sent as the ETag. Pass it to savePipeline() as `baseRevision`
+  /** Also sent as the ETag. Pass it to updatePipeline() as `baseRevision`
    * (sent as If-Match) so the save refuses to overwrite a newer version. */
   revision: string;
   /** The file has YAML comments (kept when saving). */

@@ -45,6 +45,7 @@ describe("listModels", () => {
 
 describe("getPipeline", () => {
   it("reads the pipeline itself — the definition and revision a save takes back", async () => {
+    requested.length = 0;
     const loaded = await new PipelineClient(base).getPipeline("my-pipe");
     assert.deepEqual(requested, ["GET /pipelines/my-pipe"]);
     assert.deepEqual(loaded, stored);

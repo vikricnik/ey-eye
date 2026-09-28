@@ -2,10 +2,9 @@ import type {
   ApiErrorBody,
   DeletedResponse,
   ErrorCode,
-  AskOptions,
+  AskInput,
   RequestOptions,
   AskStreamEvent,
-  ConversationTurn,
   HealthResponse,
   ModelLimits,
   ModelsResponse,
@@ -33,6 +32,7 @@ export class RequestCancelledError extends Error {
     this.name = "RequestCancelledError";
   }
 }
+
 
 /** What the server reported about a failure — see ApiErrorBody. */
 export interface PipelineApiErrorInfo {
@@ -70,6 +70,19 @@ export class PipelineApiError extends Error {
     this.validations = info.validations;
     this.details = info.details;
     this.serverMessage = info.serverMessage;
+  }
+}
+
+/** The server couldn't be reached at all — not running, a wrong URL, the
+ * network down — so there's no response, status or code. A PipelineApiError,
+ * so code that handles every failure still catches it. */
+export class ServerUnreachableError extends PipelineApiError {
+  readonly baseUrl: string;
+
+  constructor(baseUrl: string) {
+    super(`Could not reach pipeline server at ${baseUrl}. Is it running?`);
+    this.name = "ServerUnreachableError";
+    this.baseUrl = baseUrl;
   }
 }
 
@@ -134,9 +147,31 @@ function ifMatch(revision: string): Record<string, string> {
   return { "If-Match": `"${revision}"` };
 }
 
+type Method = "GET" | "POST" | "PUT" | "DELETE";
+
+interface SendOptions {
+  body?: unknown;
+  headers?: Record<string, string>;
+  signal?: AbortSignal | undefined;
+}
+
+function pipelinePath(name: string): string {
+  return `/pipelines/${encodeURIComponent(name)}`;
+}
+
 /** Where a pipeline's runs are started (answered or streamed, by Accept). */
 function runsPath(pipelineName: string): string {
-  return `/pipelines/${encodeURIComponent(pipelineName)}/runs`;
+  return `${pipelinePath(pipelineName)}/runs`;
+}
+
+/** The run's request body, field by field — the pipeline goes in the path,
+ * and nothing else a caller's object carries is sent. */
+function runRequest(input: AskInput): RunRequest {
+  return {
+    prompt: input.prompt,
+    history: input.history ?? [],
+    ...(input.rerun ? { rerun: input.rerun } : {}),
+  };
 }
 
 const ASK_EVENTS: ReadonlySet<string> = new Set(["node_start", "node_token", "node_complete", "loop_iteration", "done"]);
@@ -171,12 +206,11 @@ export class PipelineClient {
     return this.request<T>("GET", path);
   }
 
-  private async request<T>(
-    method: "GET" | "POST" | "PUT" | "DELETE",
-    path: string,
-    body?: unknown,
-    headers: Record<string, string> = {}
-  ): Promise<T> {
+  /** fetch() against the server, with the API key. A network failure is
+   * thrown as ServerUnreachableError (RequestCancelledError if `signal`
+   * fired), an error response as the PipelineApiError it describes. */
+  private async send(method: Method, path: string, options: SendOptions = {}): Promise<Response> {
+    const { body, headers = {}, signal } = options;
     let response: Response;
     try {
       response = await fetch(`${this.baseUrl}${path}`, {
@@ -186,19 +220,27 @@ export class PipelineClient {
           ...headers,
           ...this.authHeaders(),
         },
-        body: body === undefined ? undefined : JSON.stringify(body),
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        ...(signal ? { signal } : {}),
       });
     } catch {
-      throw new PipelineApiError(
-        `Could not reach pipeline server at ${this.baseUrl}. Is it running?`
-      );
+      if (signal?.aborted) throw new RequestCancelledError();
+      throw new ServerUnreachableError(this.baseUrl);
     }
+    // A 401 almost always means the server has API_KEYS configured but this
+    // client's apiKey wasn't set (or is wrong).
+    if (!response.ok) throw await buildApiError(response);
+    return response;
+  }
 
-    if (!response.ok) {
-      throw await buildApiError(response);
+  private async request<T>(method: Method, path: string, options: SendOptions = {}): Promise<T> {
+    const response = await this.send(method, path, options);
+    try {
+      return (await response.json()) as T;
+    } catch (err) {
+      if (options.signal?.aborted) throw new RequestCancelledError();
+      throw err;
     }
-
-    return (await response.json()) as T;
   }
 
   async checkHealth(): Promise<HealthResponse> {
@@ -210,7 +252,7 @@ export class PipelineClient {
   }
 
   /** A pipeline as stored: its complete definition (prompts, options,
-   * layout) and the revision to pass back to savePipeline() — the same
+   * layout) and the revision to pass back to updatePipeline() — the same
    * representation a save takes. To draw it, derive the structure with
    * detailFromDefinition(). */
   async getPipeline(name: string): Promise<PipelineDefinitionResponse> {
@@ -221,8 +263,8 @@ export class PipelineClient {
 
   /** Models this server lets an editor select (installed Ollama models +
    * the cloud allowlist). `refresh` bypasses the server's short cache. */
-  async listModels(refresh = false): Promise<ModelsResponse> {
-    return this.get<ModelsResponse>(refresh ? "/models?refresh=true" : "/models");
+  async listModels(options: { refresh?: boolean } = {}): Promise<ModelsResponse> {
+    return this.get<ModelsResponse>(options.refresh ? "/models?refresh=true" : "/models");
   }
 
   /** Max context, size and quantization of an installed Ollama model.
@@ -240,28 +282,34 @@ export class PipelineClient {
   async validatePipeline(
     input: { definition: PipelineDefinition } | { yaml: string }
   ): Promise<ValidatePipelineResponse> {
-    return this.request<ValidatePipelineResponse>("POST", "/drafts/validation", input);
+    return this.request<ValidatePipelineResponse>("POST", "/drafts/validation", { body: input });
   }
 
   /** What a node would receive — see PreviewPromptRequest. */
   async previewPrompt(req: PreviewPromptRequest): Promise<PreviewPromptResponse> {
-    return this.request<PreviewPromptResponse>("POST", "/drafts/prompt-preview", req);
+    return this.request<PreviewPromptResponse>("POST", "/drafts/prompt-preview", { body: req });
   }
 
-  /** Creates (`baseRevision` null) or updates a pipeline — sent as
-   * If-None-Match: * or If-Match. Throws ALREADY_EXISTS (create) or
-   * REVISION_CONFLICT (changed since `baseRevision` was loaded), both 412,
-   * or EDITING_DISABLED (403). */
-  async savePipeline(
+  /** Saves a new pipeline (If-None-Match: *). Throws ALREADY_EXISTS (412)
+   * if the name is taken, EDITING_DISABLED (403) if writes are off. */
+  async createPipeline(definition: PipelineDefinition): Promise<SavePipelineResponse> {
+    return this.request<SavePipelineResponse>("PUT", pipelinePath(definition.name), {
+      body: { definition },
+      headers: { "If-None-Match": "*" },
+    });
+  }
+
+  /** Saves over the pipeline loaded at `baseRevision` (If-Match). Throws
+   * REVISION_CONFLICT (412) if it changed since, EDITING_DISABLED (403) if
+   * writes are off. */
+  async updatePipeline(
     definition: PipelineDefinition,
-    baseRevision: string | null
+    options: { baseRevision: string }
   ): Promise<SavePipelineResponse> {
-    return this.request<SavePipelineResponse>(
-      "PUT",
-      `/pipelines/${encodeURIComponent(definition.name)}`,
-      { definition },
-      baseRevision === null ? { "If-None-Match": "*" } : ifMatch(baseRevision)
-    );
+    return this.request<SavePipelineResponse>("PUT", pipelinePath(definition.name), {
+      body: { definition },
+      headers: ifMatch(options.baseRevision),
+    });
   }
 
   async listPresets(): Promise<PresetsListResponse> {
@@ -277,76 +325,35 @@ export class PipelineClient {
    * loaded; the server's default pipeline can't be deleted
    * (PIPELINE_PROTECTED). */
   async deletePipeline(name: string, baseRevision?: string): Promise<DeletedResponse> {
-    return this.request<DeletedResponse>(
-      "DELETE",
-      `/pipelines/${encodeURIComponent(name)}`,
-      undefined,
-      baseRevision === undefined ? {} : ifMatch(baseRevision)
-    );
+    return this.request<DeletedResponse>("DELETE", pipelinePath(name), {
+      headers: baseRevision === undefined ? {} : ifMatch(baseRevision),
+    });
   }
 
   /** Soft-deletes a preset (moved to presets/.deleted/). With
    * `baseRevision`, refused (REVISION_CONFLICT) if it changed since. */
   async deletePreset(name: string, baseRevision?: string): Promise<DeletedResponse> {
-    return this.request<DeletedResponse>(
-      "DELETE",
-      `/presets/${encodeURIComponent(name)}`,
-      undefined,
-      baseRevision === undefined ? {} : ifMatch(baseRevision)
-    );
+    return this.request<DeletedResponse>("DELETE", `/presets/${encodeURIComponent(name)}`, {
+      headers: baseRevision === undefined ? {} : ifMatch(baseRevision),
+    });
   }
 
   /** Creates or replaces a preset — last write wins, unless you pass the
    * `baseRevision` you loaded (REVISION_CONFLICT if it changed since). */
   async savePreset(preset: NodePreset, baseRevision?: string): Promise<PresetResponse> {
-    return this.request<PresetResponse>(
-      "PUT",
-      `/presets/${encodeURIComponent(preset.name)}`,
-      { preset },
-      baseRevision === undefined ? {} : ifMatch(baseRevision)
-    );
+    return this.request<PresetResponse>("PUT", `/presets/${encodeURIComponent(preset.name)}`, {
+      body: { preset },
+      headers: baseRevision === undefined ? {} : ifMatch(baseRevision),
+    });
   }
 
-  async ask(
-    prompt: string,
-    pipelineName: string,
-    history: ConversationTurn[] = [],
-    options: AskOptions & RequestOptions = {}
-  ): Promise<RunResponse> {
-    const { signal, ...request } = options;
-    const body: RunRequest = { prompt, history, ...request };
-
-    let response: Response;
-    try {
-      response = await fetch(`${this.baseUrl}${runsPath(pipelineName)}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-          ...this.authHeaders(),
-        },
-        body: JSON.stringify(body),
-        ...(signal ? { signal } : {}),
-      });
-    } catch {
-      if (signal?.aborted) throw new RequestCancelledError();
-      throw new PipelineApiError(
-        `Could not reach pipeline server at ${this.baseUrl}. Is it running?`
-      );
-    }
-
-    if (!response.ok) {
-      // A 401 here almost always means the server has API_KEYS configured
-      // but the client's apiKey wasn't set (or is wrong).
-      throw await buildApiError(response);
-    }
-
-    try {
-      return (await response.json()) as RunResponse;
-    } catch (err) {
-      if (signal?.aborted) throw new RequestCancelledError();
-      throw err;
-    }
+  /** Runs a pipeline and resolves with the finished run. */
+  async ask(input: AskInput, options: RequestOptions = {}): Promise<RunResponse> {
+    return this.request<RunResponse>("POST", runsPath(input.pipeline), {
+      body: runRequest(input),
+      headers: { Accept: "application/json" },
+      signal: options.signal,
+    });
   }
 
   /**
@@ -365,14 +372,11 @@ export class PipelineClient {
    * normal event — see AskStreamEvent's doc comment for why).
    */
   async *askStream(
-    prompt: string,
-    pipelineName: string,
-    history: ConversationTurn[] = [],
-    options: AskOptions & RequestOptions = {}
+    input: AskInput,
+    options: RequestOptions = {}
   ): AsyncGenerator<AskStreamEvent, void, undefined> {
-    const { signal, ...request } = options;
-    const body: RunRequest = { prompt, history, ...request };
-    for await (const { event, data } of this.postStream(runsPath(pipelineName), body, ASK_EVENTS, signal)) {
+    const stream = this.postStream(runsPath(input.pipeline), runRequest(input), ASK_EVENTS, options.signal);
+    for await (const { event, data } of stream) {
       yield { type: event, data } as AskStreamEvent;
     }
   }
@@ -402,30 +406,13 @@ export class PipelineClient {
     known: ReadonlySet<string>,
     signal?: AbortSignal
   ): AsyncGenerator<{ event: string; data: unknown }, void, undefined> {
-    let response: Response;
-    try {
-      response = await fetch(`${this.baseUrl}${path}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "text/event-stream",
-          ...this.authHeaders(),
-        },
-        body: JSON.stringify(body),
-        ...(signal ? { signal } : {}),
-      });
-    } catch {
-      if (signal?.aborted) throw new RequestCancelledError();
-      throw new PipelineApiError(
-        `Could not reach pipeline server at ${this.baseUrl}. Is it running?`
-      );
-    }
-
-    if (!response.ok) {
-      // Pre-stream errors (400/401/404/422/429) arrive as a normal JSON
-      // error body, not an SSE stream.
-      throw await buildApiError(response);
-    }
+    // Pre-stream errors (400/401/404/422/429) arrive as a normal JSON error
+    // body, not an SSE stream — send() throws them.
+    const response = await this.send("POST", path, {
+      body,
+      headers: { Accept: "text/event-stream" },
+      signal,
+    });
 
     if (!response.body) {
       throw new PipelineApiError("Streaming response had no body");

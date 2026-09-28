@@ -5,10 +5,14 @@ import type {
   EvalExpectation,
   ExpectationKind,
   LoopConfig,
+  ExecutionConfig,
+  HistoryConfig,
   NodeConfig,
+  NodeDefaults,
   NodeLayout,
   NodeModelConfig,
   NodePreset,
+  OllamaOptions,
   PipelineDefinition,
   ProviderName,
   TestsConfig,
@@ -349,10 +353,16 @@ export function moveNode(def: PipelineDefinition, id: string, x: number, y: numb
   return mapNode(def, id, (n) => ({ ...n, layout: { x: Math.round(x), y: Math.round(y) } }));
 }
 
-/** Switches a model block to another "provider:model", keeping its
- * temperature, and its Ollama options only while it stays on Ollama (the
- * server rejects options for other providers). */
-function withModel(current: NodeModelConfig | undefined, identity: string): NodeModelConfig {
+// ---------------------------------------------------------------------------
+// Settings — typed: what a field is called and what it takes are checked at
+// compile time. (The CLI turns its typed-in `/set node.field value` paths
+// into these; see cli/src/fieldPaths.ts.)
+// ---------------------------------------------------------------------------
+
+/** A model block switched to another "provider:model" — a model picker's
+ * value — keeping its temperature, and its Ollama options only while it
+ * stays on Ollama (the server rejects options for other providers). */
+export function modelWithIdentity(current: NodeModelConfig | undefined, identity: string): NodeModelConfig {
   const { provider, model } = parseModelIdentity(identity);
   const keepOptions = provider === "ollama" && current?.options;
   return {
@@ -363,168 +373,92 @@ function withModel(current: NodeModelConfig | undefined, identity: string): Node
   };
 }
 
-/** Values meaning "no model of its own — use the pipeline default". */
-const INHERIT = new Set(["", "default", "inherit", "unset"]);
+/** A model block with one Ollama option set (or, with `undefined`, cleared);
+ * an emptied options block is dropped. */
+export function modelWithOption<K extends keyof OllamaOptions>(
+  model: NodeModelConfig,
+  key: K,
+  value: OllamaOptions[K]
+): NodeModelConfig {
+  const { options: current, ...rest } = model;
+  const options = withField(current ?? {}, key, value);
+  return Object.keys(options).length > 0 ? { ...rest, options } : rest;
+}
 
-export function setNodeModel(def: PipelineDefinition, id: string, identity: string): PipelineDefinition {
-  if (INHERIT.has(identity.trim())) {
+/** A node's settings besides its id (renameNode() updates every reference
+ * to it) and its model (setNodeModel() / updateNodeModel()). */
+export type NodeProperty = Exclude<keyof NodeConfig, "id" | "model">;
+
+/** Sets (or, with `undefined`, clears) one of a node's settings. A required
+ * one, like `prompt_template`, can't be cleared. */
+export function setNodeProperty<K extends NodeProperty>(
+  def: PipelineDefinition,
+  id: string,
+  key: K,
+  value: NodeConfig[K]
+): PipelineDefinition {
+  return mapNode(def, id, (node) => withField(node, key, value));
+}
+
+/** Gives a node its own model, or — with `undefined` — makes it use the
+ * pipeline's default model (which it then needs). */
+export function setNodeModel(
+  def: PipelineDefinition,
+  id: string,
+  model: NodeModelConfig | undefined
+): PipelineDefinition {
+  if (model === undefined) {
     if (!def.defaults?.model) throw new DraftError("the pipeline has no default model to inherit");
     return mapNode(def, id, ({ model: _dropped, ...rest }) => rest);
   }
-  return mapNode(def, id, (n) => ({ ...n, model: withModel(n.model, identity) }));
+  return mapNode(def, id, (n) => ({ ...n, model }));
 }
 
-/** Pipeline-level paths /pset and the pipeline inspector may change. */
-const PIPELINE_ROOTS = new Set(["description", "execution", "defaults", "history"]);
-
-/**
- * Sets (or, with `undefined`, clears) a pipeline-wide setting by path —
- * `"description"`, `"execution.max_concurrency"`, `"defaults.system_prompt"`,
- * `"defaults.options.num_ctx"`, `"history.max_chars"`, `"history.remember"`
- * … A `model` path (`defaults.model`, `history.summarize.model`) takes a
- * "provider:model" identity; `defaults.temperature` and `defaults.options.*`
- * are shorthands for the default model's settings.
- */
-export function setPipelineField(def: PipelineDefinition, path: string, value: unknown): PipelineDefinition {
-  let segments = path.split(".").filter(Boolean);
-  if (segments[0] === "defaults" && (segments[1] === "temperature" || segments[1] === "options")) {
-    if (!def.defaults?.model) throw new DraftError("set defaults.model first");
-    segments = ["defaults", "model", ...segments.slice(1)];
-  }
-  if (!segments[0] || !PIPELINE_ROOTS.has(segments[0])) {
-    throw new DraftError(`unknown pipeline setting '${path}' (use description, execution.*, defaults.*, history.*)`);
-  }
-  if (segments.at(-1) === "model" && segments.length > 1 && typeof value === "string") {
-    const parentPath = segments.slice(0, -1);
-    let parent: unknown = def;
-    for (const key of parentPath) parent = (parent as Record<string, unknown> | undefined)?.[key];
-    const current = (parent as { model?: NodeModelConfig } | undefined)?.model;
-    value = INHERIT.has(value.trim()) ? undefined : withModel(current, value);
-  }
-  return setIn(def, segments, value) as PipelineDefinition;
-}
-
-// ---------------------------------------------------------------------------
-// Field-level edits
-// ---------------------------------------------------------------------------
-
-/** Short paths accepted by setNodeField, mapped to their full location. */
-const FIELD_ALIASES: Record<string, string> = {
-  temperature: "model.temperature",
-  provider: "model.provider",
-  system: "system_prompt",
-  prompt: "prompt_template",
-  deps: "depends_on",
-  after: "depends_on",
-  history: "include_history",
-  reasoning: "strip_reasoning",
-};
-
-export function resolveFieldPath(path: string): string[] {
-  const aliased = FIELD_ALIASES[path] ?? (path.startsWith("options.") ? `model.${path}` : path);
-  const segments = aliased.split(".").filter(Boolean);
-  if (segments.length === 0) throw new DraftError("empty field path");
-  return segments;
-}
-
-function setIn(target: unknown, path: string[], value: unknown): unknown {
-  const [head, ...rest] = path;
-  const obj: Record<string, unknown> =
-    target !== null && typeof target === "object" && !Array.isArray(target)
-      ? { ...(target as Record<string, unknown>) }
-      : {};
-  if (rest.length === 0) {
-    if (value === undefined) delete obj[head!];
-    else obj[head!] = value;
-    return obj;
-  }
-  const child = setIn(obj[head!], rest, value);
-  if (child && typeof child === "object" && Object.keys(child).length === 0) delete obj[head!];
-  else obj[head!] = child;
-  return obj;
-}
-
-/**
- * Sets (or, with `undefined`, clears) one field of a node by path —
- * `"model.temperature"`, `"model.options.num_ctx"`, `"system_prompt"` —
- * plus the short aliases in FIELD_ALIASES (`temperature`,
- * `options.num_ctx`, `system`, `prompt`, `deps`). `"model"` itself takes a
- * "provider:model" identity; `"id"` renames the node everywhere.
- */
-export function setNodeField(
+/** Changes a node's own model — its temperature, options, … A node that
+ * uses the pipeline default has none to change: give it one first. */
+export function updateNodeModel(
   def: PipelineDefinition,
   id: string,
-  path: string,
-  value: unknown
+  change: (model: NodeModelConfig) => NodeModelConfig
 ): PipelineDefinition {
-  const segments = resolveFieldPath(path);
-  if (segments.length === 1 && segments[0] === "id") return renameNode(def, id, String(value));
-  if (segments.length === 1 && segments[0] === "model") {
-    if (typeof value !== "string") throw new DraftError("model takes a 'provider:model' identity");
-    return setNodeModel(def, id, value);
-  }
-  return mapNode(def, id, (n) => {
-    const updated = setIn(n, segments, value) as NodeConfig;
-    if (updated.id !== id) throw new DraftError("use 'id' at the top level to rename a node");
-    return updated;
+  return mapNode(def, id, (node) => {
+    if (!node.model) {
+      throw new DraftError(`node '${id}' uses the pipeline's default model — give it a model of its own first`);
+    }
+    return { ...node, model: change(node.model) };
   });
 }
 
-const NUMERIC_FIELDS = new Set([
-  "temperature",
-  "top_p",
-  "top_k",
-  "tfs_z",
-  "repeat_penalty",
-  "repeat_last_n",
-  "seed",
-  "mirostat",
-  "mirostat_eta",
-  "mirostat_tau",
-  "num_ctx",
-  "num_predict",
-  "num_gpu",
-  "num_thread",
-  "x",
-  "y",
-  "model_timeout_seconds",
-  "max_history_turns",
-  "max_retries",
-  "retry_backoff_seconds",
-  "max_iterations",
-  "max_chars",
-  "max_concurrency",
-]);
-const LIST_FIELDS = new Set(["depends_on", "stop", "remember"]);
-const BOOLEAN_FIELDS = new Set(["include_history", "strip_reasoning"]);
+/** The pipeline-wide settings, by section. */
+export interface PipelineSections {
+  execution: ExecutionConfig;
+  defaults: NodeDefaults;
+  history: HistoryConfig;
+}
 
-/**
- * Converts a typed-in string (CLI `/set`) into the value a field expects:
- * numbers for numeric settings, comma-separated lists for depends_on/stop,
- * and `unset`/`null`/`-` to clear the field. keep_alive stays a string
- * unless it is a plain integer (Ollama accepts both "5m" and 300).
- */
-export function coerceFieldValue(path: string, raw: string): unknown {
-  const trimmed = raw.trim();
-  if (trimmed === "unset" || trimmed === "null" || trimmed === "-") return undefined;
-  const leaf = resolveFieldPath(path).at(-1)!;
-  if (LIST_FIELDS.has(leaf)) {
-    return trimmed === "" ? [] : trimmed.split(",").map((s) => s.trim()).filter(Boolean);
-  }
-  if (NUMERIC_FIELDS.has(leaf)) {
-    const n = Number(trimmed);
-    if (trimmed === "" || Number.isNaN(n)) throw new DraftError(`'${leaf}' needs a number, got '${raw}'`);
-    return n;
-  }
-  if (BOOLEAN_FIELDS.has(leaf)) {
-    const lower = trimmed.toLowerCase();
-    if (["true", "yes", "on", "1"].includes(lower)) return true;
-    if (["false", "no", "off", "0"].includes(lower)) return false;
-    if (lower === "inherit" || lower === "default") return undefined;
-    throw new DraftError(`'${leaf}' is on or off, got '${raw}'`);
-  }
-  if (leaf === "keep_alive" && /^-?\d+$/.test(trimmed)) return Number(trimmed);
-  return raw;
+export type PipelineSection = keyof PipelineSections;
+
+/** Sets (or, with `undefined`, clears) one pipeline-wide setting, e.g.
+ * `setPipelineSetting(def, "history", "max_chars", 4000)`. An emptied
+ * section is dropped. */
+export function setPipelineSetting<S extends PipelineSection, K extends keyof PipelineSections[S]>(
+  def: PipelineDefinition,
+  section: S,
+  key: K,
+  value: PipelineSections[S][K]
+): PipelineDefinition {
+  const settings = withField((def[section] ?? {}) as PipelineSections[S], key, value);
+  const { [section]: _old, ...rest } = def;
+  return (Object.keys(settings).length > 0 ? { ...rest, [section]: settings } : rest) as PipelineDefinition;
+}
+
+/** `target` with `key` set to `value`, or removed when `value` is undefined
+ * — so a cleared setting is gone, not present as `undefined`. */
+function withField<T extends object, K extends keyof T>(target: T, key: K, value: T[K]): T {
+  const next = { ...target };
+  if (value === undefined) delete next[key];
+  else next[key] = value;
+  return next;
 }
 
 // ---------------------------------------------------------------------------
@@ -709,10 +643,10 @@ export function removeTestCase(def: PipelineDefinition, name: string): PipelineD
   return withTests(def, { ...def.tests, cases: testCases(def).filter((c) => c.name !== name) });
 }
 
-/** Sets the model that grades `judge` expectations ("provider:model"), or
- * removes the judge with an empty identity. */
-export function setTestJudge(def: PipelineDefinition, identity: string): PipelineDefinition {
+/** Sets the model that grades `judge` expectations, or — with
+ * `undefined` — removes the judge. */
+export function setTestJudge(def: PipelineDefinition, model: NodeModelConfig | undefined): PipelineDefinition {
   const { judge, ...tests } = def.tests ?? {};
-  if (!identity.trim()) return withTests(def, tests);
-  return withTests(def, { ...tests, judge: { ...judge, model: withModel(judge?.model, identity) } });
+  if (model === undefined) return withTests(def, tests);
+  return withTests(def, { ...tests, judge: { ...judge, model } });
 }

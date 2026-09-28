@@ -236,7 +236,7 @@ const NUMERIC_OPTIONS: { key: NumericOption; label: string; hint: string }[] = [
 /** Every Ollama generation option; empty means "the model's default". */
 export function OllamaOptionsForm(props: {
   options: OllamaOptions | undefined;
-  onChange: (key: keyof OllamaOptions, value: unknown) => void;
+  onChange: <K extends keyof OllamaOptions>(key: K, value: OllamaOptions[K]) => void;
   /** The model's maximum context length, when known — shown on num_ctx. */
   maxContext?: number | null | undefined;
   disabled?: boolean;
@@ -273,7 +273,7 @@ export function OllamaOptionsForm(props: {
           <select
             value={o.mirostat === undefined ? "" : String(o.mirostat)}
             disabled={props.disabled}
-            onChange={(e) => set("mirostat", e.target.value === "" ? undefined : Number(e.target.value))}
+            onChange={(e) => set("mirostat", e.target.value === "" ? undefined : (Number(e.target.value) as 0 | 1 | 2))}
           >
             <option value="">default</option>
             <option value="0">0 — off</option>
@@ -285,7 +285,7 @@ export function OllamaOptionsForm(props: {
           <select
             value={o.format ?? ""}
             disabled={props.disabled}
-            onChange={(e) => set("format", e.target.value === "" ? undefined : e.target.value)}
+            onChange={(e) => set("format", e.target.value === "" ? undefined : (e.target.value as "json"))}
           >
             <option value="">text</option>
             <option value="json">json</option>

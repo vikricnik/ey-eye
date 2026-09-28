@@ -167,7 +167,7 @@ export function App() {
 
   const refreshModels = useCallback(async (refresh = false) => {
     try {
-      setModels(await client.listModels(refresh));
+      setModels(await client.listModels({ refresh }));
     } catch (err) {
       notify("error", `couldn't load models: ${errorText(err)}`);
     }
@@ -501,7 +501,10 @@ export function App() {
       base = null;
     }
     try {
-      const saved = await client.savePipeline(definition, base);
+      const saved =
+        base === null
+          ? await client.createPipeline(definition)
+          : await client.updatePipeline(definition, { baseRevision: base });
       applyDoc({ type: "saved", definition: saved.definition, revision: saved.revision });
       notify(
         "info",
@@ -764,10 +767,8 @@ export function App() {
     stopRun.current = stop;
 
     try {
-      for await (const event of client.askStream(prompt, name, before, {
-        ...(rerun ? { rerun } : {}),
-        signal: stop.signal,
-      })) {
+      const input = { pipeline: name, prompt, history: before, ...(rerun ? { rerun } : {}) };
+      for await (const event of client.askStream(input, { signal: stop.signal })) {
         log = appendRunLog(log, event);
         if (event.type === "node_token") {
           flushLog(false);

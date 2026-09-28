@@ -4,6 +4,7 @@ import {
   EXPECTATION_KINDS,
   expectationParts,
   makeExpectation,
+  modelWithIdentity,
   parseModelIdentity,
   removeTestCase,
   setTestJudge,
@@ -290,7 +291,11 @@ export function TestsView(props: {
               emptyOption="none"
               disabled={!editable}
               onRefresh={props.onRefreshModels}
-              onChange={(identity) => onEdit((d) => setTestJudge(d, identity))}
+              onChange={(identity) =>
+                onEdit((d) =>
+                  setTestJudge(d, identity ? modelWithIdentity(d.tests?.judge?.model, identity) : undefined)
+                )
+              }
             />
           </Field>
         )}

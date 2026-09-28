@@ -27,7 +27,7 @@ import { EDIT_HELP, draftDiagram, handleEditCommand } from "./editCommands.js";
 import { LineInput } from "./input.js";
 import type { EditContext } from "./editCommands.js";
 import type {
-  AskOptions,
+  AskInput,
   ConversationTurn,
   RequestOptions,
   GraphModel,
@@ -175,7 +175,7 @@ async function main(): Promise<void> {
   /** Runs `prompt` with the conversation `before` it; a finished run's
    * answer follows `before` in the history (for a re-run, that replaces the
    * answer it re-ran). */
-  const sendMessage = async (prompt: string, before: ConversationTurn[], options: AskOptions = {}) => {
+  const sendMessage = async (prompt: string, before: ConversationTurn[], options: Pick<AskInput, "rerun"> = {}) => {
     const result = await stoppable((signal) =>
       streaming
         ? handlePromptStreaming(client, prompt, activePipeline, activeGraph, verbose, before, { ...options, signal })
@@ -368,13 +368,16 @@ async function handlePrompt(
   pipelineName: string,
   verbose: boolean,
   history: ConversationTurn[],
-  options: AskOptions & RequestOptions = {}
+  options: Pick<AskInput, "rerun"> & RequestOptions = {}
 ): Promise<RunResult | undefined> {
   const spinner = startSpinner("thinking");
   const startedAt = Date.now();
 
   try {
-    const response = await client.ask(prompt, pipelineName, history, options);
+    const response = await client.ask(
+      { pipeline: pipelineName, prompt, history, rerun: options.rerun },
+      { signal: options.signal }
+    );
     const elapsedMs = Date.now() - startedAt;
     stopSpinner(spinner);
     console.log();
@@ -499,7 +502,7 @@ async function handlePromptStreaming(
   graph: GraphModel | undefined,
   verbose: boolean,
   history: ConversationTurn[],
-  options: AskOptions & RequestOptions = {}
+  options: Pick<AskInput, "rerun"> & RequestOptions = {}
 ): Promise<RunResult> {
   const startedAt = Date.now();
   console.log();
@@ -525,7 +528,8 @@ async function handlePromptStreaming(
   }
 
   try {
-    for await (const event of client.askStream(prompt, pipelineName, history, options)) {
+    const input = { pipeline: pipelineName, prompt, history, rerun: options.rerun };
+    for await (const event of client.askStream(input, { signal: options.signal })) {
       texts = appendNodeText(texts, event);
       if (event.type === "node_token") {
         // Tokens arrive far faster than a terminal should repaint.

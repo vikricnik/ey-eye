@@ -5,7 +5,6 @@ import {
   DraftError,
   addNode,
   applyPreset,
-  coerceFieldValue,
   connect,
   disconnect,
   duplicateNode,
@@ -22,9 +21,13 @@ import {
   removeNode,
   renameNode,
   renameTemplateRefs,
-  setNodeField,
+  modelWithIdentity,
+  modelWithOption,
+  setNodeModel,
+  setNodeProperty,
   setOutput,
-  setPipelineField,
+  setPipelineSetting,
+  updateNodeModel,
   templateNodeRefs,
   uniqueNodeId,
 } from "../src/draftOps.js";
@@ -145,45 +148,56 @@ describe("edges", () => {
   });
 });
 
-describe("setNodeField", () => {
-  it("sets nested fields through aliases and clears empty containers", () => {
-    let def = setNodeField(diamond(), "a", "temperature", 0.7);
-    def = setNodeField(def, "a", "options.num_ctx", 8192);
-    def = setNodeField(def, "a", "system", "Be terse.");
-    const a = def.nodes[0]!;
-    assert.equal(a.model!.temperature, 0.7);
-    assert.deepEqual(a.model!.options, { num_ctx: 8192 });
-    assert.equal(a.system_prompt, "Be terse.");
+describe("typed node edits", () => {
+  it("sets and clears a node's own properties", () => {
+    let def = setNodeProperty(diamond(), "a", "system_prompt", "Be terse.");
+    def = setNodeProperty(def, "a", "include_history", false);
+    assert.equal(def.nodes[0]!.system_prompt, "Be terse.");
+    assert.equal(def.nodes[0]!.include_history, false);
+    def = setNodeProperty(def, "a", "system_prompt", undefined);
+    assert.equal("system_prompt" in def.nodes[0]!, false, "cleared, not left as undefined");
+  });
 
-    def = setNodeField(def, "a", "options.num_ctx", undefined);
+  it("tunes a node's own model, dropping an emptied options block", () => {
+    let def = updateNodeModel(diamond(), "a", (m) => ({ ...m, temperature: 0.7 }));
+    def = updateNodeModel(def, "a", (m) => modelWithOption(m, "num_ctx", 8192));
+    assert.equal(def.nodes[0]!.model!.temperature, 0.7);
+    assert.deepEqual(def.nodes[0]!.model!.options, { num_ctx: 8192 });
+    def = updateNodeModel(def, "a", (m) => modelWithOption(m, "num_ctx", undefined));
     assert.equal(def.nodes[0]!.model!.options, undefined, "empty options object removed");
   });
 
   it("switching model provider drops Ollama-only options", () => {
-    const def = setNodeField(diamond(), "d", "model", "openai:gpt-4o");
+    const current = diamond().nodes[3]!.model;
     // No temperature was set, so none is invented: it stays "inherit".
-    assert.deepEqual(def.nodes[3]!.model, { provider: "openai", model: "gpt-4o" });
-    const same = setNodeField(diamond(), "d", "model", "gemma3:12b");
-    assert.deepEqual(same.nodes[3]!.model!.options, { num_ctx: 4096 });
+    assert.deepEqual(modelWithIdentity(current, "openai:gpt-4o"), { provider: "openai", model: "gpt-4o" });
+    assert.deepEqual(modelWithIdentity(current, "gemma3:12b").options, { num_ctx: 4096 });
   });
 
-  it("'id' renames everywhere", () => {
-    const def = setNodeField(diamond(), "b", "id", "bee");
-    assert.deepEqual(def.nodes.find((n) => n.id === "d")!.depends_on, ["bee", "c"]);
+  it("only a node with its own model can be tuned", () => {
+    const inherits: PipelineDefinition = {
+      ...diamond(),
+      defaults: { model: { provider: "ollama", model: "base" } },
+    };
+    const def = setNodeModel(inherits, "a", undefined);
+    assert.throws(() => updateNodeModel(def, "a", (m) => ({ ...m, temperature: 1 })), DraftError);
   });
-});
 
-describe("coerceFieldValue", () => {
-  it("parses numbers, lists and unset", () => {
-    assert.equal(coerceFieldValue("temperature", "0.3"), 0.3);
-    assert.equal(coerceFieldValue("options.num_ctx", "8192"), 8192);
-    assert.deepEqual(coerceFieldValue("deps", "a, b"), ["a", "b"]);
-    assert.deepEqual(coerceFieldValue("options.stop", "###,END"), ["###", "END"]);
-    assert.equal(coerceFieldValue("options.keep_alive", "5m"), "5m");
-    assert.equal(coerceFieldValue("options.keep_alive", "0"), 0);
-    assert.equal(coerceFieldValue("system", "unset"), undefined);
-    assert.equal(coerceFieldValue("system", "Be kind, always."), "Be kind, always.");
-    assert.throws(() => coerceFieldValue("temperature", "hot"), DraftError);
+  it("makes misuse a compile-time error", () => {
+    const def = diamond();
+    // Never called: these lines only have to fail to type-check.
+    void (() => {
+      // @ts-expect-error — a node's prompt template can't be cleared
+      setNodeProperty(def, "a", "prompt_template", undefined);
+      // @ts-expect-error — renaming updates every reference: renameNode()
+      setNodeProperty(def, "a", "id", "b");
+      // @ts-expect-error — the model has its own operations (inheritance)
+      setNodeProperty(def, "a", "model", undefined);
+      // @ts-expect-error — `nodes` isn't a settings section
+      setPipelineSetting(def, "nodes", "x", 1);
+      // @ts-expect-error — a setting takes its own type
+      setPipelineSetting(def, "execution", "max_concurrency", "2");
+    });
   });
 });
 
@@ -215,7 +229,7 @@ describe("models and presets", () => {
 
 describe("duplicating nodes", () => {
   it("copies every setting and the inputs under a new id, beside the original", () => {
-    const def = setNodeField(setNodeField(diamond(), "b", "history", false), "b", "layout", { x: 10, y: 170 });
+    const def = setNodeProperty(setNodeProperty(diamond(), "b", "include_history", false), "b", "layout", { x: 10, y: 170 });
     const { definition, id } = duplicateNode(def, "b");
     assert.equal(id, "b_2");
     const copy = definition.nodes.find((n) => n.id === "b_2")!;
@@ -269,8 +283,8 @@ describe("saved nodes (presets)", () => {
   });
 
   it("applying one replaces the node's settings but keeps its id and inputs", () => {
-    let def = setNodeField(diamond(), "c", "system", "old system");
-    def = setNodeField(def, "c", "reasoning", true);
+    let def = setNodeProperty(diamond(), "c", "system_prompt", "old system");
+    def = setNodeProperty(def, "c", "strip_reasoning", true);
     def = applyPreset(def, "c", {
       name: "p",
       model: { provider: "ollama", model: "gemma3:12b" },
@@ -352,30 +366,30 @@ describe("pipeline defaults and history settings", () => {
       provider: "ollama", model: "base", temperature: 0.6, options: { num_ctx: 4096, keep_alive: "10m" },
     });
     // node d has its own model with num_ctx 4096 and no temperature
-    def = setNodeField(def, "d", "options.num_ctx", 8192);
+    def = updateNodeModel(def, "d", (m) => modelWithOption(m, "num_ctx", 8192));
     assert.deepEqual(effectiveModel(def, def.nodes.find((n) => n.id === "d")!)!.options, { num_ctx: 8192, keep_alive: "10m" });
     assert.equal(effectiveModel(def, def.nodes.find((n) => n.id === "d")!)!.temperature, 0.6);
   });
 
   it("a node can switch back to inheriting the default model", () => {
-    const def = setNodeField(withDefaults(), "a", "model", "default");
+    const def = setNodeModel(withDefaults(), "a", undefined);
     assert.equal(def.nodes[0]!.model, undefined);
-    assert.throws(() => setNodeField(diamond(), "a", "model", "default"), DraftError);
+    assert.throws(() => setNodeModel(diamond(), "a", undefined), DraftError);
   });
 
-  it("setPipelineField edits defaults, history and execution by path", () => {
-    let def = setPipelineField(diamond(), "defaults.model", "ollama:gemma3:12b");
-    def = setPipelineField(def, "defaults.temperature", 0.3);
-    def = setPipelineField(def, "defaults.options.num_ctx", 2048);
-    def = setPipelineField(def, "history.max_chars", 5000);
-    def = setPipelineField(def, "history.summarize.model", "llama3.2:3b");
-    def = setPipelineField(def, "execution.max_concurrency", 2);
+  it("setPipelineSetting edits defaults, history and execution", () => {
+    const base = modelWithIdentity(undefined, "ollama:gemma3:12b");
+    let def = setPipelineSetting(diamond(), "defaults", "model", modelWithOption({ ...base, temperature: 0.3 }, "num_ctx", 2048));
+    def = setPipelineSetting(def, "history", "max_chars", 5000);
+    def = setPipelineSetting(def, "history", "summarize", { model: modelWithIdentity(undefined, "llama3.2:3b") });
+    def = setPipelineSetting(def, "execution", "max_concurrency", 2);
     assert.deepEqual(def.defaults, { model: { provider: "ollama", model: "gemma3:12b", temperature: 0.3, options: { num_ctx: 2048 } } });
     assert.deepEqual(def.history, { max_chars: 5000, summarize: { model: { provider: "ollama", model: "llama3.2:3b" } } });
     assert.equal(def.execution!.max_concurrency, 2);
-    def = setPipelineField(def, "history.summarize.model", "unset");
+    def = setPipelineSetting(def, "history", "summarize", undefined);
     assert.deepEqual(def.history, { max_chars: 5000 });
-    assert.throws(() => setPipelineField(def, "nodes", []), DraftError);
+    def = setPipelineSetting(def, "execution", "max_concurrency", undefined);
+    assert.equal(def.execution, undefined, "an emptied section is dropped");
   });
 
   it("remembered nodes follow renames and removals", () => {
@@ -383,14 +397,6 @@ describe("pipeline defaults and history settings", () => {
     assert.deepEqual(removeNode(withDefaults(), "c").history!.remember, ["b"]);
   });
 
-  it("coerces on/off and list settings", () => {
-    assert.equal(coerceFieldValue("history", "off"), false);
-    assert.equal(coerceFieldValue("reasoning", "yes"), true);
-    assert.equal(coerceFieldValue("strip_reasoning", "inherit"), undefined);
-    assert.deepEqual(coerceFieldValue("history.remember", "a, b"), ["a", "b"]);
-    assert.equal(coerceFieldValue("execution.max_concurrency", "2"), 2);
-    assert.throws(() => coerceFieldValue("include_history", "maybe"), DraftError);
-  });
 });
 
 describe("test cases", () => {
@@ -408,9 +414,9 @@ describe("test cases", () => {
   });
 
   it("sets and clears the judge model", () => {
-    let def = setTestJudge(diamond(), "ollama:llama3.2:3b");
+    let def = setTestJudge(diamond(), modelWithIdentity(undefined, "ollama:llama3.2:3b"));
     assert.deepEqual(def.tests, { judge: { model: { provider: "ollama", model: "llama3.2:3b" } } });
-    def = setTestJudge(def, "");
+    def = setTestJudge(def, undefined);
     assert.equal(def.tests, undefined);
   });
 

@@ -11,7 +11,6 @@ import {
   addNode,
   applyPreset,
   buildGraphModel,
-  coerceFieldValue,
   connect,
   detailFromDefinition,
   disconnect,
@@ -26,15 +25,14 @@ import {
   upsertTestCase,
   findNode,
   modelIdentity,
+  modelWithIdentity,
   newDefinition,
   outputCandidates,
   parseModelIdentity,
   presetFromNode,
   removeNode,
-  resolveFieldPath,
-  setNodeField,
+  setNodeProperty,
   setOutput,
-  setPipelineField,
 } from "@llm-pipeline/client";
 import type {
   CaseResult,
@@ -47,6 +45,7 @@ import type {
   PipelineDefinition,
 } from "@llm-pipeline/client";
 import { renderGraphText } from "./graphRenderer.js";
+import { coerceFieldValue, resolveNodeFieldPath, setNodeFieldByPath, setPipelineSettingByPath } from "./fieldPaths.js";
 import type { LineSource } from "./input.js";
 
 /**
@@ -384,7 +383,10 @@ async function saveDraft(ctx: EditContext, newName?: string): Promise<void> {
   }
 
   try {
-    const saved = await ctx.client.savePipeline(draft, baseRevision);
+    const saved =
+      baseRevision === null
+        ? await ctx.client.createPipeline(draft)
+        : await ctx.client.updatePipeline(draft, { baseRevision });
     ctx.session = { draft: saved.definition, baseRevision: saved.revision, dirty: false };
     await ctx.switchPipeline(saved.definition.name);
     console.log(chalk.green(`✓ saved "${saved.definition.name}"`) + chalk.gray(" — new runs use it"));
@@ -571,7 +573,8 @@ async function handleTestCommand(ctx: EditContext, args: string[]): Promise<void
     const identity = rest[0];
     if (!identity) throw new DraftError("usage: /test judge <provider:model|unset>");
     const session = requireSession(ctx);
-    update(ctx, setTestJudge(session.draft, identity === "unset" ? "" : identity));
+    const judge = session.draft.tests?.judge?.model;
+    update(ctx, setTestJudge(session.draft, identity === "unset" ? undefined : modelWithIdentity(judge, identity)));
     return note(identity === "unset" ? "judge model removed" : `judge model: ${identity}`);
   }
 
@@ -750,9 +753,9 @@ export async function handleEditCommand(ctx: EditContext, line: string): Promise
         const raw = line.slice(line.indexOf(target) + target.length).trim();
         const session = requireSession(ctx);
         const value = coerceFieldValue(path, raw);
-        update(ctx, setNodeField(session.draft, nodeId, path, value));
+        update(ctx, setNodeFieldByPath(session.draft, nodeId, path, value));
         const shown = value === undefined ? "(unset)" : JSON.stringify(value);
-        note(`${nodeId}.${resolveFieldPath(path).join(".")} = ${shown}`);
+        note(`${nodeId}.${resolveNodeFieldPath(path).join(".")} = ${shown}`);
         break;
       }
 
@@ -764,7 +767,7 @@ export async function handleEditCommand(ctx: EditContext, line: string): Promise
         const session = requireSession(ctx);
         const raw = line.slice(line.indexOf(path) + path.length).trim();
         const value = coerceFieldValue(path, raw);
-        update(ctx, setPipelineField(session.draft, path, value));
+        update(ctx, setPipelineSettingByPath(session.draft, path, value));
         note(`${path} = ${value === undefined ? "(unset)" : JSON.stringify(value)}`);
         break;
       }
@@ -785,8 +788,12 @@ export async function handleEditCommand(ctx: EditContext, line: string): Promise
           note("unchanged");
           break;
         }
-        const value = isSystem && edited.trim() === "" ? undefined : edited;
-        update(ctx, setNodeField(session.draft, nodeId, isSystem ? "system_prompt" : "prompt_template", value));
+        update(
+          ctx,
+          isSystem
+            ? setNodeProperty(session.draft, nodeId, "system_prompt", edited.trim() === "" ? undefined : edited)
+            : setNodeProperty(session.draft, nodeId, "prompt_template", edited)
+        );
         note(`updated ${isSystem ? "system prompt" : "prompt template"} of "${nodeId}"`);
         break;
       }
@@ -810,7 +817,7 @@ export async function handleEditCommand(ctx: EditContext, line: string): Promise
       }
 
       case "/models": {
-        const { providers } = await ctx.client.listModels(true);
+        const { providers } = await ctx.client.listModels({ refresh: true });
         for (const p of providers) {
           const status = p.reachable ? "" : chalk.red(`  (${p.error ?? "unreachable"})`);
           console.log(chalk.bold.cyan(p.provider) + status);

@@ -3,7 +3,10 @@ import {
   applyPreset,
   disconnect,
   effectiveModel,
+  findNode,
   modelIdentity,
+  modelWithIdentity,
+  modelWithOption,
   nodeIds,
   outputCandidates,
   removeBranch,
@@ -11,9 +14,11 @@ import {
   removeNode,
   renameNode,
   routeTargets,
-  setNodeField,
+  setNodeModel,
+  setNodeProperty,
   setOutput,
-  setPipelineField,
+  setPipelineSetting,
+  updateNodeModel,
   upsertBranch,
   upsertLoop,
 } from "@llm-pipeline/client";
@@ -23,8 +28,12 @@ import type {
   LoopConfig,
   ModelsResponse,
   NodeConfig,
+  NodeModelConfig,
   NodePreset,
+  NodeProperty,
   PipelineDefinition,
+  PipelineSection,
+  PipelineSections,
 } from "@llm-pipeline/client";
 import type { EditorDoc, Selection, ValidationState } from "./editorState";
 import { CommitInput, Field, ModelPicker, NumberField, OllamaOptionsForm, useModelLimits } from "./fields";
@@ -152,8 +161,13 @@ function NodeInspector(props: InspectorProps & { node: NodeConfig; tab: NodeTab;
   const { node, doc, editable, onEdit, onSelect, presets, validation, tab, onTab } = props;
   const def = doc.definition;
   const id = node.id;
-  const set = (path: string, value: unknown, coalesce = true) =>
-    onEdit((d) => setNodeField(d, id, path, value), coalesce ? `node:${id}:${path}` : undefined);
+  /** One of the node's settings; `coalesce` folds a burst of edits (typing,
+   * dragging) into one undo step. */
+  const set = <K extends NodeProperty>(key: K, value: NodeConfig[K], coalesce = true) =>
+    onEdit((d) => setNodeProperty(d, id, key, value), coalesce ? `node:${id}:${key}` : undefined);
+  /** A change to the node's own model — its temperature or options. */
+  const tuneModel = (change: (model: NodeModelConfig) => NodeModelConfig, key: string) =>
+    onEdit((d) => updateNodeModel(d, id, change), `node:${id}:${key}`);
   const limits = useModelLimits(node.model);
   const deps = node.depends_on ?? [];
   const isOutput = outputCandidates(def).includes(id);
@@ -250,7 +264,9 @@ function NodeInspector(props: InspectorProps & { node: NodeConfig; tab: NodeTab;
             {...(defaults.model ? { emptyOption: `pipeline default (${modelIdentity(defaults.model)})` } : {})}
             disabled={!editable}
             onRefresh={props.onRefreshModels}
-            onChange={(identity) => set("model", identity || "default", false)}
+            onChange={(identity) =>
+              onEdit((d) => setNodeModel(d, id, identity ? modelWithIdentity(findNode(d, id).model, identity) : undefined))
+            }
           />
         </Field>
         {node.model ? (
@@ -267,14 +283,17 @@ function NodeInspector(props: InspectorProps & { node: NodeConfig; tab: NodeTab;
                 value={effective?.temperature ?? 0.2}
                 disabled={!editable}
                 aria-label="Temperature"
-                onChange={(e) => set("temperature", Number(e.target.value))}
+                onChange={(e) => {
+                  const temperature = Number(e.target.value);
+                  tuneModel((m) => withTemperature(m, temperature), "temperature");
+                }}
               />
               <NumberField
                 value={node.model.temperature}
                 placeholder={`${effective?.temperature ?? 0.2}`}
                 disabled={!editable}
                 ariaLabel="Temperature value"
-                onChange={(v) => set("temperature", v)}
+                onChange={(v) => tuneModel((m) => withTemperature(m, v), "temperature")}
               />
             </div>
           </Field>
@@ -361,7 +380,7 @@ function NodeInspector(props: InspectorProps & { node: NodeConfig; tab: NodeTab;
             options={node.model.options}
             maxContext={limits?.context_length}
             disabled={!editable}
-            onChange={(key, value) => set(`options.${key}`, value)}
+            onChange={(key, value) => tuneModel((m) => modelWithOption(m, key, value), `options.${key}`)}
           />
         </section>
       )}
@@ -910,10 +929,25 @@ function PipelineInspector(props: InspectorProps) {
 }
 
 
-/** Edits one pipeline-wide setting by path (see setPipelineField). */
+/** Edits one pipeline-wide setting (see setPipelineSetting). */
 function usePipelineSetter(onEdit: Edit) {
-  return (path: string, value: unknown, coalesce = true) =>
-    onEdit((d) => setPipelineField(d, path, value), coalesce ? `pipeline:${path}` : undefined);
+  return <S extends PipelineSection, K extends keyof PipelineSections[S]>(
+    section: S,
+    key: K,
+    value: PipelineSections[S][K],
+    coalesce = true
+  ) =>
+    onEdit(
+      (d) => setPipelineSetting(d, section, key, value),
+      coalesce ? `pipeline:${section}.${String(key)}` : undefined
+    );
+}
+
+/** `model` with its own temperature, or — with `undefined` — none, so it
+ * inherits the pipeline default's. */
+function withTemperature(model: NodeModelConfig, temperature: number | undefined): NodeModelConfig {
+  const { temperature: _old, ...rest } = model;
+  return temperature === undefined ? rest : { ...rest, temperature };
 }
 
 /** How earlier conversation turns reach the nodes. */
@@ -939,7 +973,7 @@ function HistorySettings(props: InspectorProps) {
             value={turns}
             placeholder="6"
             disabled={!editable}
-            onChange={(v) => set("execution.max_history_turns", v)}
+            onChange={(v) => set("execution", "max_history_turns", v)}
           />
         </Field>
         <Field label="character budget" hint="oldest turns go first (empty: no limit)">
@@ -947,7 +981,7 @@ function HistorySettings(props: InspectorProps) {
             value={history.max_chars}
             placeholder="no limit"
             disabled={!editable}
-            onChange={(v) => set("history.max_chars", v)}
+            onChange={(v) => set("history", "max_chars", v)}
           />
         </Field>
       </div>
@@ -956,7 +990,7 @@ function HistorySettings(props: InspectorProps) {
           type="text"
           value={history.intro ?? "Conversation so far:"}
           disabled={!editable}
-          onChange={(e) => set("history.intro", e.target.value)}
+          onChange={(e) => set("history", "intro", e.target.value)}
         />
       </Field>
       <Field
@@ -969,11 +1003,11 @@ function HistorySettings(props: InspectorProps) {
           spellCheck={false}
           value={history.turn_template ?? DEFAULT_TURN_TEMPLATE}
           disabled={!editable}
-          onChange={(e) => set("history.turn_template", e.target.value)}
+          onChange={(e) => set("history", "turn_template", e.target.value)}
         />
       </Field>
       {editable && history.turn_template !== undefined && history.turn_template !== DEFAULT_TURN_TEMPLATE && (
-        <button type="button" className="ghost small" onClick={() => set("history.turn_template", undefined, false)}>
+        <button type="button" className="ghost small" onClick={() => set("history", "turn_template", undefined, false)}>
           reset format
         </button>
       )}
@@ -988,7 +1022,8 @@ function HistorySettings(props: InspectorProps) {
                 disabled={!editable}
                 onChange={(e) =>
                   set(
-                    "history.remember",
+                    "history",
+                    "remember",
                     e.target.checked ? [...remember, n.id] : remember.filter((r) => r !== n.id),
                     false
                   )
@@ -1008,7 +1043,13 @@ function HistorySettings(props: InspectorProps) {
           emptyOption="off — drop them"
           disabled={!editable}
           onRefresh={props.onRefreshModels}
-          onChange={(identity) => set("history.summarize.model", identity || "unset", false)}
+          onChange={(identity) =>
+            onEdit((d) => {
+              const summarize = d.history?.summarize;
+              const model = identity ? modelWithIdentity(summarize?.model, identity) : undefined;
+              return setPipelineSetting(d, "history", "summarize", model ? { ...summarize, model } : undefined);
+            })
+          }
         />
       </Field>
       {history.summarize && (
@@ -1019,7 +1060,13 @@ function HistorySettings(props: InspectorProps) {
             spellCheck={false}
             value={history.summarize.prompt ?? DEFAULT_SUMMARY_PROMPT}
             disabled={!editable}
-            onChange={(e) => set("history.summarize.prompt", e.target.value)}
+            onChange={(e) => {
+              const prompt = e.target.value;
+              onEdit((d) => {
+                const summarize = d.history?.summarize;
+                return summarize ? setPipelineSetting(d, "history", "summarize", { ...summarize, prompt }) : d;
+              }, "pipeline:history.summarize.prompt");
+            }}
           />
         </Field>
       )}
@@ -1032,6 +1079,12 @@ function NodeDefaultsSettings(props: InspectorProps) {
   const { doc, editable, onEdit, models } = props;
   const defaults = doc.definition.defaults ?? {};
   const set = usePipelineSetter(onEdit);
+  /** A change to the default model — its temperature or options. */
+  const tuneDefaultModel = (change: (model: NodeModelConfig) => NodeModelConfig, key: string) =>
+    onEdit(
+      (d) => (d.defaults?.model ? setPipelineSetting(d, "defaults", "model", change(d.defaults.model)) : d),
+      `pipeline:defaults.${key}`
+    );
   const limits = useModelLimits(defaults.model);
 
   return (
@@ -1046,7 +1099,11 @@ function NodeDefaultsSettings(props: InspectorProps) {
           emptyOption="none — every node sets its own"
           disabled={!editable}
           onRefresh={props.onRefreshModels}
-          onChange={(identity) => set("defaults.model", identity || "unset", false)}
+          onChange={(identity) =>
+            onEdit((d) =>
+              setPipelineSetting(d, "defaults", "model", identity ? modelWithIdentity(d.defaults?.model, identity) : undefined)
+            )
+          }
         />
       </Field>
       {defaults.model && (
@@ -1055,7 +1112,7 @@ function NodeDefaultsSettings(props: InspectorProps) {
             value={defaults.model.temperature}
             placeholder="0.2"
             disabled={!editable}
-            onChange={(v) => set("defaults.temperature", v)}
+            onChange={(v) => tuneDefaultModel((m) => withTemperature(m, v), "temperature")}
           />
         </Field>
       )}
@@ -1065,7 +1122,7 @@ function NodeDefaultsSettings(props: InspectorProps) {
           rows={3}
           value={defaults.system_prompt ?? ""}
           disabled={!editable}
-          onChange={(e) => set("defaults.system_prompt", e.target.value || undefined)}
+          onChange={(e) => set("defaults", "system_prompt", e.target.value || undefined)}
         />
       </Field>
       <label className="check">
@@ -1073,7 +1130,7 @@ function NodeDefaultsSettings(props: InspectorProps) {
           type="checkbox"
           checked={defaults.strip_reasoning ?? false}
           disabled={!editable}
-          onChange={(e) => set("defaults.strip_reasoning", e.target.checked || undefined, false)}
+          onChange={(e) => set("defaults", "strip_reasoning", e.target.checked || undefined, false)}
         />
         strip &lt;think&gt; reasoning from outputs (qwen3, deepseek-r1 …)
       </label>
@@ -1082,7 +1139,7 @@ function NodeDefaultsSettings(props: InspectorProps) {
           options={defaults.model.options}
           maxContext={limits?.context_length}
           disabled={!editable}
-          onChange={(key, value) => set(`defaults.options.${key}`, value)}
+          onChange={(key, value) => tuneDefaultModel((m) => modelWithOption(m, key, value), `options.${key}`)}
         />
       )}
     </section>
