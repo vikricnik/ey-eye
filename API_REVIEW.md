@@ -58,7 +58,7 @@ problems are where the parts meet:
 | [API-013](#api-013-python-signatures-rely-on-positional-tuples-and-long-parameter-lists) | SUGGESTION | Python signatures rely on positional tuples and long parameter lists — ✅ fixed |
 | [API-014](#api-014-one-concept-has-three-names-and-several-cli-commands-differ-by-one-keystroke) | SUGGESTION | One concept has three names, and several CLI commands differ by one keystroke — ✅ fixed |
 | [API-015](#api-015-yaml-schema-naming) | SUGGESTION | YAML schema naming — ✅ fixed |
-| [API-016](#api-016-validate-takes-two-mutually-exclusive-fields-and-checks-at-runtime) | SUGGESTION | `validate` takes two mutually exclusive fields and checks at runtime |
+| [API-016](#api-016-validate-takes-two-mutually-exclusive-fields-and-checks-at-runtime) | SUGGESTION | `validate` takes two mutually exclusive fields and checks at runtime — ✅ fixed |
 | [API-017](#api-017-graphedge-expresses-its-variant-through-nullable-fields) | SUGGESTION | `GraphEdge` expresses its variant through nullable fields |
 | [API-018](#api-018-smaller-naming-items) | SUGGESTION | Smaller naming items |
 
@@ -714,6 +714,21 @@ working around them.
 ### API-016: `validate` takes two mutually exclusive fields and checks at runtime
 
 - **Severity**: SUGGESTION
+- **Status**: ✅ Fixed (2026-09-28).
+  - `POST /drafts/validation` takes a tagged body: either
+    `{"format": "json", "definition": {...}}` or `{"format": "yaml", "text": "..."}`.
+  - `ValidatePipelineRequest` is the union of `ValidateDefinitionRequest` and
+    `ValidateYamlRequest`. The route names `format` as the discriminator.
+  - Each side forbids extra fields, so a body with both, neither, a
+    mismatched pair or an unknown format is a 422 from request validation.
+    The runtime check is gone.
+  - OpenAPI documents the body as `oneOf` with a `format` discriminator.
+  - In TypeScript, `ValidatePipelineRequest` is the same tagged union and
+    `validatePipeline(req)` takes it. `{format: "json", definition, text}`
+    and a body without `format` no longer compile; `@ts-expect-error`
+    tests pin this.
+  - The CLI (`/validate`, `/import`, `/export`) and the web app
+    (live validation, import, export) send the new body.
 - **Principle**: Make invalid states unrepresentable
 - **File(s)**:
   - [api_schemas.py:365-369](llm_pipeline/llm_pipeline/api_schemas.py#L365-L369)

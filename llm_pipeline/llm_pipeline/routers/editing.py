@@ -14,8 +14,9 @@ translate between HTTP and those.
 """
 
 from collections.abc import AsyncGenerator
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, Query, Request, Response
+from fastapi import APIRouter, Body, Depends, Header, Query, Request, Response
 from fastapi.responses import StreamingResponse
 
 from llm_pipeline.api_error import ApiError
@@ -36,6 +37,7 @@ from llm_pipeline.api_schemas import (
     SavePipelineRequest,
     SavePipelineResponse,
     SavePresetRequest,
+    ValidateDefinitionRequest,
     ValidatePipelineRequest,
     ValidatePipelineResponse,
 )
@@ -199,18 +201,17 @@ async def get_pipeline(
     responses={k: ERROR_RESPONSES[k] for k in (401, 422, 429)},
 )
 async def validate_pipeline(
-    body: ValidatePipelineRequest, store: PipelineStore = Depends(get_pipeline_store)
+    body: Annotated[ValidatePipelineRequest, Body(discriminator="format")],
+    store: PipelineStore = Depends(get_pipeline_store),
 ) -> ValidatePipelineResponse:
-    """Validates without saving. Accepts a JSON definition or YAML text and
-    returns both forms — so the same call serves live validation, import
-    (YAML in) and export (canonical YAML out). Never writes anything, so
-    it doesn't need editing to be enabled."""
-    if (body.definition is None) == (body.yaml is None):
-        raise ApiError(ErrorCode.REQUEST_INVALID, "send exactly one of 'definition' or 'yaml'")
+    """Validates without saving. Takes a JSON definition (`format: json`) or
+    a file's YAML text (`format: yaml`) and returns both forms — so the same
+    call serves live validation, import (YAML in) and export (canonical YAML
+    out). Never writes anything, so it doesn't need editing to be enabled."""
     definition = (
         parse_definition(body.definition)
-        if body.definition is not None
-        else parse_definition_yaml(body.yaml or "")
+        if isinstance(body, ValidateDefinitionRequest)
+        else parse_definition_yaml(body.text)
     )
     issues = await store.model_issues(definition.name, definition)
     warnings = await store.catalog.limit_warnings(effective_model_uses(definition))

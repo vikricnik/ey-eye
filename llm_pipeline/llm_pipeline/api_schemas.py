@@ -16,7 +16,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Annotated, Any, Literal, cast
 
-from pydantic import BaseModel, Field, PlainValidator
+from pydantic import BaseModel, ConfigDict, Field, PlainValidator
 
 # Shared with history.py, which doesn't import this wire contract.
 from llm_pipeline.conversation import ConversationTurn as ConversationTurn
@@ -363,11 +363,25 @@ class TestsDoneEvent(BaseModel):
     summaries: list[VariantSummary]
 
 
-class ValidatePipelineRequest(BaseModel):
-    """Exactly one of `definition` or `yaml`."""
+class ValidateDefinitionRequest(BaseModel):
+    """A definition as editors hold it — live validation, and export."""
 
-    definition: PipelineDefinitionJson | None = None
-    yaml: str | None = None
+    model_config = ConfigDict(extra="forbid")
+    format: Literal["json"]
+    definition: PipelineDefinitionJson
+
+
+class ValidateYamlRequest(BaseModel):
+    """A pipeline file's text — import."""
+
+    model_config = ConfigDict(extra="forbid")
+    format: Literal["yaml"]
+    text: str
+
+
+# POST /drafts/validation: one or the other, as `format` says (the route
+# declares it the discriminator).
+ValidatePipelineRequest = ValidateDefinitionRequest | ValidateYamlRequest
 
 
 class DefinitionIssue(BaseModel):

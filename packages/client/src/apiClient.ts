@@ -24,6 +24,7 @@ import type {
   PresetsListResponse,
   SavePipelineResponse,
   TestRunEvent,
+  ValidatePipelineRequest,
   ValidatePipelineResponse,
   ValidationIssue,
 } from "./types.js";
@@ -284,15 +285,14 @@ export class PipelineClient {
     return this.get<ModelLimitsResponse>(`/models/ollama/${path}`);
   }
 
-  /** Validates without saving. Pass a definition (live validation, export
-   * — the result's `yaml` is the canonical file text) or YAML text
-   * (import — the result's `definition` is the parsed pipeline). Throws a
+  /** Validates without saving. Pass a definition (`format: "json"` — live
+   * validation, export: the result's `yaml` is the canonical file text) or
+   * a file's text (`format: "yaml"` — import: the result's `definition` is
+   * the parsed pipeline). Throws a
    * PipelineApiError (status 422, `details.node_id` when a node is at
    * fault) if it's invalid. */
-  async validatePipeline(
-    input: { definition: PipelineDefinition } | { yaml: string }
-  ): Promise<ValidatePipelineResponse> {
-    return this.request<ValidatePipelineResponse>("POST", "/drafts/validation", { body: input });
+  async validatePipeline(req: ValidatePipelineRequest): Promise<ValidatePipelineResponse> {
+    return this.request<ValidatePipelineResponse>("POST", "/drafts/validation", { body: req });
   }
 
   /** What a node would receive — see PreviewPromptRequest. */

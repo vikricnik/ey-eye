@@ -73,12 +73,29 @@ describe("runs", () => {
   it("works on unsaved definitions under /drafts", async () => {
     const client = new PipelineClient(base);
     const definition: PipelineDefinition = { name: "d", nodes: [], output_nodes: ["a"] };
-    await client.validatePipeline({ definition });
+    await client.validatePipeline({ format: "json", definition });
     await client.previewPrompt({ definition, node_id: "a" });
     for await (const _event of client.runTests({ definition })) void _event;
     assert.deepEqual(
       seen.map((s) => s.request),
       ["POST /drafts/validation", "POST /drafts/prompt-preview", "POST /drafts/test-runs"]
     );
+    assert.deepEqual(seen[0]!.body, { format: "json", definition });
+  });
+
+  it("validates a definition or a file's text, never both", () => {
+    const definition: PipelineDefinition = { name: "d", nodes: [], output_nodes: ["a"] };
+    const client = new PipelineClient(base);
+    // Compile-time only: each request is exactly one of the two shapes.
+    const _checks = () => [
+      client.validatePipeline({ format: "yaml", text: "name: d" }),
+      // @ts-expect-error — a definition's request has no text
+      client.validatePipeline({ format: "json", definition, text: "name: d" }),
+      // @ts-expect-error — a file's text isn't a definition
+      client.validatePipeline({ format: "yaml", definition }),
+      // @ts-expect-error — which format it is must be said
+      client.validatePipeline({ definition }),
+    ];
+    void _checks;
   });
 });

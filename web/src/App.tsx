@@ -340,7 +340,7 @@ export function App() {
     const timer = window.setTimeout(async () => {
       setValidation({ status: "checking" });
       try {
-        const result = await client.validatePipeline({ definition });
+        const result = await client.validatePipeline({ format: "json", definition });
         if (seq !== validationSeq.current) return;
         setValidation({
           status: "valid",
@@ -639,7 +639,7 @@ export function App() {
   const importFile = async (file: File) => {
     if (!(await confirmDiscard())) return;
     try {
-      const { definition } = await client.validatePipeline({ yaml: await file.text() });
+      const { definition } = await client.validatePipeline({ format: "yaml", text: await file.text() });
       let baseRevision: string | null = null;
       if (pipelines.some((p) => p.name === definition.name)) {
         const replace = await dialogs.confirm({
@@ -661,7 +661,7 @@ export function App() {
     const current = docRef.current;
     if (!current) return;
     try {
-      const { yaml } = await client.validatePipeline({ definition: current.definition });
+      const { yaml } = await client.validatePipeline({ format: "json", definition: current.definition });
       download(`${current.definition.name}.yaml`, yaml);
     } catch (err) {
       notify("error", `export failed — the pipeline must be valid: ${errorText(err)}`);

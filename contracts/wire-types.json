@@ -311,15 +311,19 @@
     "TestsDoneEvent": [
       "summaries"
     ],
-    "ValidatePipelineRequest": [
+    "ValidateDefinitionRequest": [
       "definition",
-      "yaml"
+      "format"
     ],
     "ValidatePipelineResponse": [
       "definition",
       "model_issues",
       "warnings",
       "yaml"
+    ],
+    "ValidateYamlRequest": [
+      "format",
+      "text"
     ],
     "ValidationIssue": [
       "field",

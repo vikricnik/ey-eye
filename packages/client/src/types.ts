@@ -462,11 +462,20 @@ export interface DefinitionIssue {
   message: string;
 }
 
-/** POST /drafts/validation — exactly one of `definition` or `yaml`. */
-export interface ValidatePipelineRequest {
-  definition?: PipelineDefinition;
-  yaml?: string;
+/** A definition as editors hold it — live validation, and export. */
+export interface ValidateDefinitionRequest {
+  format: "json";
+  definition: PipelineDefinition;
 }
+
+/** A pipeline file's text — import. */
+export interface ValidateYamlRequest {
+  format: "yaml";
+  text: string;
+}
+
+/** POST /drafts/validation — one or the other, as `format` says. */
+export type ValidatePipelineRequest = ValidateDefinitionRequest | ValidateYamlRequest;
 
 export interface ValidatePipelineResponse {
   definition: PipelineDefinition;

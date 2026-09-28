@@ -356,7 +356,7 @@ async function loadForEditing(ctx: EditContext, name: string): Promise<void> {
 async function validateDraft(ctx: EditContext): Promise<void> {
   const session = requireSession(ctx);
   try {
-    const result = await ctx.client.validatePipeline({ definition: session.draft });
+    const result = await ctx.client.validatePipeline({ format: "json", definition: session.draft });
     console.log(chalk.green("✓ valid"));
     for (const issue of [...result.model_issues, ...(result.warnings ?? [])]) {
       console.log(chalk.yellow(`! ${issue.message}`));
@@ -894,7 +894,7 @@ export async function handleEditCommand(ctx: EditContext, line: string): Promise
       case "/import": {
         const file = args[0];
         if (!file) throw new DraftError("usage: /import <file.yaml>");
-        const { definition } = await ctx.client.validatePipeline({ yaml: readFileSync(file, "utf8") });
+        const { definition } = await ctx.client.validatePipeline({ format: "yaml", text: readFileSync(file, "utf8") });
         let baseRevision: string | null = null;
         try {
           const existing = await ctx.client.getPipeline(definition.name);
@@ -913,7 +913,7 @@ export async function handleEditCommand(ctx: EditContext, line: string): Promise
         const file = args[0];
         if (!file) throw new DraftError("usage: /export <file.yaml>");
         const definition = ctx.session?.draft ?? (await ctx.client.getPipeline(ctx.activePipeline())).definition;
-        const { yaml } = await ctx.client.validatePipeline({ definition });
+        const { yaml } = await ctx.client.validatePipeline({ format: "json", definition });
         writeFileSync(file, yaml);
         note(`wrote "${definition.name}" to ${file}`);
         break;

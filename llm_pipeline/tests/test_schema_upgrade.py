@@ -142,7 +142,9 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClie
 
 
 def test_a_version_1_body_is_accepted_and_answered_in_version_2(client: TestClient) -> None:
-    body = client.post("/drafts/validation", json={"definition": VERSION_1}).json()
+    body = client.post(
+        "/drafts/validation", json={"format": "json", "definition": VERSION_1}
+    ).json()
     assert body["definition"]["output_nodes"] == ["b"]
     assert body["definition"]["nodes"][1]["model"]["name"] == "big"
     assert body["definition"]["history"]["max_turns"] == 4

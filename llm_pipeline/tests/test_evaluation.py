@@ -145,9 +145,13 @@ def test_the_tests_block_is_validated() -> None:
 
 
 def test_tests_are_saved_only_when_there_are_some(client: TestClient) -> None:
-    empty = client.post("/drafts/validation", json={"definition": _definition()}).json()
+    empty = client.post(
+        "/drafts/validation", json={"format": "json", "definition": _definition()}
+    ).json()
     assert "tests" not in yaml.safe_load(empty["yaml"])
-    full = client.post("/drafts/validation", json={"definition": _definition(TESTS)}).json()
+    full = client.post(
+        "/drafts/validation", json={"format": "json", "definition": _definition(TESTS)}
+    ).json()
     saved = yaml.safe_load(full["yaml"])
     assert list(saved)[-1] == "tests"  # written last, after the pipeline itself
     assert saved["tests"]["cases"][1] == {"name": "open", "input": "Tell me a joke"}

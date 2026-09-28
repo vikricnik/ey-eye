@@ -121,7 +121,12 @@ def test_saving_is_forbidden_when_editing_is_disabled(
     assert "PIPELINE_EDITING_ENABLED" in response.json()["message"]
     assert not (dirs[0] / "fresh.yaml").exists()
     # Reads and validation stay available.
-    assert client.post("/drafts/validation", json={"definition": _pipeline()}).status_code == 200
+    assert (
+        client.post(
+            "/drafts/validation", json={"format": "json", "definition": _pipeline()}
+        ).status_code
+        == 200
+    )
     assert client.get("/server-info").json()["editing_enabled"] is False
 
 
@@ -267,11 +272,13 @@ def test_models_reports_unreachable_ollama_without_failing(client: TestClient) -
 
 
 def test_validate_returns_canonical_yaml_that_round_trips(client: TestClient) -> None:
-    response = client.post("/drafts/validation", json={"definition": _pipeline()})
+    response = client.post("/drafts/validation", json={"format": "json", "definition": _pipeline()})
     assert response.status_code == 200
     body = response.json()
     assert body["model_issues"] == []
-    reloaded = client.post("/drafts/validation", json={"yaml": body["yaml"]}).json()
+    reloaded = client.post(
+        "/drafts/validation", json={"format": "yaml", "text": body["yaml"]}
+    ).json()
     assert reloaded["definition"] == body["definition"]
     # Multi-line prompts are written as literal blocks.
     assert "prompt_template: |" in body["yaml"]
@@ -280,7 +287,7 @@ def test_validate_returns_canonical_yaml_that_round_trips(client: TestClient) ->
 def test_validate_names_the_offending_node(client: TestClient) -> None:
     broken = _pipeline()
     broken["nodes"][1]["prompt_template"] = "{{ nowhere.output }}"
-    response = client.post("/drafts/validation", json={"definition": broken})
+    response = client.post("/drafts/validation", json={"format": "json", "definition": broken})
     assert response.status_code == 422
     body = response.json()
     assert body["details"] == {"node_id": "polish"}
@@ -290,14 +297,14 @@ def test_validate_names_the_offending_node(client: TestClient) -> None:
 def test_validate_maps_field_errors_to_their_node(client: TestClient) -> None:
     broken = _pipeline()
     broken["nodes"][1]["model"]["temperature"] = 9
-    body = client.post("/drafts/validation", json={"definition": broken}).json()
+    body = client.post("/drafts/validation", json={"format": "json", "definition": broken}).json()
     assert body["details"] == {"node_id": "polish"}
     assert body["validations"][0]["field"] == "nodes.1.model.temperature"
 
 
 def test_validate_reports_model_issues_as_warnings(client: TestClient) -> None:
     body = client.post(
-        "/drafts/validation", json={"definition": _pipeline(model="not-pulled")}
+        "/drafts/validation", json={"format": "json", "definition": _pipeline(model="not-pulled")}
     ).json()
     assert body["model_issues"] == [
         {
@@ -310,11 +317,22 @@ def test_validate_reports_model_issues_as_warnings(client: TestClient) -> None:
     ]
 
 
-def test_validate_rejects_bad_yaml_and_needs_exactly_one_input(client: TestClient) -> None:
-    assert client.post("/drafts/validation", json={"yaml": "nodes: [unclosed"}).status_code == 422
-    assert client.post("/drafts/validation", json={}).status_code == 422
-    both = {"definition": _pipeline(), "yaml": "x: 1"}
-    assert client.post("/drafts/validation", json=both).status_code == 422
+def test_validate_takes_a_definition_or_a_file_text_never_both(client: TestClient) -> None:
+    def status(body: dict[str, Any]) -> int:
+        return client.post("/drafts/validation", json=body).status_code
+
+    assert status({"format": "yaml", "text": "nodes: [unclosed"}) == 422
+    assert status({}) == 422
+    assert status({"definition": _pipeline()}) == 422, "says which format it is"
+    assert status({"format": "json", "definition": _pipeline(), "text": "x: 1"}) == 422
+    assert status({"format": "yaml", "definition": _pipeline()}) == 422
+
+
+def test_openapi_says_the_validation_body_is_one_or_the_other(client: TestClient) -> None:
+    operation = client.get("/openapi.json").json()["paths"]["/drafts/validation"]["post"]
+    schema = operation["requestBody"]["content"]["application/json"]["schema"]
+    assert schema["discriminator"]["propertyName"] == "format"
+    assert sorted(schema["discriminator"]["mapping"]) == ["json", "yaml"]
 
 
 # -- saving ------------------------------------------------------------------
@@ -890,7 +908,7 @@ def test_model_limits_endpoint(client: TestClient) -> None:
 def test_validate_warns_when_num_ctx_exceeds_the_model_maximum(client: TestClient) -> None:
     too_big = _pipeline()
     too_big["nodes"][0]["model"]["options"] = {"num_ctx": 32768}
-    body = client.post("/drafts/validation", json={"definition": too_big}).json()
+    body = client.post("/drafts/validation", json={"format": "json", "definition": too_big}).json()
     assert body["warnings"] == [
         {
             "node_id": "draft",
@@ -901,7 +919,12 @@ def test_validate_warns_when_num_ctx_exceeds_the_model_maximum(client: TestClien
     ]
     fits = _pipeline()
     fits["nodes"][0]["model"]["options"] = {"num_ctx": 4096}
-    assert client.post("/drafts/validation", json={"definition": fits}).json()["warnings"] == []
+    assert (
+        client.post("/drafts/validation", json={"format": "json", "definition": fits}).json()[
+            "warnings"
+        ]
+        == []
+    )
     # A warning never blocks saving.
     assert (
         client.put("/pipelines/fresh", json={"definition": too_big}, headers=CREATE).status_code
@@ -916,7 +939,7 @@ def test_limits_are_best_effort_when_ollama_is_down(client: TestClient) -> None:
     _use_catalog(client, shower=down)
     too_big = _pipeline()
     too_big["nodes"][0]["model"]["options"] = {"num_ctx": 32768}
-    response = client.post("/drafts/validation", json={"definition": too_big})
+    response = client.post("/drafts/validation", json={"format": "json", "definition": too_big})
     assert response.status_code == 200
     assert response.json()["warnings"] == []
     assert client.get("/models/ollama/llama3").status_code == 404
