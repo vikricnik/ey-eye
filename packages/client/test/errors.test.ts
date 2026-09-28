@@ -31,12 +31,12 @@ before(async () => {
     req.resume();
     if (req.url === "/ask/stream") {
       res.writeHead(200, { "Content-Type": "text/event-stream" });
-      const failure = errorBody(503, "PIPELINE_RUN_FAILED", "Node 'a' failed", { node_id: "a" });
+      const failure = errorBody(502, "PIPELINE_RUN_FAILED", "Node 'a' failed", { node_id: "a" });
       res.end(`event: error\ndata: ${JSON.stringify(failure)}\n\n`);
       return;
     }
-    res.writeHead(409, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(errorBody(409, "PIPELINE_EXISTS", "pipeline 'fresh' already exists")));
+    res.writeHead(412, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(errorBody(412, "ALREADY_EXISTS", "pipeline 'fresh' already exists")));
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -61,8 +61,8 @@ describe("error codes", () => {
   it("are exposed on a failed request", async () => {
     const client = new PipelineClient(base);
     const err = await rejection(client.savePipeline({ name: "fresh", nodes: [], output_node: "a" }, null));
-    assert.equal(err.code, "PIPELINE_EXISTS");
-    assert.equal(err.statusCode, 409);
+    assert.equal(err.code, "ALREADY_EXISTS");
+    assert.equal(err.statusCode, 412);
     assert.equal(err.serverMessage, "pipeline 'fresh' already exists");
     assert.equal(err.exceptionUID, "ref123");
   });
@@ -77,7 +77,7 @@ describe("error codes", () => {
     );
     assert.deepEqual(seen, []);
     assert.equal(err.code, "PIPELINE_RUN_FAILED");
-    assert.equal(err.statusCode, 503);
+    assert.equal(err.statusCode, 502);
     assert.equal(err.serverMessage, "Node 'a' failed");
     assert.deepEqual(err.details, { node_id: "a" });
   });

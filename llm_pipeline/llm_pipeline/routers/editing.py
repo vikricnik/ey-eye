@@ -13,7 +13,7 @@ translate between HTTP and those.
 
 from collections.abc import AsyncGenerator
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Header, Query, Request, Response
 from fastapi.responses import StreamingResponse
 
 from llm_pipeline.api_error import ApiError
@@ -46,7 +46,9 @@ from llm_pipeline.evaluation import Variant, make_judge, run_tests
 from llm_pipeline.pipeline_config import EvalCase, PipelineDefinition
 from llm_pipeline.pipeline_loader import PipelineCache, get_pipeline_cache
 from llm_pipeline.pipeline_store import (
+    ANY_REVISION,
     PipelineStore,
+    Precondition,
     definition_to_json,
     definition_to_yaml,
     effective_model_uses,
@@ -72,6 +74,39 @@ async def require_editing_enabled() -> None:
     reason = settings.editing_block_reason
     if reason is not None:
         raise ApiError(ErrorCode.EDITING_DISABLED, f"Pipeline {reason}")
+
+
+def _etag(revision: str) -> str:
+    """A revision as an ETag header value (a strong entity tag)."""
+    return f'"{revision}"'
+
+
+def _entity_tags(if_match: str) -> frozenset[str]:
+    """The revisions an If-Match header lists — `*`, or entity tags. A weak
+    tag (W/"…") never matches a write, so it is dropped."""
+    tags: set[str] = set()
+    for part in if_match.split(","):
+        tag = part.strip()
+        if tag and not tag.startswith("W/"):
+            tags.add(tag if tag == ANY_REVISION else tag.strip('"'))
+    return frozenset(tags)
+
+
+async def write_precondition(
+    if_match: str | None = Header(default=None),
+    if_none_match: str | None = Header(default=None),
+) -> Precondition:
+    """The request's If-Match / If-None-Match, as the condition the store
+    checks against the file before writing. Writes take If-None-Match: *
+    ("create, unless it exists") only."""
+    if if_none_match is not None and if_none_match.strip() != ANY_REVISION:
+        raise ApiError(
+            ErrorCode.REQUEST_INVALID, "writes support only If-None-Match: * (create only)"
+        )
+    return Precondition(
+        revisions=_entity_tags(if_match) if if_match is not None else None,
+        must_not_exist=if_none_match is not None,
+    )
 
 
 @router.get(
@@ -138,16 +173,17 @@ async def get_ollama_model_limits(
     responses={k: ERROR_RESPONSES[k] for k in (401, 404, 422, 429)},
 )
 async def get_pipeline(
-    name: str, store: PipelineStore = Depends(get_pipeline_store)
+    name: str, response: Response, store: PipelineStore = Depends(get_pipeline_store)
 ) -> PipelineDefinitionResponse:
-    """The complete definition — prompts, options, layout — plus the
-    revision to send back as `base_revision` when saving it with PUT. A
-    client that only draws the pipeline derives that from the definition
-    (the client package's detailFromDefinition)."""
+    """The complete definition — prompts, options, layout — plus its
+    revision, also sent as the ETag: send it back as If-Match when saving
+    with PUT. A client that only draws the pipeline derives that from the
+    definition (the client package's detailFromDefinition)."""
     try:
         stored = store.read_pipeline(name)
     except PipelineNotFoundError:
         raise ApiError(ErrorCode.PIPELINE_NOT_FOUND, f"No pipeline named '{name}'") from None
+    response.headers["ETag"] = _etag(stored.revision)
     return PipelineDefinitionResponse(
         definition=definition_to_json(stored.definition),
         revision=stored.revision,
@@ -292,15 +328,27 @@ async def run_pipeline_tests(
     "/pipelines/{name}",
     response_model=SavePipelineResponse,
     dependencies=[Depends(require_editing_enabled)],
-    responses={k: ERROR_RESPONSES[k] for k in (400, 401, 403, 409, 422, 429)},
+    responses={k: ERROR_RESPONSES[k] for k in (400, 401, 403, 412, 422, 428, 429)},
 )
 async def save_pipeline(
-    name: str, req: SavePipelineRequest, store: PipelineStore = Depends(get_pipeline_store)
+    name: str,
+    req: SavePipelineRequest,
+    response: Response,
+    precondition: Precondition = Depends(write_precondition),
+    store: PipelineStore = Depends(get_pipeline_store),
 ) -> SavePipelineResponse:
-    """Creates (`base_revision: null`) or updates (`base_revision` = the
-    revision you loaded) pipelines/<name>.yaml. Runs are picked up
-    immediately — the next /ask uses the saved version."""
-    stored = await store.save_pipeline(name, req.definition, req.base_revision)
+    """Creates (If-None-Match: *) or updates (If-Match: the ETag you loaded)
+    pipelines/<name>.yaml. One of the two is required: pipelines are
+    shared, and a blind overwrite could silently undo someone else's save.
+    Runs are picked up immediately — the next /ask uses the saved version."""
+    if not precondition.is_set:
+        raise ApiError(
+            ErrorCode.PRECONDITION_REQUIRED,
+            "say whether this save creates or updates: send If-None-Match: * to create "
+            "the pipeline, or If-Match with the ETag (revision) you loaded to update it",
+        )
+    stored = await store.save_pipeline(name, req.definition, precondition)
+    response.headers["ETag"] = _etag(stored.revision)
     return SavePipelineResponse(
         definition=definition_to_json(stored.definition),
         revision=stored.revision,
@@ -312,18 +360,27 @@ async def save_pipeline(
     "/pipelines/{name}",
     response_model=DeletedResponse,
     dependencies=[Depends(require_editing_enabled)],
-    responses={k: ERROR_RESPONSES[k] for k in (400, 401, 403, 404, 409, 429)},
+    responses={k: ERROR_RESPONSES[k] for k in (400, 401, 403, 404, 409, 412, 422, 429)},
 )
 async def delete_pipeline(
     name: str,
-    revision: str | None = None,
+    precondition: Precondition = Depends(write_precondition),
+    revision: str | None = Query(default=None, include_in_schema=False),
     store: PipelineStore = Depends(get_pipeline_store),
 ) -> DeletedResponse:
     """Moves pipelines/<name>.yaml to pipelines/.deleted/ (recoverable).
-    Pass `revision` to refuse if it changed since you loaded it. The
-    server's default pipeline can't be deleted (409)."""
+    Send If-Match with the ETag you loaded to refuse if it changed since.
+    The server's default pipeline can't be deleted (409)."""
+    if revision is not None:
+        # Ignoring it would quietly turn an old client's conditional delete
+        # into an unconditional one.
+        raise ApiError(
+            ErrorCode.REQUEST_INVALID,
+            "the `revision` query parameter was replaced by the If-Match header — send "
+            'If-Match: "<revision>"',
+        )
     try:
-        moved = await store.delete_pipeline(name, revision)
+        moved = await store.delete_pipeline(name, precondition)
     except PipelineNotFoundError:
         raise ApiError(ErrorCode.PIPELINE_NOT_FOUND, f"No pipeline named '{name}'") from None
     return DeletedResponse(name=name, recoverable_as=moved)
@@ -346,12 +403,13 @@ async def list_presets(store: PipelineStore = Depends(get_pipeline_store)) -> Pr
     responses={k: ERROR_RESPONSES[k] for k in (401, 404, 429)},
 )
 async def get_preset(
-    name: str, store: PipelineStore = Depends(get_pipeline_store)
+    name: str, response: Response, store: PipelineStore = Depends(get_pipeline_store)
 ) -> PresetResponse:
     try:
         stored = store.read_preset(name)
     except FileNotFoundError:
         raise ApiError(ErrorCode.PRESET_NOT_FOUND, f"No preset named '{name}'") from None
+    response.headers["ETag"] = _etag(stored.revision)
     return PresetResponse(
         preset=stored.preset.model_dump(mode="json", exclude_none=True), revision=stored.revision
     )
@@ -361,12 +419,19 @@ async def get_preset(
     "/presets/{name}",
     response_model=PresetResponse,
     dependencies=[Depends(require_editing_enabled)],
-    responses={k: ERROR_RESPONSES[k] for k in (400, 401, 403, 422, 429)},
+    responses={k: ERROR_RESPONSES[k] for k in (400, 401, 403, 412, 422, 429)},
 )
 async def save_preset(
-    name: str, req: SavePresetRequest, store: PipelineStore = Depends(get_pipeline_store)
+    name: str,
+    req: SavePresetRequest,
+    response: Response,
+    precondition: Precondition = Depends(write_precondition),
+    store: PipelineStore = Depends(get_pipeline_store),
 ) -> PresetResponse:
-    stored = await store.save_preset(name, req.preset)
+    """Creates or replaces presets/<name>.yaml — last write wins, unless you
+    send If-Match (the ETag you loaded) or If-None-Match: * (create only)."""
+    stored = await store.save_preset(name, req.preset, precondition)
+    response.headers["ETag"] = _etag(stored.revision)
     return PresetResponse(
         preset=stored.preset.model_dump(mode="json", exclude_none=True), revision=stored.revision
     )
@@ -376,14 +441,17 @@ async def save_preset(
     "/presets/{name}",
     response_model=DeletedResponse,
     dependencies=[Depends(require_editing_enabled)],
-    responses={k: ERROR_RESPONSES[k] for k in (400, 401, 403, 404, 429)},
+    responses={k: ERROR_RESPONSES[k] for k in (400, 401, 403, 404, 412, 422, 429)},
 )
 async def delete_preset(
-    name: str, store: PipelineStore = Depends(get_pipeline_store)
+    name: str,
+    precondition: Precondition = Depends(write_precondition),
+    store: PipelineStore = Depends(get_pipeline_store),
 ) -> DeletedResponse:
-    """Moves presets/<name>.yaml to presets/.deleted/ (recoverable)."""
+    """Moves presets/<name>.yaml to presets/.deleted/ (recoverable). Send
+    If-Match with the ETag you loaded to refuse if it changed since."""
     try:
-        moved = await store.delete_preset(name)
+        moved = await store.delete_preset(name, precondition)
     except FileNotFoundError:
         raise ApiError(ErrorCode.PRESET_NOT_FOUND, f"No preset named '{name}'") from None
     return DeletedResponse(name=name, recoverable_as=moved)

@@ -44,9 +44,9 @@ from ruamel.yaml.comments import CommentedMap, CommentedSeq
 from ruamel.yaml.scalarstring import LiteralScalarString
 
 from llm_pipeline.errors import (
+    AlreadyExistsError,
     DefinitionInvalidError,
     InvalidNameError,
-    PipelineExistsError,
     PipelineNotFoundError,
     ProtectedPipelineError,
     RevisionConflictError,
@@ -384,6 +384,51 @@ def effective_model_uses(definition: PipelineDefinition) -> list[ModelUse]:
     return uses
 
 
+# In Precondition.revisions: any existing file will do (HTTP's If-Match: *).
+ANY_REVISION = "*"
+
+
+@dataclass(frozen=True)
+class Precondition:
+    """When a write may go ahead, judged against the revision of the file it
+    replaces — compare-and-swap, as HTTP's If-Match and If-None-Match: *.
+    The default sets no condition: the write creates or replaces.
+
+    `revisions`: the file must exist at one of these revisions (ANY_REVISION:
+    at any). `must_not_exist`: create only."""
+
+    revisions: frozenset[str] | None = None
+    must_not_exist: bool = False
+
+    @property
+    def is_set(self) -> bool:
+        return self.revisions is not None or self.must_not_exist
+
+    def check(self, current: str | None, what: str) -> None:
+        """Raises unless a write to `what` (e.g. "pipeline 'x'"), whose file
+        is at revision `current` (None: no file), may go ahead."""
+        if self.revisions is not None:
+            if current is None:
+                raise RevisionConflictError(f"{what} no longer exists")
+            if ANY_REVISION not in self.revisions and current not in self.revisions:
+                raise RevisionConflictError(
+                    f"{what} changed since you loaded it — reload it to see the latest "
+                    f"version first"
+                )
+        if self.must_not_exist and current is not None:
+            raise AlreadyExistsError(
+                f"{what} already exists — load it first, or save under a different name"
+            )
+
+
+# The default for every write: no condition — it creates or replaces.
+NO_PRECONDITION = Precondition()
+
+
+def _revision_on_disk(path: Path) -> str | None:
+    return revision_of(path.read_bytes()) if path.is_file() else None
+
+
 @dataclass(frozen=True)
 class StoredPipeline:
     definition: PipelineDefinition
@@ -464,10 +509,10 @@ class PipelineStore:
         return await self.catalog.issues(model_blocks(definition), already)
 
     async def save_pipeline(
-        self, name: str, raw_definition: object, base_revision: str | None
+        self, name: str, raw_definition: object, precondition: Precondition = NO_PRECONDITION
     ) -> StoredPipeline:
-        """`base_revision=None` means "create": refused if the file exists.
-        Otherwise it must match the revision currently on disk."""
+        """Creates or replaces pipelines/<name>.yaml — if `precondition` holds
+        for the file on disk."""
         path = self._pipeline_path(name)
         definition = parse_definition(raw_definition)
         if definition.name != name:
@@ -477,19 +522,9 @@ class PipelineStore:
 
         async with self._lock(path):
             current = path.read_bytes() if path.is_file() else None
-            if base_revision is None and current is not None:
-                raise PipelineExistsError(
-                    f"pipeline '{name}' already exists — load it first, or save under a "
-                    f"different name"
-                )
-            if base_revision is not None:
-                if current is None:
-                    raise RevisionConflictError(f"pipeline '{name}' no longer exists")
-                if revision_of(current) != base_revision:
-                    raise RevisionConflictError(
-                        f"pipeline '{name}' changed since you loaded it — reload to see "
-                        f"the latest version before saving"
-                    )
+            precondition.check(
+                revision_of(current) if current is not None else None, f"pipeline '{name}'"
+            )
 
             await self.catalog.check(model_blocks(definition), self._stored_model_identities(name))
 
@@ -533,10 +568,10 @@ class PipelineStore:
             raise RuntimeError(f"canonical YAML for '{definition.name}' did not round-trip")
         return text, original is None or not _COMMENT_LINE.search(original)
 
-    async def delete_pipeline(self, name: str, base_revision: str | None) -> str:
-        """Soft-deletes pipelines/<name>.yaml (see _soft_delete) and returns
-        where it went, relative to the pipelines directory. With
-        `base_revision`, refuses if the file changed since it was loaded."""
+    async def delete_pipeline(self, name: str, precondition: Precondition = NO_PRECONDITION) -> str:
+        """Soft-deletes pipelines/<name>.yaml (see _soft_delete) — if
+        `precondition` holds — and returns where it went, relative to the
+        pipelines directory."""
         path = self._pipeline_path(name)
         if name == self.default_pipeline_name:
             raise ProtectedPipelineError(
@@ -546,10 +581,7 @@ class PipelineStore:
         async with self._lock(path):
             if not path.is_file():
                 raise PipelineNotFoundError(name)
-            if base_revision is not None and revision_of(path.read_bytes()) != base_revision:
-                raise RevisionConflictError(
-                    f"pipeline '{name}' changed since you loaded it — reload before deleting"
-                )
+            precondition.check(_revision_on_disk(path), f"pipeline '{name}'")
             moved = _soft_delete(path)
             self._on_pipeline_changed(name)
         return str(moved.relative_to(self.pipelines_dir))
@@ -587,9 +619,11 @@ class PipelineStore:
             raise FileNotFoundError(name)
         return self._read_preset_file(path)
 
-    async def save_preset(self, name: str, raw_preset: object) -> StoredPreset:
-        """Presets are small, personal building blocks, so saving one simply
-        creates or replaces it — no revision check."""
+    async def save_preset(
+        self, name: str, raw_preset: object, precondition: Precondition = NO_PRECONDITION
+    ) -> StoredPreset:
+        """Presets are small, personal building blocks, so saving one creates
+        or replaces it — unless the caller sets a `precondition`."""
         path = self._preset_path(name)
         try:
             preset = NodePreset.model_validate(raw_preset)
@@ -601,6 +635,7 @@ class PipelineStore:
             )
 
         async with self._lock(path):
+            precondition.check(_revision_on_disk(path), f"preset '{name}'")
             stored: set[str] = set()
             with contextlib.suppress(FileNotFoundError, DefinitionInvalidError):
                 stored = {model_identity(self.read_preset(name).preset.model)}
@@ -623,13 +658,14 @@ class PipelineStore:
             _atomic_write(path, text)
         return StoredPreset(preset, revision_of(text.encode("utf-8")))
 
-    async def delete_preset(self, name: str) -> str:
-        """Soft-deletes presets/<name>.yaml; returns where it went, relative
-        to the presets directory."""
+    async def delete_preset(self, name: str, precondition: Precondition = NO_PRECONDITION) -> str:
+        """Soft-deletes presets/<name>.yaml — if `precondition` holds — and
+        returns where it went, relative to the presets directory."""
         path = self._preset_path(name)
         async with self._lock(path):
             if not path.is_file():
                 raise FileNotFoundError(name)
+            precondition.check(_revision_on_disk(path), f"preset '{name}'")
             moved = _soft_delete(path)
         return str(moved.relative_to(self.presets_dir))
 

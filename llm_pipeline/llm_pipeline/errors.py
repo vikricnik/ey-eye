@@ -54,8 +54,8 @@ class RevisionConflictError(Exception):
     deleted since the client loaded it."""
 
 
-class PipelineExistsError(RevisionConflictError):
-    """A create (no base revision) for a name that is already taken."""
+class AlreadyExistsError(RevisionConflictError):
+    """A create-only write (If-None-Match: *) for a name that is taken."""
 
 
 class ProtectedPipelineError(Exception):

@@ -128,6 +128,12 @@ function parseSseEvent(raw: string): { event: string; data: string } | null {
   return { event, data: dataLines.join("\n") };
 }
 
+/** A write that goes ahead only if the resource is still at `revision` —
+ * the server's revisions are its ETags. */
+function ifMatch(revision: string): Record<string, string> {
+  return { "If-Match": `"${revision}"` };
+}
+
 const ASK_EVENTS: ReadonlySet<string> = new Set(["node_start", "node_token", "node_complete", "loop_iteration", "done"]);
 const TEST_EVENTS: ReadonlySet<string> = new Set(["case_start", "case_result", "tests_done"]);
 
@@ -163,16 +169,18 @@ export class PipelineClient {
   private async request<T>(
     method: "GET" | "POST" | "PUT" | "DELETE",
     path: string,
-    body?: unknown
+    body?: unknown,
+    headers: Record<string, string> = {}
   ): Promise<T> {
     let response: Response;
     try {
       response = await fetch(`${this.baseUrl}${path}`, {
         method,
-        headers:
-          body === undefined
-            ? this.authHeaders()
-            : { "Content-Type": "application/json", ...this.authHeaders() },
+        headers: {
+          ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+          ...headers,
+          ...this.authHeaders(),
+        },
         body: body === undefined ? undefined : JSON.stringify(body),
       });
     } catch {
@@ -235,9 +243,10 @@ export class PipelineClient {
     return this.request<PreviewPromptResponse>("POST", "/pipelines/preview", req);
   }
 
-  /** Creates (`baseRevision` null) or updates a pipeline. Throws with
-   * status 409 if it already exists (create) or changed since
-   * `baseRevision` was loaded, 403 if editing is disabled server-side. */
+  /** Creates (`baseRevision` null) or updates a pipeline — sent as
+   * If-None-Match: * or If-Match. Throws ALREADY_EXISTS (create) or
+   * REVISION_CONFLICT (changed since `baseRevision` was loaded), both 412,
+   * or EDITING_DISABLED (403). */
   async savePipeline(
     definition: PipelineDefinition,
     baseRevision: string | null
@@ -245,7 +254,8 @@ export class PipelineClient {
     return this.request<SavePipelineResponse>(
       "PUT",
       `/pipelines/${encodeURIComponent(definition.name)}`,
-      { definition, base_revision: baseRevision }
+      { definition },
+      baseRevision === null ? { "If-None-Match": "*" } : ifMatch(baseRevision)
     );
   }
 
@@ -258,23 +268,38 @@ export class PipelineClient {
   }
 
   /** Soft-deletes a pipeline (moved to pipelines/.deleted/). With
-   * `revision`, refused (409) if it changed since it was loaded; the
-   * server's default pipeline can't be deleted (409). */
-  async deletePipeline(name: string, revision?: string): Promise<DeletedResponse> {
-    const query = revision ? `?revision=${encodeURIComponent(revision)}` : "";
-    return this.request<DeletedResponse>("DELETE", `/pipelines/${encodeURIComponent(name)}${query}`);
+   * `baseRevision`, refused (REVISION_CONFLICT) if it changed since it was
+   * loaded; the server's default pipeline can't be deleted
+   * (PIPELINE_PROTECTED). */
+  async deletePipeline(name: string, baseRevision?: string): Promise<DeletedResponse> {
+    return this.request<DeletedResponse>(
+      "DELETE",
+      `/pipelines/${encodeURIComponent(name)}`,
+      undefined,
+      baseRevision === undefined ? {} : ifMatch(baseRevision)
+    );
   }
 
-  /** Soft-deletes a preset (moved to presets/.deleted/). */
-  async deletePreset(name: string): Promise<DeletedResponse> {
-    return this.request<DeletedResponse>("DELETE", `/presets/${encodeURIComponent(name)}`);
+  /** Soft-deletes a preset (moved to presets/.deleted/). With
+   * `baseRevision`, refused (REVISION_CONFLICT) if it changed since. */
+  async deletePreset(name: string, baseRevision?: string): Promise<DeletedResponse> {
+    return this.request<DeletedResponse>(
+      "DELETE",
+      `/presets/${encodeURIComponent(name)}`,
+      undefined,
+      baseRevision === undefined ? {} : ifMatch(baseRevision)
+    );
   }
 
-  /** Creates or replaces a preset. */
-  async savePreset(preset: NodePreset): Promise<PresetResponse> {
-    return this.request<PresetResponse>("PUT", `/presets/${encodeURIComponent(preset.name)}`, {
-      preset,
-    });
+  /** Creates or replaces a preset — last write wins, unless you pass the
+   * `baseRevision` you loaded (REVISION_CONFLICT if it changed since). */
+  async savePreset(preset: NodePreset, baseRevision?: string): Promise<PresetResponse> {
+    return this.request<PresetResponse>(
+      "PUT",
+      `/presets/${encodeURIComponent(preset.name)}`,
+      { preset },
+      baseRevision === undefined ? {} : ifMatch(baseRevision)
+    );
   }
 
   async ask(

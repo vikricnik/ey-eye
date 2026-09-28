@@ -435,7 +435,8 @@ export interface ModelsResponse {
 
 export interface PipelineDefinitionResponse {
   definition: PipelineDefinition;
-  /** Send back as `base_revision` when saving. */
+  /** Also sent as the ETag. Pass it to savePipeline() as `baseRevision`
+   * (sent as If-Match) so the save refuses to overwrite a newer version. */
   revision: string;
   /** The file has YAML comments (kept when saving). */
   has_comments: boolean;
@@ -467,6 +468,9 @@ export interface SavePipelineResponse {
 
 export interface PresetResponse {
   preset: NodePreset;
+  /** Also sent as the ETag — pass it to savePreset()/deletePreset() to
+   * refuse overwriting a newer version (preset writes are otherwise
+   * last-write-wins). */
   revision: string;
 }
 
@@ -489,9 +493,8 @@ export interface ValidationIssue {
 
 /** What went wrong — the server's ErrorCode (api_schemas.py), for code
  * that must act differently per failure. `status` alone can't tell apart
- * failures that share one (409: changed since loaded, name taken, or the
- * protected default pipeline); each code always comes with the same
- * status. The server may add codes; treat one you don't know by its status. */
+ * failures that share one (412: changed since loaded, or name taken);
+ * each code always comes with the same status. The server may add codes; treat one you don't know by its status. */
 export type ErrorCode =
   | "REQUEST_INVALID"
   | "UNAUTHENTICATED"
@@ -504,9 +507,10 @@ export type ErrorCode =
   | "DEFINITION_INVALID"
   | "MODEL_NOT_ALLOWED"
   | "EDITING_DISABLED"
-  | "PIPELINE_EXISTS"
+  | "ALREADY_EXISTS"
   | "REVISION_CONFLICT"
   | "PIPELINE_PROTECTED"
+  | "PRECONDITION_REQUIRED"
   | "INPUT_INVALID"
   | "INPUT_TOO_LARGE"
   | "NODE_NOT_FOUND"

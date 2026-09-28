@@ -25,9 +25,9 @@ from fastapi.responses import JSONResponse
 from llm_pipeline.api_error import STATUS_BY_CODE, ApiError
 from llm_pipeline.api_schemas import ErrorCode, ErrorResponse, ValidationIssue
 from llm_pipeline.errors import (
+    AlreadyExistsError,
     DefinitionInvalidError,
     InvalidNameError,
-    PipelineExistsError,
     ProtectedPipelineError,
     RevisionConflictError,
 )
@@ -192,8 +192,8 @@ def register_exception_handlers(app: FastAPI) -> None:
         request: Request, exc: Exception
     ) -> JSONResponse:
         """(pyright false positive — see http_exception_handler's docstring.)"""
-        if isinstance(exc, PipelineExistsError):
-            code = ErrorCode.PIPELINE_EXISTS
+        if isinstance(exc, AlreadyExistsError):
+            code = ErrorCode.ALREADY_EXISTS
         elif isinstance(exc, ProtectedPipelineError):
             code = ErrorCode.PIPELINE_PROTECTED
         else:
@@ -233,7 +233,9 @@ ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
     401: {"model": ErrorResponse, "description": "Missing or invalid API key"},
     403: {"model": ErrorResponse, "description": "Pipeline editing is disabled"},
     404: {"model": ErrorResponse, "description": "A pipeline, node, preset, … that doesn't exist"},
-    409: {"model": ErrorResponse, "description": "Changed since loaded, name taken, or protected"},
+    409: {"model": ErrorResponse, "description": "The default pipeline can't be deleted"},
+    412: {"model": ErrorResponse, "description": "If-Match / If-None-Match didn't hold"},
+    428: {"model": ErrorResponse, "description": "Saving needs If-Match or If-None-Match"},
     422: {"model": ErrorResponse, "description": "Request or submitted definition is invalid"},
     429: {"model": ErrorResponse, "description": "Rate limit exceeded"},
     500: {"model": ErrorResponse, "description": "Unexpected server error"},

@@ -109,6 +109,9 @@ def create_app() -> FastAPI:
         allow_origins=settings.cors_origins_list,
         allow_methods=["*"],
         allow_headers=["*"],
+        # A browser only lets page scripts read response headers listed here;
+        # ETag is the revision to send back as If-Match.
+        expose_headers=["ETag"],
     )
     app.middleware("http")(request_id_middleware)
 

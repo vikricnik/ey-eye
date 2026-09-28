@@ -24,6 +24,8 @@ from llm_pipeline.pipeline_config.templates import render
 from llm_pipeline.providers import ModelSpec
 from llm_pipeline.settings import settings
 
+CREATE = {"If-None-Match": "*"}  # a save creates only if the pipeline is new
+
 
 class _Recorder:
     """Records every call (spec, prompt, system) and answers per model."""
@@ -324,13 +326,13 @@ def _use_catalog(client: TestClient) -> None:
 def test_default_and_summarizer_models_must_be_allowed(client: TestClient) -> None:
     _use_catalog(client)
     definition = _classifier_pipeline(summarize={"model": {"provider": "ollama", "model": "big"}})
-    response = client.put("/pipelines/chat", json={"definition": definition})
+    response = client.put("/pipelines/chat", json={"definition": definition}, headers=CREATE)
     assert response.status_code == 422
     assert "history summarizer" in response.json()["message"]
 
     definition = _classifier_pipeline()
     definition["defaults"]["model"]["model"] = "unknown"
-    response = client.put("/pipelines/chat", json={"definition": definition})
+    response = client.put("/pipelines/chat", json={"definition": definition}, headers=CREATE)
     assert response.status_code == 422
     assert "pipeline default model" in response.json()["message"]
 

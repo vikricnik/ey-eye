@@ -21,6 +21,15 @@ from llm_pipeline.pipeline_store import definition_to_yaml, parse_definition_yam
 from llm_pipeline.settings import settings
 
 SHIPPED_PIPELINES = Path(__file__).parent.parent / "pipelines"
+# Saving a pipeline needs a precondition: create only if it doesn't exist...
+CREATE = {"If-None-Match": "*"}
+
+
+def _if_match(revision: str) -> dict[str, str]:
+    """...or change the revision you loaded (its ETag)."""
+    return {"If-Match": f'"{revision}"'}
+
+
 INSTALLED = ["llama3:latest", "gemma3:12b", "qwen3-coder:30b", "llama3.2:3b"]
 
 
@@ -105,7 +114,7 @@ def test_saving_is_forbidden_when_editing_is_disabled(
     client: TestClient, dirs: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(settings, "pipeline_editing_enabled", False)
-    response = client.put("/pipelines/fresh", json={"definition": _pipeline()})
+    response = client.put("/pipelines/fresh", json={"definition": _pipeline()}, headers=CREATE)
     assert response.status_code == 403
     assert response.json()["code"] == "EDITING_DISABLED"
     assert "PIPELINE_EDITING_ENABLED" in response.json()["message"]
@@ -119,11 +128,16 @@ def test_editing_endpoints_require_an_api_key_when_auth_is_on(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(settings, "api_keys", "secret")
-    assert client.put("/pipelines/fresh", json={"definition": _pipeline()}).status_code == 401
+    assert (
+        client.put("/pipelines/fresh", json={"definition": _pipeline()}, headers=CREATE).status_code
+        == 401
+    )
     assert client.get("/models").status_code == 401
     assert client.get("/presets").status_code == 401
     ok = client.put(
-        "/pipelines/fresh", json={"definition": _pipeline()}, headers={"X-API-Key": "secret"}
+        "/pipelines/fresh",
+        json={"definition": _pipeline()},
+        headers={**CREATE, "X-API-Key": "secret"},
     )
     assert ok.status_code == 200
 
@@ -134,7 +148,7 @@ def test_wildcard_cors_without_api_key_blocks_editing(
     """Any web page the user visits could otherwise send writes to a local
     server from their browser — so this combination fails closed."""
     monkeypatch.setattr(settings, "cors_allowed_origins", "*")
-    response = client.put("/pipelines/fresh", json={"definition": _pipeline()})
+    response = client.put("/pipelines/fresh", json={"definition": _pipeline()}, headers=CREATE)
     assert response.status_code == 403
     assert response.json()["code"] == "EDITING_DISABLED"
     assert "CORS_ALLOWED_ORIGINS" in response.json()["message"]
@@ -151,7 +165,9 @@ def test_wildcard_cors_is_fine_once_an_api_key_is_required(
     monkeypatch.setattr(settings, "cors_allowed_origins", "*")
     monkeypatch.setattr(settings, "api_keys", "secret")
     response = client.put(
-        "/pipelines/fresh", json={"definition": _pipeline()}, headers={"X-API-Key": "secret"}
+        "/pipelines/fresh",
+        json={"definition": _pipeline()},
+        headers={**CREATE, "X-API-Key": "secret"},
     )
     assert response.status_code == 200
     health = client.get("/health").json()
@@ -160,7 +176,10 @@ def test_wildcard_cors_is_fine_once_an_api_key_is_required(
 
 
 def test_explicit_origins_allow_editing_without_a_key(client: TestClient) -> None:
-    assert client.put("/pipelines/fresh", json={"definition": _pipeline()}).status_code == 200
+    assert (
+        client.put("/pipelines/fresh", json={"definition": _pipeline()}, headers=CREATE).status_code
+        == 200
+    )
     assert client.get("/health").json()["editing_enabled"] is True
 
 
@@ -202,7 +221,8 @@ def test_a_pipeline_reads_as_what_a_save_accepts(client: TestClient) -> None:
     loaded = client.get("/pipelines/consensus-qa").json()
     saved = client.put(
         "/pipelines/consensus-qa",
-        json={"definition": loaded["definition"], "base_revision": loaded["revision"]},
+        json={"definition": loaded["definition"]},
+        headers=_if_match(loaded["revision"]),
     )
     assert saved.status_code == 200, saved.text
     assert saved.json()["definition"] == loaded["definition"]
@@ -293,7 +313,7 @@ def test_validate_rejects_bad_yaml_and_needs_exactly_one_input(client: TestClien
 def test_create_writes_the_file_and_runs_use_it_immediately(
     client: TestClient, dirs: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    response = client.put("/pipelines/fresh", json={"definition": _pipeline()})
+    response = client.put("/pipelines/fresh", json={"definition": _pipeline()}, headers=CREATE)
     assert response.status_code == 200
     path = dirs[0] / "fresh.yaml"
     on_disk = yaml.safe_load(path.read_text())
@@ -317,7 +337,7 @@ def test_invalid_definition_is_rejected_and_nothing_is_written(
 ) -> None:
     cyclic = _pipeline()
     cyclic["nodes"][0]["depends_on"] = ["polish"]
-    response = client.put("/pipelines/fresh", json={"definition": cyclic})
+    response = client.put("/pipelines/fresh", json={"definition": cyclic}, headers=CREATE)
     assert response.status_code == 422
     assert response.json()["code"] == "DEFINITION_INVALID"
     assert "cycle" in response.json()["message"]
@@ -328,25 +348,32 @@ def test_invalid_definition_is_rejected_and_nothing_is_written(
 def test_disallowed_models_are_rejected_and_nothing_is_written(
     client: TestClient, dirs: tuple[Path, Path]
 ) -> None:
-    response = client.put("/pipelines/fresh", json={"definition": _pipeline(model="evil:latest")})
+    response = client.put(
+        "/pipelines/fresh", json={"definition": _pipeline(model="evil:latest")}, headers=CREATE
+    )
     assert response.status_code == 422
     assert response.json()["code"] == "MODEL_NOT_ALLOWED"
     assert response.json()["details"] == {"node_id": "draft"}
 
     cloud = _pipeline()
     cloud["nodes"][0]["model"] = {"provider": "anthropic", "model": "claude-x"}
-    response = client.put("/pipelines/fresh", json={"definition": cloud})
+    response = client.put("/pipelines/fresh", json={"definition": cloud}, headers=CREATE)
     assert response.status_code == 422
     assert "EDITOR_CLOUD_MODELS" in response.json()["message"]
 
     allowed_cloud = _pipeline()
     allowed_cloud["nodes"][0]["model"] = {"provider": "openai", "model": "gpt-4o"}
-    assert client.put("/pipelines/fresh", json={"definition": allowed_cloud}).status_code == 200
+    assert (
+        client.put(
+            "/pipelines/fresh", json={"definition": allowed_cloud}, headers=CREATE
+        ).status_code
+        == 200
+    )
 
 
 def test_unreachable_ollama_fails_closed(client: TestClient, dirs: tuple[Path, Path]) -> None:
     _use_catalog(client, _ollama_down)
-    response = client.put("/pipelines/fresh", json={"definition": _pipeline()})
+    response = client.put("/pipelines/fresh", json={"definition": _pipeline()}, headers=CREATE)
     assert response.status_code == 422
     assert "can't verify" in response.json()["message"]
     assert not (dirs[0] / "fresh.yaml").exists()
@@ -362,42 +389,87 @@ def test_models_already_in_the_stored_pipeline_can_be_resaved(client: TestClient
     definition["nodes"][0]["prompt_template"] = "Answer briefly: {{ input }}"
     response = client.put(
         "/pipelines/consensus-qa",
-        json={"definition": definition, "base_revision": loaded["revision"]},
+        json={"definition": definition},
+        headers=_if_match(loaded["revision"]),
     )
     assert response.status_code == 200, response.json()
 
 
 def test_create_refuses_to_overwrite_and_stale_revisions_conflict(client: TestClient) -> None:
-    created = client.put("/pipelines/fresh", json={"definition": _pipeline()}).json()
-    again = client.put("/pipelines/fresh", json={"definition": _pipeline()})
-    assert again.status_code == 409
-    assert again.json()["code"] == "PIPELINE_EXISTS"
+    created = client.put(
+        "/pipelines/fresh", json={"definition": _pipeline()}, headers=CREATE
+    ).json()
+    again = client.put("/pipelines/fresh", json={"definition": _pipeline()}, headers=CREATE)
+    assert again.status_code == 412
+    assert again.json()["code"] == "ALREADY_EXISTS"
     assert "already exists" in again.json()["message"]
 
     edited = _pipeline()
     edited["nodes"][0]["model"]["temperature"] = 0.9
     first = client.put(
-        "/pipelines/fresh", json={"definition": edited, "base_revision": created["revision"]}
+        "/pipelines/fresh", json={"definition": edited}, headers=_if_match(created["revision"])
     )
     assert first.status_code == 200
     stale = client.put(
-        "/pipelines/fresh", json={"definition": edited, "base_revision": created["revision"]}
+        "/pipelines/fresh", json={"definition": edited}, headers=_if_match(created["revision"])
     )
-    assert stale.status_code == 409
+    assert stale.status_code == 412
     assert stale.json()["code"] == "REVISION_CONFLICT"
     assert "changed since you loaded it" in stale.json()["message"]
 
 
+def test_a_save_must_say_whether_it_creates_or_updates(
+    client: TestClient, dirs: tuple[Path, Path]
+) -> None:
+    """No If-Match / If-None-Match: a blind overwrite could silently undo
+    someone else's save, so it is refused (428) rather than guessed at."""
+    response = client.put("/pipelines/fresh", json={"definition": _pipeline()})
+    assert response.status_code == 428
+    assert response.json()["code"] == "PRECONDITION_REQUIRED"
+    assert not (dirs[0] / "fresh.yaml").exists()
+
+
+def test_reads_and_saves_carry_the_revision_as_an_etag(client: TestClient) -> None:
+    created = client.put("/pipelines/fresh", json={"definition": _pipeline()}, headers=CREATE)
+    assert created.headers["ETag"] == f'"{created.json()["revision"]}"'
+    loaded = client.get("/pipelines/fresh")
+    assert loaded.headers["ETag"] == created.headers["ETag"]
+    assert loaded.json()["revision"] == created.json()["revision"]
+
+
+def test_if_match_any_updates_an_existing_pipeline_only(client: TestClient) -> None:
+    missing = client.put(
+        "/pipelines/fresh", json={"definition": _pipeline()}, headers={"If-Match": "*"}
+    )
+    assert missing.status_code == 412
+    assert missing.json()["code"] == "REVISION_CONFLICT"
+
+    client.put("/pipelines/fresh", json={"definition": _pipeline()}, headers=CREATE)
+    edited = _pipeline()
+    edited["nodes"][0]["model"]["temperature"] = 0.9
+    updated = client.put("/pipelines/fresh", json={"definition": edited}, headers={"If-Match": "*"})
+    assert updated.status_code == 200
+
+
+def test_browsers_may_read_the_etag(client: TestClient) -> None:
+    response = client.get("/pipelines/consensus-qa", headers={"Origin": "http://localhost:5173"})
+    assert "etag" in response.headers["access-control-expose-headers"].lower()
+
+
 @pytest.mark.parametrize("name", ["..", "bad name", "a.b"])
 def test_unsafe_names_are_rejected_on_save(client: TestClient, name: str) -> None:
-    response = client.put(f"/pipelines/{name}", json={"definition": _pipeline(name=name)})
+    response = client.put(
+        f"/pipelines/{name}", json={"definition": _pipeline(name=name)}, headers=CREATE
+    )
     assert response.status_code in (400, 404, 405)
 
 
 def test_path_traversal_name_is_rejected_on_save(
     client: TestClient, dirs: tuple[Path, Path]
 ) -> None:
-    response = client.put("/pipelines/..%2Fescape", json={"definition": _pipeline(name="x")})
+    response = client.put(
+        "/pipelines/..%2Fescape", json={"definition": _pipeline(name="x")}, headers=CREATE
+    )
     assert response.status_code in (400, 404)
     assert not (dirs[0].parent / "escape.yaml").exists()
 
@@ -405,13 +477,17 @@ def test_path_traversal_name_is_rejected_on_save(
 def test_a_name_with_a_trailing_newline_is_not_saved(
     client: TestClient, dirs: tuple[Path, Path]
 ) -> None:
-    response = client.put("/pipelines/demo%0A", json={"definition": _pipeline(name="demo\n")})
+    response = client.put(
+        "/pipelines/demo%0A", json={"definition": _pipeline(name="demo\n")}, headers=CREATE
+    )
     assert 400 <= response.status_code < 500
     assert list(dirs[0].glob("demo*")) == []
 
 
 def test_name_in_url_must_match_the_definition(client: TestClient) -> None:
-    response = client.put("/pipelines/other", json={"definition": _pipeline(name="fresh")})
+    response = client.put(
+        "/pipelines/other", json={"definition": _pipeline(name="fresh")}, headers=CREATE
+    )
     assert response.status_code == 422
     assert "must match" in response.json()["message"]
 
@@ -526,8 +602,10 @@ def test_a_preset_prompt_must_parse(client: TestClient, dirs: tuple[Path, Path])
 def test_delete_moves_the_file_aside_and_drops_it_from_listings(
     client: TestClient, dirs: tuple[Path, Path]
 ) -> None:
-    created = client.put("/pipelines/fresh", json={"definition": _pipeline()}).json()
-    response = client.delete(f"/pipelines/fresh?revision={created['revision']}")
+    created = client.put(
+        "/pipelines/fresh", json={"definition": _pipeline()}, headers=CREATE
+    ).json()
+    response = client.delete("/pipelines/fresh", headers=_if_match(created["revision"]))
     assert response.status_code == 200
     body = response.json()
     assert body["name"] == "fresh"
@@ -551,9 +629,9 @@ def test_delete_refuses_the_default_pipeline_stale_revisions_and_unknown_names(
     assert "default pipeline" in refused.json()["message"]
     assert (dirs[0] / f"{default}.yaml").is_file()
 
-    client.put("/pipelines/fresh", json={"definition": _pipeline()})
-    stale = client.delete("/pipelines/fresh?revision=0000000000000000")
-    assert stale.status_code == 409
+    client.put("/pipelines/fresh", json={"definition": _pipeline()}, headers=CREATE)
+    stale = client.delete("/pipelines/fresh", headers=_if_match("0000000000000000"))
+    assert stale.status_code == 412
     assert stale.json()["code"] == "REVISION_CONFLICT"
     assert (dirs[0] / "fresh.yaml").is_file()
 
@@ -565,10 +643,23 @@ def test_delete_refuses_the_default_pipeline_stale_revisions_and_unknown_names(
     assert bad_name.json()["code"] == "NAME_INVALID"
 
 
+def test_the_old_revision_query_is_refused_not_ignored(
+    client: TestClient, dirs: tuple[Path, Path]
+) -> None:
+    """Dropping it silently would turn a client's conditional delete into an
+    unconditional one."""
+    client.put("/pipelines/fresh", json={"definition": _pipeline()}, headers=CREATE)
+    response = client.delete("/pipelines/fresh?revision=0000000000000000")
+    assert response.status_code == 422
+    assert response.json()["code"] == "REQUEST_INVALID"
+    assert "If-Match" in response.json()["message"]
+    assert (dirs[0] / "fresh.yaml").is_file()
+
+
 def test_delete_needs_editing_enabled(
     client: TestClient, dirs: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    client.put("/pipelines/fresh", json={"definition": _pipeline()})
+    client.put("/pipelines/fresh", json={"definition": _pipeline()}, headers=CREATE)
     monkeypatch.setattr(settings, "pipeline_editing_enabled", False)
     assert client.delete("/pipelines/fresh").status_code == 403
     assert client.delete("/presets/anything").status_code == 403
@@ -583,6 +674,31 @@ def test_presets_can_be_deleted(client: TestClient, dirs: tuple[Path, Path]) -> 
     assert (dirs[1] / response.json()["recoverable_as"]).is_file()
     assert client.get("/presets").json() == {"presets": []}
     assert client.delete("/presets/terse-llama").status_code == 404
+
+
+def test_preset_writes_honour_preconditions_when_sent(client: TestClient) -> None:
+    """Presets stay last-write-wins by default, but their revision is real:
+    send it as If-Match to refuse overwriting someone else's change."""
+    first = client.put("/presets/terse-llama", json={"preset": _preset()})
+    assert first.status_code == 200  # no precondition needed
+    etag = first.headers["ETag"]
+    assert etag == f'"{first.json()["revision"]}"'
+    assert client.get("/presets/terse-llama").headers["ETag"] == etag
+
+    changed = {**_preset(), "description": "Changed elsewhere"}
+    assert client.put("/presets/terse-llama", json={"preset": changed}).status_code == 200
+    stale = client.put(
+        "/presets/terse-llama", json={"preset": _preset()}, headers={"If-Match": etag}
+    )
+    assert stale.status_code == 412
+    assert stale.json()["code"] == "REVISION_CONFLICT"
+
+    taken = client.put("/presets/terse-llama", json={"preset": _preset()}, headers=CREATE)
+    assert taken.status_code == 412
+    assert taken.json()["code"] == "ALREADY_EXISTS"
+
+    stale_delete = client.delete("/presets/terse-llama", headers={"If-Match": etag})
+    assert stale_delete.status_code == 412
 
 
 # -- keeping comments ----------------------------------------------------------
@@ -611,7 +727,8 @@ def test_saving_unchanged_keeps_the_file_byte_identical(
     loaded = client.get(f"/pipelines/{name}").json()
     saved = client.put(
         f"/pipelines/{name}",
-        json={"definition": loaded["definition"], "base_revision": loaded["revision"]},
+        json={"definition": loaded["definition"]},
+        headers=_if_match(loaded["revision"]),
     ).json()
     assert saved["comments_preserved"] is True
     assert path.read_text() == before
@@ -627,7 +744,8 @@ def test_editing_one_prompt_changes_only_that_line(
     definition["nodes"][0]["prompt_template"] = "Answer briefly: {{ input }}"
     saved = client.put(
         "/pipelines/consensus-qa",
-        json={"definition": definition, "base_revision": loaded["revision"]},
+        json={"definition": definition},
+        headers=_if_match(loaded["revision"]),
     ).json()
 
     after = path.read_text()
@@ -659,7 +777,8 @@ def test_structural_edits_keep_every_other_comment(
     )
     saved = client.put(
         "/pipelines/consensus-qa",
-        json={"definition": definition, "base_revision": loaded["revision"]},
+        json={"definition": definition},
+        headers=_if_match(loaded["revision"]),
     ).json()
     after = path.read_text()
 
@@ -680,7 +799,8 @@ def test_structural_edits_keep_every_other_comment(
     definition["nodes"] = [n for n in definition["nodes"] if n["id"] != "audit"]
     client.put(
         "/pipelines/consensus-qa",
-        json={"definition": definition, "base_revision": loaded["revision"]},
+        json={"definition": definition},
+        headers=_if_match(loaded["revision"]),
     )
     assert _comment_lines(path.read_text()) == _comment_lines(before)
 
@@ -699,7 +819,8 @@ def test_falls_back_to_canonical_when_the_merge_would_change_meaning(
     definition["nodes"][0]["prompt_template"] = "Changed: {{ input }}"
     saved = client.put(
         "/pipelines/consensus-qa",
-        json={"definition": definition, "base_revision": loaded["revision"]},
+        json={"definition": definition},
+        headers=_if_match(loaded["revision"]),
     ).json()
 
     assert saved["comments_preserved"] is False
@@ -753,7 +874,10 @@ def test_validate_warns_when_num_ctx_exceeds_the_model_maximum(client: TestClien
     fits["nodes"][0]["model"]["options"] = {"num_ctx": 4096}
     assert client.post("/pipelines/validate", json={"definition": fits}).json()["warnings"] == []
     # A warning never blocks saving.
-    assert client.put("/pipelines/fresh", json={"definition": too_big}).status_code == 200
+    assert (
+        client.put("/pipelines/fresh", json={"definition": too_big}, headers=CREATE).status_code
+        == 200
+    )
 
 
 def test_limits_are_best_effort_when_ollama_is_down(client: TestClient) -> None:

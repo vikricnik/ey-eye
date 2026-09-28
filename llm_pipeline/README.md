@@ -524,8 +524,9 @@ Same `available_pipelines` list, standalone.
 ### `GET /pipelines/{name}`
 Returns the pipeline as stored — its complete definition (nodes, prompts,
 models, branches, loops, layout), in exactly the shape of its YAML file,
-plus the `revision` to send back as `base_revision` when saving it with
-`PUT /pipelines/{name}`. What you read is what you save:
+plus its `revision` — also the response's `ETag` header — to send back as
+`If-Match` when saving it with `PUT /pipelines/{name}`. What you read is
+what you save:
 ```json
 {
   "definition": {
@@ -736,11 +737,11 @@ Set `API_KEYS`, or list the actual client origins (e.g.
 | `GET /models/ollama/{name}` | An installed Ollama model's limits — max context length, parameter size, quantization, family — for editor hints. 404 when it isn't installed or Ollama can't be reached. |
 | `GET /pipelines/{name}` | The full definition (prompts, options, layout) plus its `revision` and whether the file has YAML comments (`has_comments`) — what `PUT` takes back. |
 | `POST /pipelines/validate` | Body `{"definition": {...}}` or `{"yaml": "..."}`. Validates without saving and returns `{definition, yaml, model_issues, warnings}` — the same call serves live validation, import (YAML in) and export (canonical YAML out). `warnings` flags settings beyond what a model supports (e.g. `num_ctx` above its maximum context) but never blocks a save. A 422 names the offending node in `details.node_id`. |
-| `PUT /pipelines/{name}` | Body `{"definition": {...}, "base_revision": "..."}`. `base_revision: null` creates (409 if it exists); otherwise it must match the file on disk (409 if someone saved in between). Writes `pipelines/<name>.yaml` atomically; the next run uses it. |
-| `DELETE /pipelines/{name}?revision=…` | Moves the file to `pipelines/.deleted/<name>.<timestamp>.yaml` — recoverable by moving it back. `revision` (optional) refuses the delete if the file changed since loaded; the server's `DEFAULT_PIPELINE_NAME` can't be deleted (409). |
+| `PUT /pipelines/{name}` | Body `{"definition": {...}}`, and a header saying whether this creates or updates: `If-None-Match: *` creates (412 `ALREADY_EXISTS` if the name is taken); `If-Match: "<revision>"` updates only the version you loaded (412 `REVISION_CONFLICT` if someone saved in between; `If-Match: *` updates whatever is there). Neither is `428 PRECONDITION_REQUIRED` — a blind overwrite could undo someone else's save. Writes `pipelines/<name>.yaml` atomically; the response's `ETag` is the new revision, and the next run uses it. |
+| `DELETE /pipelines/{name}` | Moves the file to `pipelines/.deleted/<name>.<timestamp>.yaml` — recoverable by moving it back. `If-Match: "<revision>"` (optional) refuses the delete if the file changed since loaded (412); the server's `DEFAULT_PIPELINE_NAME` can't be deleted (409). The old `?revision=` query is refused (422) rather than ignored. |
 | `POST /pipelines/preview` | Body `{"definition": {...}, "node_id": "...", "prompt": "...", "history": [...], "outputs": {<node>: <text>}}`. What that node would receive — `{prompt, system, missing}` — rendered by the same code a run uses, from a definition that needn't be saved. Inputs with no output given appear as `<node's output>` placeholders (listed in `missing`); older turns a run would summarize are left out (previews never call a model). Needs editing enabled — it renders client-supplied templates. |
 | `POST /pipelines/test` | Body `{"definition": {...}, "cases": [names], "inputs": [messages], "variants": [{"label", "models": {<node>: <model block>}}]}`. Runs the definition's test cases (see "Test cases") — all, or the named ones, plus one-off `inputs` — and again for each variant (the same pipeline with other models for some nodes; at most 3), streaming `case_start` / `case_result` per case and variant, then `tests_done` with per-variant totals. Every variant passes validation and the model allowlist. Needs editing enabled — it runs client-chosen models. |
-| `GET /presets`, `GET /presets/{name}`, `PUT /presets/{name}`, `DELETE /presets/{name}` | The node library ("saved nodes" in the clients): a node's whole configuration — `model` (with options), `system_prompt`, `prompt_template`, `include_history`, `strip_reasoning`, plus a `description` — stored as `presets/<name>.yaml` (`PRESETS_DIR`). The model passes the allowlist and the prompt must parse; which node outputs it references is checked when it lands in a pipeline. Adding or applying one copies its values into a node; pipelines never reference presets by name. Deleting moves the file to `presets/.deleted/`. |
+| `GET /presets`, `GET /presets/{name}`, `PUT /presets/{name}`, `DELETE /presets/{name}` | The node library ("saved nodes" in the clients): a node's whole configuration — `model` (with options), `system_prompt`, `prompt_template`, `include_history`, `strip_reasoning`, plus a `description` — stored as `presets/<name>.yaml` (`PRESETS_DIR`). The model passes the allowlist and the prompt must parse; which node outputs it references is checked when it lands in a pipeline. Adding or applying one copies its values into a node; pipelines never reference presets by name. Deleting moves the file to `presets/.deleted/`. Writes are last-write-wins unless you send `If-Match` (the `ETag` from reading it) or `If-None-Match: *`, as for pipelines. |
 
 What a save goes through, in order — and nothing is written unless all of
 it passes:
@@ -751,7 +752,8 @@ it passes:
    `EDITOR_CLOUD_MODELS`. If Ollama can't be reached the save is refused
    (fail closed). A model the stored pipeline *already* uses is accepted
    as-is, so editing just a prompt never needs Ollama to be up.
-3. The revision check, then an atomic write.
+3. The `If-Match` / `If-None-Match` check against the file on disk, then an
+   atomic write.
 
 **Saving keeps hand-written comments and layout.** The new definition is
 merged into the file's existing YAML document (via `ruamel.yaml`
@@ -806,7 +808,7 @@ helper:
 | `timestamp` | UTC, when the error was handled |
 | `status` | HTTP status code (int) |
 | `error` | The HTTP reason phrase for that code (`"Not Found"`, `"Too Many Requests"`, etc.) |
-| `code` | Which failure this is — see below. **Branch on this, not on `status`**: failures that share a status (a `409` is a stale revision, a taken name or the protected default pipeline) have different codes |
+| `code` | Which failure this is — see below. **Branch on this, not on `status`**: failures that share a status (a `412` is a stale revision or a taken name) have different codes |
 | `message` | Human-readable detail — what a plain `HTTPException(detail=...)` used to surface alone |
 | `request` | `"<METHOD> <path>"` of the request that failed |
 | `exceptionUID` | Same value as the `X-Request-ID` response header — ties this error directly to server log lines carrying the same id (see `logging_context.py`) |
@@ -833,8 +835,9 @@ be added, so a client should handle a code it doesn't know by its `status`.
 | `DEFINITION_INVALID` | `422` | A submitted pipeline or preset fails validation — `details.node_id` names the node at fault, if one |
 | `MODEL_NOT_ALLOWED` | `422` | A submitted definition uses a model the server doesn't allow — `details.node_id` likewise |
 | `EDITING_DISABLED` | `403` | Writes are off on this server; `message` says why |
-| `PIPELINE_EXISTS` | `409` | Creating a pipeline whose name is taken |
-| `REVISION_CONFLICT` | `409` | The pipeline changed (or was deleted) since it was loaded — reload before saving |
+| `ALREADY_EXISTS` | `412` | A create (`If-None-Match: *`) for a pipeline or preset name that is taken |
+| `REVISION_CONFLICT` | `412` | `If-Match` didn't hold: the pipeline or preset changed (or was deleted) since it was loaded — reload before saving |
+| `PRECONDITION_REQUIRED` | `428` | Saving a pipeline without `If-Match` or `If-None-Match` |
 | `PIPELINE_PROTECTED` | `409` | Deleting the server's default pipeline |
 | `INPUT_INVALID` | `400` | An empty prompt, or an OpenAI chat that doesn't end with the user's message |
 | `INPUT_TOO_LARGE` | `400` | The prompt, a history turn or a re-run's outputs exceed the configured length caps |

@@ -47,7 +47,7 @@ problems are where the parts meet:
 | [API-002](#api-002-errors-have-no-machine-readable-code) | WARNING | Errors have no machine-readable code — ✅ fixed |
 | [API-003](#api-003-status-codes-disagree-for-the-same-kind-of-failure) | WARNING | Status codes disagree for the same kind of failure — ✅ fixed |
 | [API-004](#api-004-get-pipelinesname-doesnt-return-what-put-accepts) | WARNING | `GET /pipelines/{name}` doesn't return what `PUT` accepts — ✅ fixed |
-| [API-005](#api-005-optimistic-concurrency-is-spelled-three-different-ways) | WARNING | Optimistic concurrency is spelled three different ways |
+| [API-005](#api-005-optimistic-concurrency-is-spelled-three-different-ways) | WARNING | Optimistic concurrency is spelled three different ways — ✅ fixed |
 | [API-006](#api-006-rpc-style-endpoints-with-the-pipeline-named-in-the-body) | WARNING | RPC-style endpoints, with the pipeline named in the body |
 | [API-007](#api-007-the-contract-documentation-contradicts-actual-behaviour) | WARNING | The contract documentation contradicts actual behaviour |
 | [API-008](#api-008-pipelineclient-method-signatures-make-incorrect-calls-easy) | WARNING | `PipelineClient` method signatures make incorrect calls easy |
@@ -229,6 +229,20 @@ working around them.
 ### API-005: Optimistic concurrency is spelled three different ways
 
 - **Severity**: WARNING
+- **Status**: ✅ Fixed (2026-09-28) with HTTP conditional requests. Reads
+  and writes of pipelines and presets send `ETag` (the revision; CORS
+  exposes it to browsers). Writes take `If-Match` (412 `REVISION_CONFLICT`)
+  and `If-None-Match: *` (412 `ALREADY_EXISTS`, renamed from
+  `PIPELINE_EXISTS` now that presets can hit it). A pipeline `PUT` with
+  neither is 428 `PRECONDITION_REQUIRED`, so a blind overwrite stays
+  impossible. `base_revision` and `?revision=` are gone from the wire; the
+  old query is refused (422) rather than silently ignored. Presets honour
+  the same headers, still last-write-wins without them, so their
+  `revision` now means something. All four operations share one store
+  `Precondition`. On the client, `deletePipeline(name, baseRevision)` now
+  uses the same parameter name as `savePipeline`, and `savePreset` /
+  `deletePreset` take an optional `baseRevision`. `savePipeline`'s `null`
+  still means "create"; splitting it is left to API-008.
 - **Principle**: Consistency; HTTP conventions
 - **File(s)**:
   - [api_schemas.py:391-394](llm_pipeline/llm_pipeline/api_schemas.py#L391-L394)

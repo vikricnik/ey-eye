@@ -232,7 +232,8 @@ class ModelsResponse(BaseModel):
 
 class PipelineDefinitionResponse(BaseModel):
     definition: dict[str, Any]
-    # Content hash of the file — send it back as `base_revision` when saving.
+    # Content hash of the file — also the response's ETag. Send it back as
+    # If-Match when saving, so a save refuses to overwrite a newer version.
     revision: str
     # True when the file contains YAML comments, which saving from an editor
     # rewrites the file without.
@@ -349,9 +350,10 @@ class ValidatePipelineResponse(BaseModel):
 
 
 class SavePipelineRequest(BaseModel):
+    """Whether this creates or updates is said by a header, not the body:
+    If-None-Match: * to create, If-Match: "<revision>" to update."""
+
     definition: dict[str, Any]
-    # The revision the edit was based on; null to create a new pipeline.
-    base_revision: str | None = None
 
 
 class SavePipelineResponse(BaseModel):
@@ -390,8 +392,8 @@ class DeletedResponse(BaseModel):
 
 class ErrorCode(StrEnum):
     """What went wrong, for clients to act on. `status` alone can't tell
-    apart failures that share one — a 409 is a pipeline changed since it
-    was loaded, a taken name, or the protected default pipeline. Set where
+    apart failures that share one — a 412 is a pipeline changed since it
+    was loaded, or a taken name. Set where
     the error is raised, and always sent with the same status
     (api_error.STATUS_BY_CODE). Codes may be added over time, so a client
     should handle a code it doesn't know by its `status`."""
@@ -409,8 +411,9 @@ class ErrorCode(StrEnum):
     DEFINITION_INVALID = "DEFINITION_INVALID"  # `details.node_id` names the node at fault, if one
     MODEL_NOT_ALLOWED = "MODEL_NOT_ALLOWED"  # `details.node_id` names the node, if one
     EDITING_DISABLED = "EDITING_DISABLED"  # writes are off on this server; `message` says why
-    PIPELINE_EXISTS = "PIPELINE_EXISTS"  # creating a pipeline whose name is taken
-    REVISION_CONFLICT = "REVISION_CONFLICT"  # changed or deleted since loaded: reload first
+    ALREADY_EXISTS = "ALREADY_EXISTS"  # If-None-Match: * (create), but the name is taken
+    REVISION_CONFLICT = "REVISION_CONFLICT"  # If-Match: changed or deleted since loaded
+    PRECONDITION_REQUIRED = "PRECONDITION_REQUIRED"  # saving a pipeline needs one of those
     PIPELINE_PROTECTED = "PIPELINE_PROTECTED"  # the server's default pipeline can't be deleted
     # -- runs, prompt previews and test runs
     INPUT_INVALID = "INPUT_INVALID"  # empty prompt, or a chat not ending with the user's message

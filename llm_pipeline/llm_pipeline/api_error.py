@@ -25,8 +25,10 @@ STATUS_BY_CODE: dict[ErrorCode, int] = {
     ErrorCode.DEFINITION_INVALID: 422,
     ErrorCode.MODEL_NOT_ALLOWED: 422,
     ErrorCode.EDITING_DISABLED: 403,
-    ErrorCode.PIPELINE_EXISTS: 409,
-    ErrorCode.REVISION_CONFLICT: 409,
+    # A write's If-None-Match / If-Match didn't hold (412), or was missing (428).
+    ErrorCode.ALREADY_EXISTS: 412,
+    ErrorCode.REVISION_CONFLICT: 412,
+    ErrorCode.PRECONDITION_REQUIRED: 428,
     ErrorCode.PIPELINE_PROTECTED: 409,
     ErrorCode.INPUT_INVALID: 400,
     ErrorCode.INPUT_TOO_LARGE: 400,
