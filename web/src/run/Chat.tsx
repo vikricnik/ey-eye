@@ -161,6 +161,7 @@ export function Chat(props: {
           aria-label="Conversation"
           value={current ? current.id : ""}
           disabled={props.running}
+          title={props.running ? "Wait for the run to finish to switch conversations" : undefined}
           onChange={(e) => {
             if (e.target.value) props.onOpenConversation(e.target.value);
           }}
@@ -177,7 +178,13 @@ export function Chat(props: {
           className="ghost small"
           disabled={props.running || props.turns.length === 0}
           onClick={props.onNewConversation}
-          title="Start over — this conversation stays in the list"
+          title={
+            props.running
+              ? "Wait for the run to finish to start over"
+              : props.turns.length === 0
+                ? "This conversation is already new"
+                : "Start over — this conversation stays in the list"
+          }
         >
           + new
         </button>
@@ -186,7 +193,7 @@ export function Chat(props: {
             type="button"
             className="ghost icon small"
             aria-label="Delete this conversation"
-            title="Delete this conversation"
+            title={props.running ? "Wait for the run to finish to delete this conversation" : "Delete this conversation"}
             disabled={props.running}
             onClick={() => props.onDeleteConversation(current.id)}
           >
@@ -288,9 +295,12 @@ export function Composer(props: {
             type="button"
             disabled={!prompt.trim() || props.disabledReason !== null}
             title={
-              props.saveFirst
-                ? "Save the pipeline, then send — runs use what's saved on the server"
-                : "Send the message (Enter)"
+              props.disabledReason ??
+              (!prompt.trim()
+                ? "Type a message first"
+                : props.saveFirst
+                  ? "Save the pipeline, then send — runs use what's saved on the server"
+                  : "Send the message (Enter)")
             }
             onClick={submit}
           >
@@ -298,6 +308,13 @@ export function Composer(props: {
           </button>
         )}
       </div>
+      {/* The placeholder says why sending is blocked — until there's text
+          in the box, which hides it; then it's said here. */}
+      {props.disabledReason && prompt.trim() && !props.running && (
+        <p className="composer-reason" role="status">
+          Can&apos;t send yet: {props.disabledReason}
+        </p>
+      )}
     </div>
   );
 }

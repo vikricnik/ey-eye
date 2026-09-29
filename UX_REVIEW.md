@@ -61,7 +61,7 @@ polish.
 | [UX-008](#ux-008-node-settings-run-three-screens-long-and-repeat-actions) | MINOR | Node settings run three screens long and repeat actions — ✅ fixed |
 | [UX-009](#ux-009-canvas-status-and-roles-are-hard-to-read-and-the-legend-is-on-the-wrong-tab) | MINOR | Canvas status and roles are hard to read, and the legend is on the wrong tab — ✅ fixed |
 | [UX-010](#ux-010-one-concept-has-several-names-and-one-icon-has-two-meanings) | MINOR | One concept has several names, and one icon has two meanings — ✅ fixed |
-| [UX-011](#ux-011-some-disabled-controls-give-no-reason) | MINOR | Some disabled controls give no reason |
+| [UX-011](#ux-011-some-disabled-controls-give-no-reason) | MINOR | Some disabled controls give no reason — ✅ fixed |
 | [UX-012](#ux-012-undo-exists-but-is-never-offered-after-a-delete) | MINOR | Undo exists but is never offered after a delete |
 | [UX-013](#ux-013-on-narrow-screens-the-message-box-is-below-the-fold) | MINOR | On narrow screens the message box is below the fold |
 | [UX-014](#ux-014-smaller-items) | SUGGESTION | Smaller items |
@@ -625,6 +625,33 @@ polish.
 ### UX-011: Some disabled controls give no reason
 
 - **Severity**: MINOR
+- **Status**: ✅ Fixed (2026-09-29).
+  - I checked every disabled control in the client and gave a reason to
+    each one whose cause isn't already visible next to it. Where it matters
+    most the reason is visible text, not only a tooltip, because a disabled
+    control can't be focused, so keyboard and screen-reader users can't get
+    to its tooltip.
+  - **The only output node's checkbox** (in node and pipeline settings):
+    a visible hint, linked with `aria-describedby`: "…the only output node
+    — a pipeline needs at least one, so mark another before unmarking it."
+  - **Save**: "Save — no changes to save", "…fix the validation error
+    first" or "…editing is disabled on this server". The status chip next
+    to it shows the same state. **Undo / Redo**: "nothing to undo/redo".
+  - **Send with text typed**: the placeholder that gave the reason is hidden
+    by the text, so a line under the box now says it, e.g. "Can't send yet:
+    Ollama is unreachable — start it to run". Send's tooltip gives the
+    reason too.
+  - **Dialogs**: when a required field is emptied, the confirm button says
+    "Fill in “Name” first". Other problems already showed under the field.
+  - **Tooltips on the rest**: the conversation picker, "+ new" and ✕ while
+    a run is going ("Wait for the run to finish…") or when the chat is
+    already new; "Run all cases" and "Run comparison" with no case or no
+    model chosen; Apply with no preset chosen.
+  - Left as they were, because their state is self-evident: the text size
+    buttons at their limits, and controls disabled because editing is off
+    (the read-only banner and chip explain that everywhere).
+  - **Checked in the app**: every reason above, including the Send line
+    with Ollama down and an emptied dialog field.
 - **Principle**: H1 Visibility of system status; H9 Error recovery
 - **File(s)**:
   - [Inspector.tsx:340](web/src/editor/Inspector.tsx#L340)

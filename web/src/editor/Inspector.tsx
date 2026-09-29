@@ -253,6 +253,8 @@ function NodeInspector(props: InspectorProps & { node: NodeConfig; tab: NodeTab;
   const limits = useModelLimits(node.model);
   const deps = node.depends_on ?? [];
   const isOutput = def.output_nodes.includes(id);
+  const onlyOutput = isOutput && def.output_nodes.length === 1;
+  const onlyOutputHint = useId();
   const [presetChoice, setPresetChoice] = useState("");
 
   const branch = (def.branches ?? []).find((b) => b.from === id);
@@ -469,7 +471,8 @@ function NodeInspector(props: InspectorProps & { node: NodeConfig; tab: NodeTab;
               <input
                 type="checkbox"
                 checked={isOutput}
-                disabled={!editable || (isOutput && def.output_nodes.length === 1)}
+                disabled={!editable || onlyOutput}
+                aria-describedby={onlyOutput ? onlyOutputHint : undefined}
                 onChange={(e) => {
                   const current = def.output_nodes;
                   onEdit((d) => setOutput(d, e.target.checked ? [...current, id] : current.filter((o) => o !== id)));
@@ -477,6 +480,11 @@ function NodeInspector(props: InspectorProps & { node: NodeConfig; tab: NodeTab;
               />
               output node — its answer is the pipeline&apos;s answer
             </label>
+            {onlyOutput && editable && (
+              <p className="field-hint" id={onlyOutputHint}>
+                The pipeline&apos;s only output node — it needs at least one, so mark another before unmarking this.
+              </p>
+            )}
             <label className="check">
               <input
                 type="checkbox"
@@ -596,6 +604,7 @@ function NodeInspector(props: InspectorProps & { node: NodeConfig; tab: NodeTab;
                   <button
                     type="button"
                     disabled={!presetChoice}
+                    title={presetChoice ? "Give this node the preset's configuration" : "Choose a preset first"}
                     onClick={() => {
                       const preset = presets.find((p) => p.name === presetChoice);
                       if (preset) onEdit((d) => applyPreset(d, id, preset));
@@ -923,6 +932,7 @@ function EdgeInspector(props: InspectorProps & { from: string; to: string }) {
 function PipelineInspector(props: InspectorProps) {
   const { doc, editable, onEdit, onSelect, validation } = props;
   const def = doc.definition;
+  const onlyOutputHint = useId();
   const exec = def.execution ?? {};
   const setExec = (key: keyof NonNullable<PipelineDefinition["execution"]>, value: number | undefined) =>
     onEdit(
@@ -981,19 +991,28 @@ function PipelineInspector(props: InspectorProps) {
       <section>
         <h3>Output</h3>
         <p className="dim">The first listed node that actually ran provides the answer.</p>
-        {def.nodes.map((n) => (
-          <label className="check" key={n.id}>
-            <input
-              type="checkbox"
-              checked={outputs.includes(n.id)}
-              disabled={!editable || (outputs.includes(n.id) && outputs.length === 1)}
-              onChange={(e) =>
-                onEdit((d) => setOutput(d, e.target.checked ? [...outputs, n.id] : outputs.filter((o) => o !== n.id)))
-              }
-            />
-            {n.id}
-          </label>
-        ))}
+        {def.nodes.map((n) => {
+          const only = outputs.length === 1 && outputs[0] === n.id;
+          return (
+            <label className="check" key={n.id}>
+              <input
+                type="checkbox"
+                checked={outputs.includes(n.id)}
+                disabled={!editable || only}
+                aria-describedby={only ? onlyOutputHint : undefined}
+                onChange={(e) =>
+                  onEdit((d) => setOutput(d, e.target.checked ? [...outputs, n.id] : outputs.filter((o) => o !== n.id)))
+                }
+              />
+              {n.id}
+            </label>
+          );
+        })}
+        {outputs.length === 1 && editable && (
+          <p className="field-hint" id={onlyOutputHint}>
+            {outputs[0]} is the only output node — a pipeline needs at least one, so mark another before unmarking it.
+          </p>
+        )}
       </section>
 
       <section>

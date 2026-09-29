@@ -325,7 +325,12 @@ export function TestsView(props: {
                 Stop
               </button>
             )}
-            <button type="button" disabled={!editable || running || cases.length === 0} onClick={() => props.onRun({ variants: [] })}>
+            <button
+              type="button"
+              disabled={!editable || running || cases.length === 0}
+              title={cases.length === 0 ? "Add a test case first (+ add, above)" : undefined}
+              onClick={() => props.onRun({ variants: [] })}
+            >
               Run all cases
             </button>
             {testCase && (
@@ -382,6 +387,13 @@ export function TestsView(props: {
               <button
                 type="button"
                 disabled={!editable || running || cases.length === 0 || variants.length === 0}
+                title={
+                  cases.length === 0
+                    ? "Add a test case first (+ add, above)"
+                    : variants.length === 0
+                      ? "Choose a model to compare with first"
+                      : undefined
+                }
                 onClick={() => props.onRun({ variants })}
               >
                 Run comparison

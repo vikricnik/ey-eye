@@ -109,6 +109,11 @@ function DialogView({ request, onDone }: { request: Request; onDone: () => void 
   );
   const errors = fields.map((f) => fieldError(f, (values[f.name] ?? "").trim()));
   const invalid = errors.some((e) => e !== null);
+  /** Why the confirm button is disabled: the first field's problem — for
+   * an empty one, its name without the explanation ("Name (the file…)"). */
+  const blocked = fields
+    .map((f, i) => (errors[i] === "required" ? `Fill in “${f.label.split(/ \(| — /)[0]}” first` : errors[i]))
+    .find((e): e is string => Boolean(e));
   const settled = useRef(false);
 
   const finish = (confirmed: boolean) => {
@@ -190,6 +195,7 @@ function DialogView({ request, onDone }: { request: Request; onDone: () => void 
             autoFocus={request.kind === "confirm"}
             className={request.kind === "confirm" && request.danger ? "danger-solid" : ""}
             disabled={invalid}
+            title={blocked}
           >
             {request.confirmLabel ?? "OK"}
           </button>

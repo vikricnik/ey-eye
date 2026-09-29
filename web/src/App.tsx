@@ -1001,6 +1001,18 @@ export function App() {
     setFitSignal((f) => f + 1);
   };
 
+  // Why Save, Undo and Redo are unavailable, when they are — shown as
+  // their tooltips, like Run's reason in the message box.
+  const saveBlocked = !editable
+    ? "editing is disabled on this server"
+    : !doc?.dirty
+      ? "no changes to save"
+      : validation.status === "invalid"
+        ? "fix the validation error first"
+        : null;
+  const undoBlocked = !editable ? "editing is disabled on this server" : doc?.past.length ? null : "nothing to undo";
+  const redoBlocked = !editable ? "editing is disabled on this server" : doc?.future.length ? null : "nothing to redo";
+
   const isNew = doc?.baseRevision === null;
   let runDisabled: string | null = null;
   if (!doc) runDisabled = "no pipeline loaded";
@@ -1089,17 +1101,32 @@ export function App() {
           {doc?.dirty && <span className="dirty-dot" title="unsaved changes">●</span>}
           {validationChip}
           <span className="sep" />
-          <button type="button" className="ghost icon" onClick={undo} disabled={!editable || !doc?.past.length} title="Undo (⌘Z / Ctrl+Z)" aria-label="Undo">
+          <button
+            type="button"
+            className="ghost icon"
+            onClick={undo}
+            disabled={undoBlocked !== null}
+            title={undoBlocked ? `Undo — ${undoBlocked}` : "Undo (⌘Z / Ctrl+Z)"}
+            aria-label="Undo"
+          >
             ↶
-          </button>
-          <button type="button" className="ghost icon" onClick={redo} disabled={!editable || !doc?.future.length} title="Redo (⇧⌘Z / Ctrl+Y)" aria-label="Redo">
-            ↷
           </button>
           <button
             type="button"
+            className="ghost icon"
+            onClick={redo}
+            disabled={redoBlocked !== null}
+            title={redoBlocked ? `Redo — ${redoBlocked}` : "Redo (⇧⌘Z / Ctrl+Y)"}
+            aria-label="Redo"
+          >
+            ↷
+          </button>
+          {/* Disabled, it says why — and the status chip beside it shows it too. */}
+          <button
+            type="button"
             onClick={() => void save()}
-            disabled={!editable || !doc?.dirty || validation.status === "invalid"}
-            title="Save (⌘S / Ctrl+S)"
+            disabled={saveBlocked !== null}
+            title={saveBlocked ? `Save — ${saveBlocked}` : "Save (⌘S / Ctrl+S)"}
           >
             Save
           </button>

@@ -884,6 +884,8 @@ button kbd {
 .stopped-banner .turn-actions { margin-top: 8px; }
 
 .input-row { display: flex; gap: 8px; align-items: flex-end; }
+/* Why Send is blocked, once typed text hides the placeholder that said so. */
+.composer-reason { margin: 6px 0 0; font-size: var(--fs-sm); color: var(--text-dim); }
 .input-row textarea { flex: 1; resize: none; min-height: 2.75rem; max-height: 9rem; }
 .input-row button { min-width: 88px; padding: 11px 14px; }
 
