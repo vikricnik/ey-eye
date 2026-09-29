@@ -157,6 +157,10 @@ export function ModelPicker(props: {
   }
   const unlisted = current !== "" && selected === "";
   const ollama = providers.find((p) => p.provider === "ollama");
+  // Ollama being down explains everything else that's missing here (the
+  // app-wide notice says what it means for runs), so it's the one warning.
+  const ollamaDown = ollama !== undefined && !ollama.reachable;
+  const unlistedBecauseDown = unlisted && ollamaDown && model?.provider === "ollama";
 
   return (
     <div className="model-picker">
@@ -168,7 +172,11 @@ export function ModelPicker(props: {
           onChange={(e) => props.onChange(e.target.value)}
         >
           {props.emptyOption !== undefined && <option value="">{props.emptyOption}</option>}
-          {unlisted && <option value={current}>{current} (not available on server)</option>}
+          {unlisted && (
+            <option value={current}>
+              {current} ({unlistedBecauseDown ? "Ollama unreachable" : "not available on server"})
+            </option>
+          )}
           {!current && props.emptyOption === undefined && <option value="">choose a model…</option>}
           {providers.map((p) => (
             <optgroup key={p.provider} label={p.reachable ? p.provider : `${p.provider} (unreachable)`}>
@@ -202,13 +210,15 @@ export function ModelPicker(props: {
             .join(" · ")}
         </p>
       )}
-      {ollama && !ollama.reachable && <p className="hint-warn">{ollama.error ?? "Ollama unreachable"}</p>}
-      {unlisted && (
+      {ollamaDown && <p className="hint-warn">Ollama isn&apos;t reachable — its models aren&apos;t listed.</p>}
+      {unlisted && !unlistedBecauseDown && (
         <p className="hint-warn">
           This model isn&apos;t installed/allowlisted — a save only succeeds if the pipeline already used it.
         </p>
       )}
-      {listed.length === 0 && models && <p className="hint-warn">The server lists no selectable models.</p>}
+      {listed.length === 0 && models && !ollamaDown && (
+        <p className="hint-warn">The server lists no selectable models.</p>
+      )}
     </div>
   );
 }

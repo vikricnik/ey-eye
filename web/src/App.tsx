@@ -44,6 +44,8 @@ import { docReducer } from "./editor/editorState";
 import type { DocAction, EditorDoc, Selection, ValidationState } from "./editor/editorState";
 import { useDialogs } from "./ui/Dialogs";
 import { DisplayMenu, useDisplaySettings } from "./ui/DisplaySettings";
+import { OutageNotice, ServerStatus } from "./ui/ServerStatus";
+import { outageMessage, runBlockedReason, runOutage } from "./providerStatus";
 import { Splitter, usePanelSizes } from "./ui/Splitter";
 import { errorText } from "./format";
 import type { PreviewContext } from "./editor/PromptPreview";
@@ -282,7 +284,7 @@ export function App() {
   }, [openPipeline, refreshModels, refreshPresets]);
 
   // Self-scheduling server poll (never overlapping, unlike setInterval): is
-  // it reachable, and does it still allow editing?
+  // it reachable, does it still allow editing, and can it reach Ollama?
   useEffect(() => {
     let stopped = false;
     let timer: number | undefined;
@@ -290,6 +292,10 @@ export function App() {
       try {
         setServerInfo(await client.getServerInfo());
         setOnline(true);
+        // The server re-checks Ollama on every call while it's down, so this
+        // notices it going away or coming back — and newly installed models.
+        const next = await client.listModels();
+        setModels((current) => (JSON.stringify(current) === JSON.stringify(next) ? current : next));
       } catch (err) {
         setOnline(!(err instanceof ServerUnreachableError));
       }
@@ -923,10 +929,16 @@ export function App() {
     ? doc.definition.output_nodes.map((id) => liveText[id]).find((t) => t)
     : undefined;
 
+  // A model provider the open pipeline needs is down (Ollama, in practice).
+  const outage = useMemo(() => (doc ? runOutage(doc.definition, models) : null), [doc, models]);
+  const ollama = models?.providers.find((p) => p.provider === "ollama");
+  const blockedByOutage = runBlockedReason(outage);
+
   const isNew = doc?.baseRevision === null;
   let runDisabled: string | null = null;
   if (!doc) runDisabled = "no pipeline loaded";
   else if (online === false) runDisabled = "server offline";
+  else if (blockedByOutage) runDisabled = blockedByOutage;
   else if (doc.dirty && !editable) runDisabled = "editing is disabled — can't save changes to run them";
   else if (doc.dirty && validation.status === "invalid") runDisabled = "fix the validation error to run";
 
@@ -969,6 +981,12 @@ export function App() {
         <div className="title-block">
           <h1>LLM Pipeline</h1>
           <span className="subtitle">{BASE_URL}</span>
+          <ServerStatus
+            baseUrl={BASE_URL}
+            online={online}
+            ollama={ollama}
+            readOnly={serverInfo !== null && !serverInfo.editing_enabled}
+          />
         </div>
         <div className="toolbar">
           <select
@@ -1057,45 +1075,44 @@ export function App() {
             }}
           />
           <DisplayMenu settings={display.settings} onChange={display.update} />
-          <div className="status" title={online ? "server online" : "server offline"}>
-            <span className={`status-dot ${online ? "online" : online === false ? "offline" : ""}`} />
-            {serverInfo && !serverInfo.editing_enabled && <span className="chip-status">read-only</span>}
-          </div>
         </div>
       </header>
 
-      {notice && (
-        <div className={`notice ${notice.kind}`} role={notice.kind === "error" ? "alert" : "status"}>
-          <span>{notice.text}</span>
-          {notice.action && (
-            <button
-              type="button"
-              className="link"
-              onClick={() => {
-                notice.action?.run();
-                setNotice(null);
-              }}
-            >
-              {notice.action.label}
+      <div className="notices">
+        {notice && (
+          <div className={`notice ${notice.kind}`} role={notice.kind === "error" ? "alert" : "status"}>
+            <span>{notice.text}</span>
+            {notice.action && (
+              <button
+                type="button"
+                className="link"
+                onClick={() => {
+                  notice.action?.run();
+                  setNotice(null);
+                }}
+              >
+                {notice.action.label}
+              </button>
+            )}
+            <button type="button" className="link" aria-label="Dismiss" onClick={() => setNotice(null)}>
+              ✕
             </button>
-          )}
-          <button type="button" className="link" aria-label="Dismiss" onClick={() => setNotice(null)}>
-            ✕
-          </button>
-        </div>
-      )}
-      {serverInfo && !serverInfo.editing_enabled && (
-        <div className="notice info subtle">
-          {serverInfo.editing_disabled_reason ? (
-            <>Read-only: {serverInfo.editing_disabled_reason}</>
-          ) : (
-            <>
-              Read-only: this server has editing disabled. Set <code>PIPELINE_EDITING_ENABLED=true</code> on the server
-              to build and save pipelines here.
-            </>
-          )}
-        </div>
-      )}
+          </div>
+        )}
+        {outage && online !== false && <OutageNotice message={outageMessage(outage)} onRetry={() => refreshModels(true)} />}
+        {serverInfo && !serverInfo.editing_enabled && (
+          <div className="notice info subtle">
+            {serverInfo.editing_disabled_reason ? (
+              <>Read-only: {serverInfo.editing_disabled_reason}</>
+            ) : (
+              <>
+                Read-only: this server has editing disabled. Set <code>PIPELINE_EDITING_ENABLED=true</code> on the server
+                to build and save pipelines here.
+              </>
+            )}
+          </div>
+        )}
+      </div>
 
       <div className="workspace">
         <main className="canvas-wrap">

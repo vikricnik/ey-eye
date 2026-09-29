@@ -74,6 +74,16 @@
 
 * { box-sizing: border-box; }
 
+/* Read by screen readers, not shown. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 html, body, #root {
   height: 100%;
   margin: 0;
@@ -101,7 +111,7 @@ code {
 .app {
   height: 100%;
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr); /* top bar, notices, workspace */
   min-height: 0;
 }
 
@@ -166,7 +176,19 @@ button.chip-status { min-width: 0; font-weight: 600; cursor: pointer; }
 .chip-status.warn { color: var(--warn); }
 .chip-status.error { color: var(--invalid); border-color: color-mix(in srgb, var(--invalid) 40%, transparent); background: color-mix(in srgb, var(--invalid) 8%, transparent); }
 
-.status { display: flex; align-items: center; gap: 8px; }
+/* The API and Ollama health lights (ui/ServerStatus.tsx), beside the server URL. */
+.status { display: flex; align-items: center; gap: 10px; align-self: center; }
+.indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.indicator.down { color: var(--invalid); font-weight: 700; }
 .status-dot {
   width: 8px;
   height: 8px;
@@ -177,8 +199,8 @@ button.chip-status { min-width: 0; font-weight: 600; cursor: pointer; }
 .status-dot.online { background: var(--valid); box-shadow: 0 0 6px var(--valid); }
 .status-dot.offline { background: var(--invalid); }
 
+.notices { grid-row: 2; }
 .notice {
-  grid-row: 2;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -186,9 +208,9 @@ button.chip-status { min-width: 0; font-weight: 600; cursor: pointer; }
   font-size: var(--fs-sm);
   border-bottom: 1px solid var(--border);
 }
-.notice + .notice { grid-row: 3; }
 .notice.error { background: color-mix(in srgb, var(--invalid) 10%, transparent); color: var(--invalid); }
 .notice.info { background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--accent); }
+.notice.warn { background: color-mix(in srgb, var(--warn) 10%, transparent); color: var(--warn); }
 .notice.subtle { color: var(--text-dim); background: var(--panel); }
 .notice > span { flex: 1; }
 
@@ -251,7 +273,7 @@ button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-
 /* ---------- Workspace ---------- */
 .workspace {
   position: relative; /* anchors the panel splitter */
-  grid-row: 4;
+  grid-row: 3;
   display: grid;
   grid-template-columns: minmax(0, 1fr) var(--panel-w);
   min-height: 0;
@@ -759,7 +781,7 @@ button.loading .btn-spinner { display: inline-block; }
 /* ---------- Narrow screens: stack the panels ---------- */
 @media (max-width: 960px) {
   .splitter { display: none; } /* stacked: nothing side by side to resize */
-  .app { grid-template-rows: auto auto auto auto; height: auto; min-height: 100%; }
+  .app { grid-template-rows: auto auto auto; height: auto; min-height: 100%; }
   .workspace { grid-template-columns: 1fr; }
   .canvas-wrap { height: 55vh; }
   .side-panel { border-left: none; border-top: 1px solid var(--border); height: 80vh; }

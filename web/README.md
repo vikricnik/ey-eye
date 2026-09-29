@@ -238,6 +238,13 @@ it everything below is read-only and a banner says so):
 
 **Running**:
 
+- **Server status** (beside the server URL in the header): **API** and
+  **Ollama**, each green, or red and marked "offline" — hover for the URL
+  or the error. Both are re-checked every 15 s. When Ollama is down and the
+  open pipeline uses it, a notice says so, with **Retry** to check again
+  right away. If every model the pipeline uses is on Ollama, Run is
+  disabled until it's back; with other providers in the mix, a run can
+  still go ahead (a branch may never reach the Ollama nodes).
 - Runs always stream. Each node shows idle / **running** (pulsing) / done
   (with duration) / failed, driven by the server's `node_start` and
   `node_complete` events — so parallel nodes visibly run at the same time.

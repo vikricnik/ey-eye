@@ -53,7 +53,7 @@ polish.
 |----|----------|-------|
 | [UX-001](#ux-001-canvas-text-is-too-small-to-read-at-normal-window-sizes) | MAJOR | Canvas text is too small to read at normal window sizes — ✅ fixed |
 | [UX-002](#ux-002-most-text-is-small-and-fails-contrast-minimums) | MAJOR | Most text is small and fails contrast minimums — ✅ fixed |
-| [UX-003](#ux-003-an-unreachable-ollama-is-only-discovered-when-a-run-fails) | MAJOR | An unreachable Ollama is only discovered when a run fails |
+| [UX-003](#ux-003-an-unreachable-ollama-is-only-discovered-when-a-run-fails) | MAJOR | An unreachable Ollama is only discovered when a run fails — ✅ fixed |
 | [UX-004](#ux-004-a-failed-run-discards-the-message-and-offers-no-retry) | MAJOR | A failed run discards the message and offers no retry |
 | [UX-005](#ux-005-pipeline-settings-are-hard-to-find) | MAJOR | Pipeline settings are hard to find |
 | [UX-006](#ux-006-two-run-buttons-with-different-meanings-on-the-tests-tab) | MINOR | Two Run buttons with different meanings on the Tests tab |
@@ -206,6 +206,37 @@ polish.
 ### UX-003: An unreachable Ollama is only discovered when a run fails
 
 - **Severity**: MAJOR
+- **Status**: ✅ Fixed (2026-09-29).
+  - **Two health lights** ([ServerStatus.tsx](web/src/ui/ServerStatus.tsx)),
+    next to the server URL: **API** and **Ollama**. A light that's down turns
+    red and reads "offline", so the state doesn't rest on color. The tooltip
+    gives the URL or the server's error, and screen readers hear "API online,
+    Ollama offline". The read-only chip moved into the same group.
+  - **Re-checked every 15 s**: the existing server poll now also fetches
+    `GET /v1/models`. The server re-checks Ollama on every call while it's
+    down, so Ollama going away or coming back is noticed on its own. In the
+    app, losing Ollama showed up after 21 s (the server caches a *successful*
+    check for 30 s, so the worst case is about 45 s). The poll only updates
+    state when the answer changed.
+  - **One notice, only when it matters**
+    ([providerStatus.ts](web/src/providerStatus.ts)): shown when a provider
+    the open pipeline uses is unreachable. That means each node's own model
+    or the pipeline default, plus the history summarizer. It quotes the
+    server's error and says what it means: *"… — this pipeline can't run
+    until it's back."*, or *"… — the nodes that use it will fail."* when
+    other providers are also in use. **Retry** re-checks right away and
+    shows "checking…" while it does.
+  - **Run is blocked** with "Ollama is unreachable — start it to run" only
+    when every model the pipeline uses is unreachable. With a mix of
+    providers a run may still get through, so it isn't blocked.
+  - **One line per model dropdown**: "Ollama isn't reachable — its models
+    aren't listed.", in place of three warnings. The selected model reads
+    "(Ollama unreachable)" instead of "(not available on server)". The
+    "not installed" and "no selectable models" warnings still appear when
+    they're the real cause.
+  - **Checked in the app** with a stand-in for Ollama's `/api/tags`: the
+    outage state, Retry recovering at once, and the poll noticing the loss
+    again. Unit tests: [providerStatus.test.ts](web/test/providerStatus.test.ts).
 - **Principle**: H1 Visibility of system status; H5 Error prevention; WCAG 1.4.1 Use of Color
 - **File(s)**:
   - [App.tsx:168-174](web/src/App.tsx#L168-L174)
