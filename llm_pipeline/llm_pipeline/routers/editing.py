@@ -3,7 +3,7 @@ Endpoints for reading and editing pipelines (the web builder and the CLI):
 the models an editor may select, reading and saving a pipeline, node
 presets, and /v1/drafts/… — validation/import/export, prompt previews and
 test runs on a definition that needn't be saved (their own path space, so
-no pipeline name can collide with them). GET and PUT /v1/pipelines/{name}
+no pipeline name can collide with them). GET and PUT /v1/workflows/{name}
 speak the same representation — what you read is what you save back.
 
 Reads are available whenever the client is authenticated. Every write is
@@ -172,7 +172,7 @@ async def get_ollama_model_limits(
 
 
 @router.get(
-    "/pipelines/{name}",
+    "/workflows/{name}",
     response_model=PipelineDefinitionResponse,
     responses={k: ERROR_RESPONSES[k] for k in (401, 404, 422, 429)},
 )
@@ -328,7 +328,7 @@ async def run_pipeline_tests(
 
 
 @router.put(
-    "/pipelines/{name}",
+    "/workflows/{name}",
     response_model=SavePipelineResponse,
     dependencies=[Depends(require_editing_enabled)],
     responses={k: ERROR_RESPONSES[k] for k in (400, 401, 403, 412, 422, 428, 429)},
@@ -360,7 +360,7 @@ async def save_pipeline(
 
 
 @router.delete(
-    "/pipelines/{name}",
+    "/workflows/{name}",
     response_model=DeletedResponse,
     dependencies=[Depends(require_editing_enabled)],
     responses={k: ERROR_RESPONSES[k] for k in (400, 401, 403, 404, 409, 412, 422, 429)},

@@ -97,6 +97,7 @@ describe("coerceFieldValue", () => {
     assert.equal(coerceFieldValue("strip_reasoning", "inherit"), undefined);
     assert.deepEqual(coerceFieldValue("history.remember", "a, b"), ["a", "b"]);
     assert.equal(coerceFieldValue("execution.max_concurrency", "2"), 2);
+    assert.equal(coerceFieldValue("execution.run_timeout_seconds", "300"), 300);
     assert.throws(() => coerceFieldValue("include_history", "maybe"), DraftError);
   });
 });

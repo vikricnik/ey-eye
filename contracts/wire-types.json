@@ -69,7 +69,8 @@
       "max_concurrency",
       "max_retries",
       "model_timeout_seconds",
-      "retry_backoff_seconds"
+      "retry_backoff_seconds",
+      "run_timeout_seconds"
     ],
     "ExpectationResult": [
       "detail",
@@ -366,6 +367,7 @@
       "REQUEST_CANCELLED",
       "REQUEST_INVALID",
       "REVISION_CONFLICT",
+      "RUN_TIMED_OUT",
       "TEMPLATE_RENDER_FAILED",
       "TEST_CASE_NOT_FOUND",
       "UNAUTHENTICATED"

@@ -1,7 +1,7 @@
 """
 What a client reads first: GET /v1/server-info (how this server is set up)
-and GET /v1/pipelines — the pipeline listing. Reading one pipeline
-(GET /v1/pipelines/{name}) lives with saving it, in editing.py: both speak
+and GET /v1/workflows — the pipeline listing. Reading one pipeline
+(GET /v1/workflows/{name}) lives with saving it, in editing.py: both speak
 the same representation.
 """
 
@@ -35,7 +35,7 @@ async def server_info() -> ServerInfoResponse:
 
 
 @router.get(
-    "/pipelines",
+    "/workflows",
     response_model=PipelinesListResponse,
     responses={k: ERROR_RESPONSES[k] for k in (401, 422, 429)},
 )

@@ -21,6 +21,18 @@ class PipelineExecutionError(Exception):
         self.loop_id = loop_id
 
 
+class RunTimedOut(PipelineExecutionError):
+    """A run went past its pipeline's `execution.run_timeout_seconds` —
+    stopped as a whole, whichever node it was on (see run_timeout.py)."""
+
+    def __init__(self, limit_seconds: float) -> None:
+        super().__init__(
+            f"the run took longer than its limit of {limit_seconds:g}s "
+            f"(execution.run_timeout_seconds)"
+        )
+        self.limit_seconds = limit_seconds
+
+
 class PipelineNotFoundError(Exception):
     """Raised when a client requests a pipeline_name with no matching
     <pipelines_dir>/<name>.yaml file."""

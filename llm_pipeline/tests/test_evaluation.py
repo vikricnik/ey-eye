@@ -1,6 +1,7 @@
 """Test cases: their schema, running them (POST /pipelines/test), and
 comparing variants of a pipeline on them."""
 
+import asyncio
 import json
 from collections.abc import Iterator
 from pathlib import Path
@@ -279,6 +280,22 @@ def test_a_failing_run_is_reported_per_case(
     result = next(d for kind, d in events if kind == "case_result")
     assert result["passed"] is False and "ollama down" in result["error"]
     assert events[-1][1]["summaries"][0]["errors"] == 1
+
+
+def test_a_case_past_the_run_time_limit_fails_as_it_would_in_a_real_run(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class _Slow:
+        async def generate(self, prompt: str, system: str | None = None) -> Generation:
+            await asyncio.sleep(10)
+            return Generation("too late")
+
+    monkeypatch.setattr(node_types_module, "get_provider", lambda spec: _Slow())
+    definition = _definition({"cases": [{"name": "a", "input": "x"}]})
+    definition["execution"] = {"run_timeout_seconds": 0.2}
+    events = _events(client.post("/v1/drafts/test-runs", json={"definition": definition}).text)
+    result = next(d for kind, d in events if kind == "case_result")
+    assert result["passed"] is False and "run_timeout_seconds" in result["error"]
 
 
 @pytest.mark.asyncio

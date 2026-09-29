@@ -155,10 +155,10 @@ def test_a_version_1_body_is_accepted_and_answered_in_version_2(client: TestClie
 def test_saving_a_version_1_file_upgrades_it_and_keeps_its_comments(
     client: TestClient, tmp_path: Path
 ) -> None:
-    loaded = client.get("/v1/pipelines/old").json()
+    loaded = client.get("/v1/workflows/old").json()
     assert loaded["definition"]["output_nodes"] == ["answer"]
     saved = client.put(
-        "/v1/pipelines/old",
+        "/v1/workflows/old",
         json={"definition": loaded["definition"]},
         headers={"If-Match": f'"{loaded["revision"]}"'},
     ).json()

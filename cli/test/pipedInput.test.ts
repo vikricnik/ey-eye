@@ -28,10 +28,10 @@ before(async () => {
       if (req.url === "/v1/server-info") {
         return json({ default_pipeline_name: "p", editing_enabled: false, editing_disabled_reason: null });
       }
-      if (req.url === "/v1/pipelines") {
+      if (req.url === "/v1/workflows") {
         return json({ pipelines: [{ name: "p", description: "", filename: "p.yaml" }] });
       }
-      if (req.url === "/v1/pipelines/p") {
+      if (req.url === "/v1/workflows/p") {
         return json({
           definition: {
             name: "p",
@@ -42,7 +42,7 @@ before(async () => {
           has_comments: false,
         });
       }
-      if (req.url === "/v1/pipelines/p/runs") {
+      if (req.url === "/v1/workflows/p/runs") {
         const { prompt } = JSON.parse(body) as { prompt: string };
         // Slow enough that the next piped line arrives mid-run.
         setTimeout(

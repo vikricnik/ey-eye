@@ -1,8 +1,8 @@
 """
-GET /metrics — the counters in metrics.py, in Prometheus' text format.
+GET /metrics — the metrics in metrics.py, in Prometheus' text format.
 
 Behind the API key: its labels name pipelines and models, which is what
-/v1/pipelines needs a key for, so it can't be open the way /health is.
+/v1/workflows needs a key for, so it can't be open the way /health is.
 Prometheus sends the key with `authorization: {credentials: <key>}` (or
 `bearer_token`) in its scrape config. Not rate limited: a scrape answered
 with 429 leaves a gap in every graph and alert built on it. Left out of the

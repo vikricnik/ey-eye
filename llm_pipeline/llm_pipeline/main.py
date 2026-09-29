@@ -15,16 +15,21 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from llm_pipeline.error_handling import register_exception_handlers
 from llm_pipeline.logging_context import configure_logging, request_id_middleware
+from llm_pipeline.settings import settings
+
+# Before the imports below: libraries they load warn while loading (LangChain
+# deprecations), and those lines must come out in the configured format too —
+# with LOG_FORMAT=json, a text line would break the stream for log shippers.
+configure_logging(settings.log_format)
+
+from llm_pipeline.error_handling import register_exception_handlers
 from llm_pipeline.model_catalog import ModelCatalog
 from llm_pipeline.pipeline_config import load_pipeline_definition
 from llm_pipeline.pipeline_loader import PipelineCache
 from llm_pipeline.pipeline_store import PipelineStore
 from llm_pipeline.routers import discovery, editing, health, metrics, openai_compat, runs
-from llm_pipeline.settings import settings
 
-configure_logging()
 logger: logging.Logger = logging.getLogger("llm_pipeline")
 
 # Every route of this API is under it, so a breaking change can arrive as

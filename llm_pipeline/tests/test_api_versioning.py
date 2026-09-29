@@ -29,12 +29,14 @@ def test_every_api_route_is_versioned() -> None:
     paths = {route.path for route in app.routes if isinstance(route, APIRoute)}
     outside = {path for path in paths - UNVERSIONED if not path.startswith(("/v1/", "/openai/v1/"))}
     assert outside == set()
-    assert "/v1/pipelines/{name}/runs" in paths
+    assert "/v1/workflows/{name}/runs" in paths
 
 
-def test_the_unversioned_paths_are_gone(client: TestClient) -> None:
+def test_the_old_paths_are_gone(client: TestClient) -> None:
+    """Neither was ever released, so neither has an alias."""
     assert client.get("/server-info").status_code == 404
     assert client.get("/pipelines").status_code == 404
+    assert client.get("/v1/pipelines").status_code == 404  # renamed to /v1/workflows
     assert client.get("/v1/server-info").status_code == 200
-    assert client.get("/v1/pipelines").status_code == 200
+    assert client.get("/v1/workflows").status_code == 200
     assert client.get("/health").status_code == 200

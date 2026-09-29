@@ -1,5 +1,7 @@
 from pathlib import Path
+from typing import Literal
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -8,6 +10,11 @@ class Settings(BaseSettings):
 
     ollama_base_url: str = "http://localhost:11434"
     cors_allowed_origins: str = "*"
+
+    # "text": human-readable lines. "json": one JSON object per line (time,
+    # level, logger, request_id, message, exception) for log search tools —
+    # uvicorn's own lines included.
+    log_format: Literal["text", "json"] = "text"
 
     # Directory containing pipeline YAML definitions. Relative paths are
     # resolved against the current working directory the server is started
@@ -30,10 +37,11 @@ class Settings(BaseSettings):
 
     # --- Rate limiting ---
     # Per-client (per API key, or per IP if auth is disabled) request cap.
-    # A simple in-process fixed-window limiter — fine for a single instance;
-    # for multiple instances behind a load balancer you'd want a shared
-    # store (e.g. Redis) instead, which this doesn't implement.
-    rate_limit_requests_per_minute: int = 60
+    # A simple in-process fixed-window limiter, per worker process — the
+    # server runs one (README "One worker per server"); several workers or
+    # instances would each allow this many. At least 1:
+    # a lower value would fail every request, so the server won't start.
+    rate_limit_requests_per_minute: int = Field(default=60, ge=1)
 
     # --- Prompt/history safety ---
     # Basic length caps — not a substitute for real prompt-injection defenses,
@@ -54,12 +62,12 @@ class Settings(BaseSettings):
     # After this many CONSECUTIVE failures for a given model, stop calling it
     # for `circuit_breaker_cooldown_seconds` (fail fast instead of paying the
     # timeout cost every single request) — then allow one trial call to see
-    # if it's recovered.
+    # if it's recovered. Per worker process, like the rate limit.
     circuit_breaker_failure_threshold: int = 3
     circuit_breaker_cooldown_seconds: float = 30.0
 
     # --- Pipeline editing (web/CLI builder) ---
-    # OFF by default: when false, every write endpoint (PUT /v1/pipelines/{name},
+    # OFF by default: when false, every write endpoint (PUT /v1/workflows/{name},
     # PUT /v1/presets/{name}) returns 403 and clients show pipelines read-only.
     # Turn on deliberately — with API_KEYS set — for any server reachable
     # beyond localhost, since it lets clients rewrite pipelines_dir files.

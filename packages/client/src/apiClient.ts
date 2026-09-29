@@ -166,7 +166,7 @@ interface SendOptions {
 const API_V1 = "/v1";
 
 function pipelinePath(name: string): string {
-  return `${API_V1}/pipelines/${encodeURIComponent(name)}`;
+  return `${API_V1}/workflows/${encodeURIComponent(name)}`;
 }
 
 /** Where a pipeline's runs are started (answered or streamed, by Accept). */
@@ -265,7 +265,7 @@ export class PipelineClient {
   }
 
   async listPipelines(): Promise<PipelinesListResponse> {
-    return this.get<PipelinesListResponse>(`${API_V1}/pipelines`);
+    return this.get<PipelinesListResponse>(`${API_V1}/workflows`);
   }
 
   /** A pipeline as stored: its complete definition (prompts, options,

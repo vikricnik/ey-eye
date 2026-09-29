@@ -36,6 +36,7 @@ STATUS_BY_CODE: dict[ErrorCode, int] = {
     ErrorCode.TEST_CASE_NOT_FOUND: 404,
     ErrorCode.TEMPLATE_RENDER_FAILED: 422,
     ErrorCode.PIPELINE_RUN_FAILED: 502,  # the models behind the run failed it
+    ErrorCode.RUN_TIMED_OUT: 504,  # the models behind the run took too long
     ErrorCode.REQUEST_CANCELLED: 499,
 }
 

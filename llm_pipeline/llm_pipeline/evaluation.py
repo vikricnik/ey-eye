@@ -39,6 +39,7 @@ from llm_pipeline.pipeline_config.schema import DEFAULT_TEMPERATURE
 from llm_pipeline.pipeline_config.templates import render
 from llm_pipeline.providers import ModelSpec, RetryPolicy, generate_with_retry, get_provider
 from llm_pipeline.providers.resilience import CircuitBreaker
+from llm_pipeline.run_timeout import within_run_timeout
 from llm_pipeline.safe_eval import evaluate_condition
 from llm_pipeline.state import NodeResult, PipelineState
 
@@ -161,7 +162,9 @@ async def run_case(variant: Variant, case: EvalCase, judge: Judge | None) -> Cas
         )
 
     try:
-        final = cast(PipelineState, await variant.graph.ainvoke(state))
+        # Bounded like a real run, so a case can't pass here and time out there.
+        limit = definition.execution.run_timeout_seconds
+        final = cast(PipelineState, await within_run_timeout(limit, variant.graph.ainvoke(state)))
     except Exception as e:
         return failed(str(e))
     outputs = final["node_outputs"]

@@ -877,6 +877,14 @@ function PipelineInspector(props: InspectorProps) {
           <Field label="timeout (s)" hint="per model call">
             <NumberField value={exec.model_timeout_seconds} disabled={!editable} onChange={(v) => setExec("model_timeout_seconds", v)} />
           </Field>
+          <Field label="run time limit (s)" hint="for the whole run, retries and loops included (empty: no limit)">
+            <NumberField
+              value={exec.run_timeout_seconds}
+              placeholder="no limit"
+              disabled={!editable}
+              onChange={(v) => setExec("run_timeout_seconds", v)}
+            />
+          </Field>
           <Field label="parallel model calls" hint="max nodes running at once (empty: no limit)">
             <NumberField
               value={exec.max_concurrency}

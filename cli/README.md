@@ -86,7 +86,7 @@ validates it on `/validate` and `/save`. Runs always use the saved version.
 | `/node rm <id>` | remove a node and every edge/route/loop touching it |
 | `/set <node>.<field> <value>` | change a node setting — see below |
 | `/settings` | show the pipeline-wide settings: execution, history, defaults |
-| `/settings set <setting> <value>` | change one — `description`, `execution.<…>` (incl. `max_concurrency`), `history.<max_turns\|intro\|turn_template\|max_chars\|remember\|summarize.model\|summarize.prompt>`, `defaults.<model\|temperature\|system_prompt\|strip_reasoning\|options.*>`; `unset` clears |
+| `/settings set <setting> <value>` | change one — `description`, `execution.<…>` (incl. `max_concurrency`, `run_timeout_seconds`), `history.<max_turns\|intro\|turn_template\|max_chars\|remember\|summarize.model\|summarize.prompt>`, `defaults.<model\|temperature\|system_prompt\|strip_reasoning\|options.*>`; `unset` clears |
 | `/prompt <node> [system]` | edit the prompt template (or system prompt) in `$EDITOR`; without one, type lines and finish with a single `.` |
 | `/connect <from> <to>` / `/disconnect <from> <to>` | add/remove a dependency edge |
 | `/output <node>[,<node>…]` | set the output node(s) |

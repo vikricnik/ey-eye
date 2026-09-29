@@ -74,9 +74,17 @@ class CircuitBreaker:
     default below — see pipeline_loader.py, which owns one CircuitBreaker
     per PipelineCache instance rather than relying on a bare singleton."""
 
-    def __init__(self, failure_threshold: int, cooldown_seconds: float) -> None:
+    def __init__(
+        self,
+        failure_threshold: int,
+        cooldown_seconds: float,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
         self.failure_threshold = failure_threshold
         self.cooldown_seconds = cooldown_seconds
+        # What "now" is — replaceable, so tests move time on instead of
+        # sleeping through cooldowns.
+        self._clock = clock
         self._states: dict[str, _CircuitBreakerState] = {}
 
     def is_open(self, key: str) -> bool:
@@ -85,7 +93,7 @@ class CircuitBreaker:
             return False
         # Once the cooldown has elapsed the circuit is half-open: allow a
         # trial call.
-        return time.monotonic() - state.opened_at < self.cooldown_seconds
+        return self._clock() - state.opened_at < self.cooldown_seconds
 
     def allow_call(self, key: str) -> bool:
         """Whether a call to `key` may go ahead now — ask right before each
@@ -96,7 +104,7 @@ class CircuitBreaker:
         state = self._states.get(key)
         if state is None or state.opened_at is None:
             return True
-        now = time.monotonic()
+        now = self._clock()
         if now - state.opened_at < self.cooldown_seconds:
             return False
         trial = state.trial_started_at
@@ -118,7 +126,7 @@ class CircuitBreaker:
         state.trial_started_at = None
         if state.consecutive_failures >= self.failure_threshold:
             was_open = self.is_open(key)
-            state.opened_at = time.monotonic()
+            state.opened_at = self._clock()
             if not was_open:
                 logger.warning(
                     f"circuit opened for {key} after {state.consecutive_failures} "
@@ -190,15 +198,16 @@ async def generate_with_retry(
     called just before attempt n (n >= 2) — streaming callers use it to tell
     clients to discard partial output from the failed attempt.
 
-    Every attempt is counted by its result (metrics.count_model_call), and
-    so is every attempt the breaker refuses.
+    Every attempt is counted and timed by its result, with the tokens a
+    successful one used (see metrics.py); an attempt the breaker refuses is
+    counted, not timed — it never reached the model.
     """
     breaker = circuit_breaker if circuit_breaker is not None else _default_circuit_breaker
 
     last_error: ProviderError | None = None
     for attempt in range(policy.max_attempts):
         if not breaker.allow_call(spec.identity):
-            metrics.count_model_call(spec.identity, "circuit_open")
+            metrics.record_model_call(spec.identity, "circuit_open")
             if last_error is not None:
                 raise last_error
             raise ProviderError(
@@ -210,17 +219,24 @@ async def generate_with_retry(
             )
         if attempt > 0 and on_retry is not None:
             on_retry(attempt + 1)
+        started_at = time.monotonic()
         try:
             result = await generate_with_timeout(
                 provider, prompt, spec, policy.timeout_seconds, system=system
             )
             breaker.record_success(spec.identity)
-            metrics.count_model_call(spec.identity, "ok")
+            metrics.record_model_call(spec.identity, "ok", started_at)
+            if result.usage is not None:
+                metrics.count_tokens(
+                    spec.identity, result.usage.prompt_tokens, result.usage.completion_tokens
+                )
             return result
         except ProviderError as e:
             last_error = e
             timed_out = isinstance(e.original, TimeoutError)
-            metrics.count_model_call(spec.identity, "timeout" if timed_out else "failed")
+            metrics.record_model_call(
+                spec.identity, "timeout" if timed_out else "failed", started_at
+            )
             breaker.record_failure(spec.identity)
             if attempt < policy.max_attempts - 1:
                 await asyncio.sleep(policy.backoff_base_seconds * (2**attempt))

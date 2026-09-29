@@ -57,7 +57,7 @@ class RerunRequest(BaseModel):
 
 
 class RunRequest(BaseModel):
-    """POST /v1/pipelines/{name}/runs. The pipeline is named in the path, per
+    """POST /v1/workflows/{name}/runs. The pipeline is named in the path, per
     request, rather than a server-side "active pipeline" — every worker
     process loads the same YAML files from the same disk independently;
     there's no shared mutable state to disagree about across workers."""
@@ -110,7 +110,7 @@ class RunResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Streaming (POST /v1/pipelines/{name}/runs, Accept: text/event-stream) — Server-
+# Streaming (POST /v1/workflows/{name}/runs, Accept: text/event-stream) — Server-
 # Sent Events, one event per line below
 # ---------------------------------------------------------------------------
 #
@@ -215,7 +215,7 @@ class HealthResponse(BaseModel):
 
 class ServerInfoResponse(BaseModel):
     """GET /v1/server-info — what a client needs to start. The pipelines
-    themselves are GET /v1/pipelines."""
+    themselves are GET /v1/workflows."""
 
     # The pipeline clients open first; it can't be deleted.
     default_pipeline_name: str
@@ -476,6 +476,7 @@ class ErrorCode(StrEnum):
     TEST_CASE_NOT_FOUND = "TEST_CASE_NOT_FOUND"
     TEMPLATE_RENDER_FAILED = "TEMPLATE_RENDER_FAILED"
     PIPELINE_RUN_FAILED = "PIPELINE_RUN_FAILED"  # `details.node_id` or `details.loop_id` if known
+    RUN_TIMED_OUT = "RUN_TIMED_OUT"  # past the pipeline's execution.run_timeout_seconds
     REQUEST_CANCELLED = "REQUEST_CANCELLED"  # the client disconnected; nobody receives this
 
 
@@ -500,7 +501,7 @@ class ErrorResponse(BaseModel):
     error: str  # HTTP reason phrase, e.g. "Not Found", "Too Many Requests"
     code: ErrorCode  # which failure this is — what clients branch on
     message: str  # human-readable detail — what used to be the bare "detail" string
-    request: str  # "<METHOD> <path>", e.g. "POST /v1/pipelines/support-router/runs"
+    request: str  # "<METHOD> <path>", e.g. "POST /v1/workflows/support-router/runs"
     request_id: str  # the X-Request-ID: ties this error to server log lines with the same id
     details: dict[str, object] = {}  # extra structured context, varies by error type
     validations: list[ValidationIssue] = []  # populated only for 422 schema validation errors

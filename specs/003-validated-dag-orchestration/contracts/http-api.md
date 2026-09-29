@@ -181,18 +181,24 @@ A run interrupted by service shutdown fails visibly rather than hanging
 |---|---|
 | `POST /ask` | Replaced by `POST /v1/workflows/{name}/run`. Its prompt-plus-history request shape is superseded by typed `inputs` |
 | `POST /ask/stream` | Node-completion SSE returns at Stage 2 as `GET /v1/runs/{id}/events`, against durable runs. Keeping it now would mean building it twice |
-| `GET /v1/pipelines`, `GET /v1/pipelines/{name}` | Renamed to `/v1/workflows...` with the new detail shape |
+| `GET /pipelines`, `GET /pipelines/{name}` | Renamed to `/v1/workflows...` with the new detail shape — the paths already are (see below), the shape not yet |
 
 These are breaking changes with no deprecation window — the schema
 change makes the old request and response bodies unrepresentable, and
 both clients are in this repo and migrate with the server.
 
-The pipeline routes have been served under `/v1` since BE-005
-(`BACKEND_REVIEW.md`), so the rename breaks v1 itself. That is fine only
-while no build serving `/v1/pipelines` has been released: as of
-2026-09-29, `main` serves only `/health` and `/ask`. Once one has been
-released, ship the workflows shape as `/v2`, or keep `/v1/pipelines`
-beside `/v1/workflows` until clients have moved.
+The paths are already renamed. Since 2026-09-29 the pipeline routes are
+served as `/v1/workflows…`: commit a83f84f put them under `/v1`, and the
+rename followed before any build serving `/v1/pipelines` was released.
+Two differences from this contract remain for the re-plan to settle:
+
+- Runs start with `POST /v1/workflows/{name}/runs`, not `…/run`. API-006
+  made runs a collection, as Stage 2's `/v1/runs` is; keep it.
+- Only the paths changed. The request and response bodies are still the
+  current ones: `prompt`/`history` rather than typed `inputs`, the current
+  detail shape, and `pipeline` in field names. Changing them breaks v1,
+  which is free only until the first release; after that, ship them as
+  `/v2`.
 
 ---
 

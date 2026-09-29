@@ -124,7 +124,7 @@ def test_a_run_streams_only_when_the_client_accepts_an_event_stream(
 
     def content_type(accept: str | None) -> str:
         headers = {"Accept": accept} if accept is not None else {}
-        response = client.post("/v1/pipelines/simple-local/runs", json=run, headers=headers)
+        response = client.post("/v1/workflows/simple-local/runs", json=run, headers=headers)
         assert response.status_code == 200
         return response.headers["content-type"].split(";")[0]
 
@@ -154,7 +154,7 @@ def test_stream_single_node_pipeline_emits_node_complete_then_done(
     monkeypatch.setattr(node_types_module, "get_provider", fake_get_provider)
 
     response = client.post(
-        "/v1/pipelines/simple-local/runs",
+        "/v1/workflows/simple-local/runs",
         json={"prompt": "hello", "history": []},
         headers=STREAM,
     )
@@ -188,7 +188,7 @@ def test_stream_multi_root_pipeline_emits_one_node_complete_per_node(
     monkeypatch.setattr(node_types_module, "get_provider", fake_get_provider)
 
     response = client.post(
-        "/v1/pipelines/consensus-qa/runs",
+        "/v1/workflows/consensus-qa/runs",
         json={"prompt": "what year is it", "history": []},
         headers=STREAM,
     )
@@ -220,7 +220,7 @@ def test_stream_provider_failure_yields_error_event_with_200_status(
     monkeypatch.setattr(node_types_module, "get_provider", fake_get_provider)
 
     response = client.post(
-        "/v1/pipelines/simple-local/runs",
+        "/v1/workflows/simple-local/runs",
         json={"prompt": "hello", "history": []},
         headers=STREAM,
     )
@@ -291,7 +291,7 @@ def test_stream_pipeline_not_found_returns_normal_404_before_streaming(
     exactly like /ask's 404 — a normal HTTP error status, since nothing has
     started streaming yet at that point."""
     response = client.post(
-        "/v1/pipelines/does-not-exist/runs",
+        "/v1/workflows/does-not-exist/runs",
         json={"prompt": "hello", "history": []},
         headers=STREAM,
     )
@@ -314,7 +314,7 @@ def test_stream_every_node_start_precedes_its_node_complete(
     monkeypatch.setattr(node_types_module, "get_provider", fake_get_provider)
 
     response = client.post(
-        "/v1/pipelines/consensus-qa/runs",
+        "/v1/workflows/consensus-qa/runs",
         json={"prompt": "q", "history": []},
         headers=STREAM,
     )
@@ -368,7 +368,7 @@ def test_stream_parallel_roots_all_start_before_any_completes(
     monkeypatch.setattr(node_types_module, "get_provider", lambda spec: barrier)
 
     response = client.post(
-        "/v1/pipelines/consensus-qa/runs",
+        "/v1/workflows/consensus-qa/runs",
         json={"prompt": "q", "history": []},
         headers=STREAM,
     )
@@ -497,7 +497,7 @@ def test_stream_emits_tokens_per_node_between_start_and_complete(
         lambda spec: _StreamingChatProvider(f"answer from {spec.model} here"),
     )
     response = client.post(
-        "/v1/pipelines/consensus-qa/runs",
+        "/v1/workflows/consensus-qa/runs",
         json={"prompt": "q", "history": []},
         headers=STREAM,
     )
@@ -572,7 +572,7 @@ def test_node_start_carries_the_messages_the_node_received(
     prompt travel with node_start, so clients can show what each node got."""
     monkeypatch.setattr(node_types_module, "get_provider", lambda spec: _EchoProvider(spec.model))
     response = client.post(
-        "/v1/pipelines/consensus-qa/runs",
+        "/v1/workflows/consensus-qa/runs",
         json={"prompt": "what year is it", "history": []},
         headers=STREAM,
     )

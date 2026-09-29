@@ -88,6 +88,10 @@ class ExecutionConfig(BaseModel):
     # At most this many nodes call their models at the same time (None: no
     # limit — every node whose inputs are ready starts immediately).
     max_concurrency: int | None = Field(default=None, ge=1)
+    # The whole run's limit: model_timeout_seconds bounds each call, but a
+    # run is many calls — retried, some in loops. Past this the run is
+    # stopped, model calls in flight included (None: no limit).
+    run_timeout_seconds: float | None = Field(default=None, gt=0)
 
 
 class NodeModelConfig(BaseModel):

@@ -52,9 +52,9 @@ pipeline_config/            YAML schema + validation
 └── loader.py                     reads/lists pipeline YAML files from disk
 
 routers/                    FastAPI route handlers — this API's own under /v1
-├── discovery.py              GET /v1/server-info, /v1/pipelines
-├── editing.py                GET/PUT/DELETE /v1/pipelines/{name}, models, presets, …
-├── runs.py                   POST /v1/pipelines/{name}/runs + prompt/history validation
+├── discovery.py              GET /v1/server-info, /v1/workflows
+├── editing.py                GET/PUT/DELETE /v1/workflows/{name}, models, presets, …
+├── runs.py                   POST /v1/workflows/{name}/runs + prompt/history validation
 ├── health.py                 GET /health — unversioned, probed by load balancers
 ├── metrics.py                GET /metrics — unversioned, scraped by Prometheus
 └── openai_compat.py          /openai/v1/… — the OpenAI-compatible chat endpoints
@@ -101,10 +101,11 @@ between test runs (see `tests/test_error_responses.py`, which uses
 
 ### Why stateless per-request pipeline *selection*?
 
-Every run names its pipeline in the path (`/v1/pipelines/{name}/runs`), and the server loads/caches
+Every run names its pipeline in the path (`/v1/workflows/{name}/runs`), and the server loads/caches
 compiled graphs by name rather than mutating a global "currently active"
 pipeline. This matters once you run more than one worker process
-(`uvicorn --workers N`): a global "active pipeline" would live independently
+(`uvicorn --workers N`; the server runs one — see
+[One worker per server](#one-worker-per-server)): a global "active pipeline" would live independently
 in each worker's memory, so an "activate" call would only affect whichever
 worker happened to receive it. Stateless selection sidesteps this entirely —
 distinct from the `PipelineCache` DI discussion above, which is about *how*
@@ -224,6 +225,9 @@ That matters because editor clients can save templates.
 ```yaml
 execution:
   max_concurrency: 2        # at most 2 nodes call models at once (default: no limit)
+  run_timeout_seconds: 300  # stop the whole run after 5 min — retries and loops
+                            # included (default: no limit; model_timeout_seconds
+                            # only bounds each call). Answered with RUN_TIMED_OUT.
 
 defaults:                   # every node inherits these unless it sets its own
   model: { provider: ollama, name: llama3, temperature: 0.4, options: { keep_alive: 10m } }
@@ -522,7 +526,36 @@ docker compose up
 ```
 See root `docker-compose.yml` for the full env var wiring.
 
+### One worker per server
+
+Run one uvicorn worker per server; the Docker image pins `--workers 1`, so a
+`WEB_CONCURRENCY` set by the platform can't quietly start more. The server
+spends its time waiting on models, and one async worker runs many pipelines
+at once; more workers add no model capacity.
+
+Three things live in the worker's memory, so with `--workers N` each worker
+keeps its own:
+
+- **Rate limit.** A client can make up to N × `RATE_LIMIT_REQUESTS_PER_MINUTE`
+  requests: each worker counts only the requests it received.
+- **Circuit breaker.** Each worker opens its own after
+  `CIRCUIT_BREAKER_FAILURE_THRESHOLD` failures, so a model that's down takes
+  up to N × that many failed calls before every worker fails fast.
+- **Metrics.** Each worker counts its own; set `PROMETHEUS_MULTIPROC_DIR` to
+  sum them (see [`GET /metrics`](#get-metrics)).
+
+Compiled pipelines are cached per worker too, but that's harmless: every
+worker reloads a file once it changes on disk. To run more than one worker or
+server anyway, enforce the rate limit where every request passes — at the
+reverse proxy, e.g. nginx `limit_req` keyed by the API-key header — and set
+`RATE_LIMIT_REQUESTS_PER_MINUTE` high enough that the server's own limit
+never applies.
+
 ## API
+
+Every route below is under `/v1` except `/health` and `/metrics`. The URLs
+call pipelines *workflows* (spec 003's name for them); the code, the
+`pipelines/` folder, the CLI and the JSON fields still say *pipeline*.
 
 ### `GET /health`
 Open to anyone — load balancers and orchestrators probe it without
@@ -532,13 +565,16 @@ credentials — so it says only that the server is up:
 ```
 
 ### `GET /metrics`
-Counters for Prometheus, in its text format — what to alert on while
+Metrics for Prometheus, in its text format — what to alert on while
 something is going wrong, where the logs explain it afterwards:
 
-| Counter | Labels | Counts |
+| Metric | Labels | Measures |
 |---|---|---|
-| `llm_pipeline_runs_total` | `pipeline`, `outcome` = `completed` / `failed` / `cancelled` | runs, answered or streamed (the OpenAI-compatible endpoint included) — a request refused before its run starts is no run |
+| `llm_pipeline_runs_total` | `pipeline`, `outcome` = `completed` / `failed` / `timed_out` / `cancelled` | runs, answered or streamed (the OpenAI-compatible endpoint included) — a request refused before its run starts is no run |
+| `llm_pipeline_run_duration_seconds` (histogram) | `pipeline`, `outcome` | how long those runs took, start to end — retries and their backoff included |
 | `llm_pipeline_model_calls_total` | `model`, `outcome` = `ok` / `failed` / `timeout` / `circuit_open` | model call attempts, retries included; `circuit_open` is a call the breaker refused without calling |
+| `llm_pipeline_model_call_duration_seconds` (histogram) | `model`, `outcome` | how long each attempt took — a refused call isn't timed |
+| `llm_pipeline_tokens_total` | `model`, `kind` = `prompt` / `completion` | tokens successful calls used, as their backend reported them — what each model costs |
 | `llm_pipeline_circuit_opened_total` | `model` | a model's circuit breaker opening — once per opening, not per failure |
 | `llm_pipeline_rate_limited_total` | — | requests refused with 429 |
 
@@ -552,8 +588,15 @@ scrape_configs:
     static_configs: [{ targets: ["pipeline-server:8000"] }]
 ```
 Alerts worth having: `rate(llm_pipeline_runs_total{outcome="failed"}[5m])`
-above your normal, any increase in `llm_pipeline_circuit_opened_total`, and
-`llm_pipeline_model_calls_total{outcome=~"failed|timeout"}` by `model`.
+above your normal, any increase in `llm_pipeline_circuit_opened_total`,
+`llm_pipeline_model_calls_total{outcome=~"failed|timeout"}` by `model`, and
+a model getting slow — its 95th percentile answer time:
+```promql
+histogram_quantile(0.95, sum by (le, model)
+  (rate(llm_pipeline_model_call_duration_seconds_bucket{outcome="ok"}[5m])))
+```
+The duration buckets run from 0.25 s to 10 min: a local model loading or a
+loop of revisions takes minutes, past Prometheus' default of 10 s.
 
 With `uvicorn --workers N`, set `PROMETHEUS_MULTIPROC_DIR` to an empty
 directory in the server process's environment (not in `.env`), so a scrape
@@ -572,7 +615,7 @@ editing — and if it was asked to but refuses, why.
 }
 ```
 
-### `GET /v1/pipelines`
+### `GET /v1/workflows`
 The pipelines the server can run (a file that fails validation is left out):
 ```json
 {
@@ -583,11 +626,11 @@ The pipelines the server can run (a file that fails validation is left out):
 }
 ```
 
-### `GET /v1/pipelines/{name}`
+### `GET /v1/workflows/{name}`
 Returns the pipeline as stored — its complete definition (nodes, prompts,
 models, branches, loops, layout), in exactly the shape of its YAML file,
 plus its `revision` — also the response's `ETag` header — to send back as
-`If-Match` when saving it with `PUT /v1/pipelines/{name}`. What you read is
+`If-Match` when saving it with `PUT /v1/workflows/{name}`. What you read is
 what you save:
 ```json
 {
@@ -610,13 +653,13 @@ A client that draws the pipeline derives its structure from this definition
 (`detailFromDefinition()` in the shared client package) — the same way it
 draws an unsaved draft.
 
-### `POST /v1/pipelines/{name}/runs`
+### `POST /v1/workflows/{name}/runs`
 
 Runs a pipeline. Answered when the run finishes — or, sent with
 `Accept: text/event-stream`, streamed while it runs (see *Streaming a run*
 below). Requires an API key if `API_KEYS` is set (see `.env.example`):
 ```bash
-curl -X POST http://localhost:8000/v1/pipelines/consensus-qa/runs \
+curl -X POST http://localhost:8000/v1/workflows/consensus-qa/runs \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $API_KEY" \
   -d '{"prompt": "What year did the Berlin Wall fall?", "history": []}'
@@ -678,7 +721,7 @@ route as before. See `rerun.py`.
 
 ### Streaming a run
 
-The same `POST /v1/pipelines/{name}/runs`, sent with `Accept: text/event-stream`,
+The same `POST /v1/workflows/{name}/runs`, sent with `Accept: text/event-stream`,
 streams progress via Server-Sent Events as the pipeline runs, rather than waiting for the whole DAG to finish: when
 each node starts, the **text each node's model is writing, token by
 token**, when it completes, and the final result. Token streaming needs no
@@ -686,7 +729,7 @@ code in the provider adapters — LangChain chat models stream on their own
 when LangGraph's `messages` stream mode is listening.
 
 ```bash
-curl -N -X POST http://localhost:8000/v1/pipelines/consensus-qa/runs \
+curl -N -X POST http://localhost:8000/v1/workflows/consensus-qa/runs \
   -H "Content-Type: application/json" \
   -H "Accept: text/event-stream" \
   -H "Authorization: Bearer $API_KEY" \
@@ -800,10 +843,10 @@ Set `API_KEYS`, or list the actual client origins (e.g.
 |---|---|
 | `GET /v1/models` | Models an editor may pick: every model installed on `OLLAMA_BASE_URL`, plus the cloud models listed in `EDITOR_CLOUD_MODELS` (`provider:model`, comma-separated). `?refresh=true` skips the short cache. |
 | `GET /v1/models/ollama/{name}` | An installed Ollama model's limits — max context length, parameter size, quantization, family — for editor hints. 404 when it isn't installed or Ollama can't be reached. |
-| `GET /v1/pipelines/{name}` | The full definition (prompts, options, layout) plus its `revision` and whether the file has YAML comments (`has_comments`) — what `PUT` takes back. |
+| `GET /v1/workflows/{name}` | The full definition (prompts, options, layout) plus its `revision` and whether the file has YAML comments (`has_comments`) — what `PUT` takes back. |
 | `POST /v1/drafts/validation` | Body `{"format": "json", "definition": {...}}` or `{"format": "yaml", "text": "..."}` — one or the other, as `format` says. Validates without saving and returns `{definition, yaml, model_issues, warnings}` — the same call serves live validation, import (YAML in) and export (canonical YAML out). `warnings` flags settings beyond what a model supports (e.g. `num_ctx` above its maximum context) but never blocks a save. A 422 names the offending node in `details.node_id`. |
-| `PUT /v1/pipelines/{name}` | Body `{"definition": {...}}`, and a header saying whether this creates or updates: `If-None-Match: *` creates (412 `ALREADY_EXISTS` if the name is taken); `If-Match: "<revision>"` updates only the version you loaded (412 `REVISION_CONFLICT` if someone saved in between; `If-Match: *` updates whatever is there). Neither is `428 PRECONDITION_REQUIRED` — a blind overwrite could undo someone else's save. Writes `pipelines/<name>.yaml` atomically; the response's `ETag` is the new revision, and the next run uses it. |
-| `DELETE /v1/pipelines/{name}` | Moves the file to `pipelines/.deleted/<name>.<timestamp>.yaml` — recoverable by moving it back. `If-Match: "<revision>"` (optional) refuses the delete if the file changed since loaded (412); the server's `DEFAULT_PIPELINE_NAME` can't be deleted (409). The old `?revision=` query is refused (422) rather than ignored. |
+| `PUT /v1/workflows/{name}` | Body `{"definition": {...}}`, and a header saying whether this creates or updates: `If-None-Match: *` creates (412 `ALREADY_EXISTS` if the name is taken); `If-Match: "<revision>"` updates only the version you loaded (412 `REVISION_CONFLICT` if someone saved in between; `If-Match: *` updates whatever is there). Neither is `428 PRECONDITION_REQUIRED` — a blind overwrite could undo someone else's save. Writes `pipelines/<name>.yaml` atomically; the response's `ETag` is the new revision, and the next run uses it. |
+| `DELETE /v1/workflows/{name}` | Moves the file to `pipelines/.deleted/<name>.<timestamp>.yaml` — recoverable by moving it back. `If-Match: "<revision>"` (optional) refuses the delete if the file changed since loaded (412); the server's `DEFAULT_PIPELINE_NAME` can't be deleted (409). The old `?revision=` query is refused (422) rather than ignored. |
 | `POST /v1/drafts/prompt-preview` | Body `{"definition": {...}, "node_id": "...", "prompt": "...", "history": [...], "outputs": {<node>: <text>}}`. What that node would receive — `{prompt, system, missing}` — rendered by the same code a run uses, from a definition that needn't be saved. Inputs with no output given appear as `<node's output>` placeholders (listed in `missing`); older turns a run would summarize are left out (previews never call a model). Needs editing enabled — it renders client-supplied templates. |
 | `POST /v1/drafts/test-runs` | Body `{"definition": {...}, "cases": [names], "inputs": [messages], "variants": [{"label", "models": {<node>: <model block>}}]}`. Runs the definition's test cases (see "Test cases") — all, or the named ones, plus one-off `inputs` — and again for each variant (the same pipeline with other models for some nodes; at most 3), streaming `case_start` / `case_result` per case and variant, then `tests_done` with per-variant totals. Every variant passes validation and the model allowlist. Needs editing enabled — it runs client-chosen models. |
 | `GET /v1/presets`, `GET /v1/presets/{name}`, `PUT /v1/presets/{name}`, `DELETE /v1/presets/{name}` | Presets: a node's whole configuration — `model` (with options), `system_prompt`, `prompt_template`, `include_history`, `strip_reasoning`, plus a `description` — stored as `presets/<name>.yaml` (`PRESETS_DIR`). The model passes the allowlist and the prompt must parse; which node outputs it references is checked when it lands in a pipeline. Adding or applying one copies its values into a node; pipelines never reference presets by name. Deleting moves the file to `presets/.deleted/`. Writes are last-write-wins unless you send `If-Match` (the `ETag` from reading it) or `If-None-Match: *`, as for pipelines. |
@@ -861,7 +904,7 @@ helper:
   "error": "Not Found",
   "code": "PIPELINE_NOT_FOUND",
   "message": "No pipeline named 'does-not-exist'",
-  "request": "POST /v1/pipelines/does-not-exist/runs",
+  "request": "POST /v1/workflows/does-not-exist/runs",
   "request_id": "a1b2c3d4e5f6",
   "details": {},
   "validations": []
@@ -910,6 +953,7 @@ be added, so a client should handle a code it doesn't know by its `status`.
 | `TEST_CASE_NOT_FOUND` | `404` | A test run names a case the definition doesn't have |
 | `TEMPLATE_RENDER_FAILED` | `422` | A prompt preview's template can't be rendered |
 | `PIPELINE_RUN_FAILED` | `502` | A node fails — its model call after retries are exhausted, or its prompt can't be rendered — or a loop hits `max_iterations` with `on_max_iterations: fail` (`details` names the node or loop), or none of `output_nodes` produced a result |
+| `RUN_TIMED_OUT` | `504` | The run went past its pipeline's `execution.run_timeout_seconds`; it was stopped, model calls in flight included |
 | `REQUEST_CANCELLED` | `499` | The client disconnected mid-run — logged only, nobody receives it |
 
 A pipeline name is validated against a strict filename-safe pattern
@@ -980,7 +1024,7 @@ there.
   when this is the case. `/health` is always open (load balancer probes).
 - **Rate limiting** (`rate_limit.py`) — a per-process, per-API-key (or
   per-IP if auth is disabled) fixed-window limiter, default 60 req/min.
-  Single-instance only; see the module docstring for the multi-instance caveat.
+  Per worker process; see [One worker per server](#one-worker-per-server).
 - **Retries with backoff** (`providers/resilience.py::generate_with_retry`) — transient
   failures (`ProviderError`) get retried with exponential backoff, configurable
   per pipeline via `execution.max_retries` / `execution.retry_backoff_seconds`.
@@ -990,13 +1034,21 @@ there.
   (`CIRCUIT_BREAKER_COOLDOWN_SECONDS`) before one trial call is allowed
   again — every other request keeps failing fast until that trial's outcome
   is known. Composes with retries — the breaker is asked before every
-  attempt, so a circuit that opens mid-request ends its retrying.
-- **Metrics** (`metrics.py`, `GET /metrics`) — Prometheus counters for runs,
-  model calls, circuit openings and 429s; see [`GET /metrics`](#get-metrics).
+  attempt, so a circuit that opens mid-request ends its retrying. Per worker
+  process, like the rate limit.
+- **Metrics** (`metrics.py`, `GET /metrics`) — Prometheus counters and
+  timings for runs and model calls, tokens used, circuit openings and 429s;
+  see [`GET /metrics`](#get-metrics).
 - **Request correlation IDs** (`logging_context.py`) — every request gets an
   id (reused from an incoming `X-Request-ID` header, or generated), injected
   into every log line automatically via a logging filter, and echoed back as
   a response header — so concurrent requests' logs can be told apart.
+- **JSON logs** (`LOG_FORMAT=json`) — one JSON object per line (`time`,
+  `level`, `logger`, `request_id`, `message`, and `exception` with the
+  traceback) for log search tools, instead of the default readable lines.
+  uvicorn's own startup and access lines and Python warnings come out as JSON
+  too. Access lines carry no request id: uvicorn writes them after the
+  request is over.
 - **Prompt/history length caps** — `MAX_PROMPT_LENGTH` /
   `MAX_HISTORY_TURN_LENGTH` reject oversized input with a `400` before it
   ever reaches a model. Not a substitute for real prompt-injection defenses,
@@ -1008,7 +1060,7 @@ there.
   `^[a-zA-Z0-9_-]+$` before being used to build a filesystem path.
 - **Read-only unless editing is enabled** — out of the box nothing writes a
   file: saving and deleting pipelines and presets (`PUT`/`DELETE` on
-  `/v1/pipelines/{name}` and `/v1/presets/{name}`), and the `/v1/drafts/…` previews
+  `/v1/workflows/{name}` and `/v1/presets/{name}`), and the `/v1/drafts/…` previews
   and test runs that render or run client-supplied templates, answer 403
   `EDITING_DISABLED` until `PIPELINE_EDITING_ENABLED=true` — and stay
   refused while CORS allows every origin without `API_KEYS`. There is no
@@ -1033,11 +1085,8 @@ dependency injection / mocked providers — no live network needed).
 
 ### Still not implemented
 
-- No shared rate-limit store across multiple server instances (each instance
-  enforces its own limit independently).
-- No structured (JSON) log *output* — request IDs are injected into
-  human-readable log lines, not a machine-parseable format; adding that is a
-  formatter change, not an architecture change.
+- No rate limit shared across workers or server instances: each enforces its
+  own (see [One worker per server](#one-worker-per-server)).
 - Deeper prompt-injection defenses beyond length caps (e.g. detecting
   attempts to manipulate downstream node prompts via conversation history).
 

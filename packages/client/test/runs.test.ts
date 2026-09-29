@@ -57,8 +57,8 @@ describe("runs", () => {
     await client.ask({ pipeline: "my-pipe", prompt: "q" });
     for await (const _event of client.askStream({ pipeline: "my-pipe", prompt: "q" })) void _event;
     assert.deepEqual(seen, [
-      { request: "POST /v1/pipelines/my-pipe/runs", accept: "application/json", body: { prompt: "q", history: [] } },
-      { request: "POST /v1/pipelines/my-pipe/runs", accept: "text/event-stream", body: { prompt: "q", history: [] } },
+      { request: "POST /v1/workflows/my-pipe/runs", accept: "application/json", body: { prompt: "q", history: [] } },
+      { request: "POST /v1/workflows/my-pipe/runs", accept: "text/event-stream", body: { prompt: "q", history: [] } },
     ]);
   });
 

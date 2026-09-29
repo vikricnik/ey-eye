@@ -216,7 +216,8 @@ it everything below is read-only and a banner says so):
   (a model a save would reject, or e.g. `num_ctx` above the model's maximum
   context) outline the node in amber but don't block anything.
 - **Pipeline settings** (click empty canvas): description, output node(s),
-  execution (timeout, retries, **parallel model calls**), **conversation
+  execution (timeout, retries, **parallel model calls**, **run time
+  limit**), **conversation
   history** (turns kept, character budget, intro line, turn format, which
   nodes' outputs to remember, and an optional summarizer model + prompt),
   **defaults for all nodes** (model, temperature, Ollama options, system

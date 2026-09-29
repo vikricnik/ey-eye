@@ -1,7 +1,7 @@
 """
 GET /health — open, and unversioned: load balancers and orchestrators probe
 it at a fixed path, without credentials. What a client reads to start
-(/v1/server-info, /v1/pipelines) is discovery.py's.
+(/v1/server-info, /v1/workflows) is discovery.py's.
 """
 
 from fastapi import APIRouter

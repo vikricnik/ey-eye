@@ -217,6 +217,7 @@ function formatSettings(def: PipelineDefinition): string {
     row("max_retries", exec.max_retries),
     row("retry_backoff_seconds", exec.retry_backoff_seconds),
     row("max_concurrency", exec.max_concurrency ?? "no limit"),
+    row("run_timeout_seconds", exec.run_timeout_seconds ?? "no limit"),
     chalk.bold.cyan("history"),
     row("max_turns", history.max_turns ?? 6),
     row("max_chars", history.max_chars ?? "no limit"),

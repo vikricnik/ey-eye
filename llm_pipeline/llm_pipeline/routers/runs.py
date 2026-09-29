@@ -1,11 +1,12 @@
 """
-Running a pipeline: POST /v1/pipelines/{name}/runs — answered when the run
+Running a pipeline: POST /v1/workflows/{name}/runs — answered when the run
 finishes, or streamed as Server-Sent Events while it runs when the client
 prefers `text/event-stream` (see wants_event_stream).
 """
 
 import asyncio
 import logging
+import time
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import aclosing
 from dataclasses import dataclass
@@ -34,7 +35,7 @@ from llm_pipeline.auth import require_api_key
 from llm_pipeline.dag_builder.node_types import NODE_START_EVENT
 from llm_pipeline.disconnects import cancel_on_disconnect, until_disconnected
 from llm_pipeline.error_handling import ERROR_RESPONSES, build_error_response
-from llm_pipeline.errors import PipelineExecutionError, PipelineNotFoundError
+from llm_pipeline.errors import PipelineExecutionError, PipelineNotFoundError, RunTimedOut
 from llm_pipeline.history import Summarizer, prepare_input
 from llm_pipeline.pipeline_config import PipelineDefinition
 from llm_pipeline.pipeline_config.effective import effective_model
@@ -44,6 +45,7 @@ from llm_pipeline.pipeline_loader import PipelineCache, get_pipeline_cache
 from llm_pipeline.providers import ModelSpec, RetryPolicy, generate_with_retry, get_provider
 from llm_pipeline.rate_limit import enforce_rate_limit
 from llm_pipeline.rerun import replay_outputs
+from llm_pipeline.run_timeout import steps_within_run_timeout, within_run_timeout
 from llm_pipeline.settings import settings
 from llm_pipeline.state import NodeResult, PipelineState
 
@@ -228,11 +230,12 @@ async def run_pipeline(
 ) -> RunResponse:
     """One whole run, answered when it finishes — a run that isn't
     streamed, here or through the OpenAI-compatible endpoint. Stopped if the
-    client disconnects (see disconnects.py). Raises ApiError. Counts the run
-    by how it ended — once it has started: a request refused by
-    prepare_run is no run."""
+    client disconnects (see disconnects.py). Raises ApiError. Counts and
+    times the run by how it ended — once it has started: a request refused
+    by prepare_run is no run."""
     run = await prepare_run(name, run_request, cache)
     definition = run.definition
+    started_at = time.monotonic()
 
     try:
         # graph.ainvoke's declared return type is generic (LangGraph doesn't
@@ -242,33 +245,41 @@ async def run_pipeline(
         final_state: PipelineState = cast(
             PipelineState,
             await cancel_on_disconnect(
-                request, run.graph.ainvoke(run.initial_state, config=_run_config(definition))
+                request,
+                within_run_timeout(
+                    definition.execution.run_timeout_seconds,
+                    run.graph.ainvoke(run.initial_state, config=_run_config(definition)),
+                ),
             ),
         )
     except HTTPException:
-        metrics.count_run(definition.name, "cancelled")
+        metrics.record_run(definition.name, "cancelled", started_at)
         raise  # the client disconnected
+    except RunTimedOut as e:
+        logger.warning(f"Pipeline '{name}' run stopped: {e}")
+        metrics.record_run(definition.name, "timed_out", started_at)
+        raise ApiError(ErrorCode.RUN_TIMED_OUT, str(e)) from e
     except PipelineExecutionError as e:
         logger.exception(f"Pipeline '{name}' run failed")
-        metrics.count_run(definition.name, "failed")
+        metrics.record_run(definition.name, "failed", started_at)
         raise ApiError(ErrorCode.PIPELINE_RUN_FAILED, str(e), details=_failure_details(e)) from e
     except Exception as e:
         logger.exception(f"Pipeline '{name}' run failed unexpectedly")
-        metrics.count_run(definition.name, "failed")
+        metrics.record_run(definition.name, "failed", started_at)
         raise ApiError(ErrorCode.INTERNAL_ERROR, UNEXPECTED_RUN_FAILURE) from e
 
     node_outputs = final_state["node_outputs"]
     resolved_output_node = _resolve_output_node(definition, node_outputs)
 
     if resolved_output_node is None:
-        metrics.count_run(definition.name, "failed")
+        metrics.record_run(definition.name, "failed", started_at)
         raise ApiError(
             ErrorCode.PIPELINE_RUN_FAILED,
             f"Pipeline completed but none of its output_nodes "
             f"({', '.join(definition.output_nodes)}) produced a result",
         )
 
-    metrics.count_run(definition.name, "completed")
+    metrics.record_run(definition.name, "completed", started_at)
     return RunResponse(
         pipeline_name=definition.name,
         output_node=resolved_output_node,
@@ -363,11 +374,12 @@ async def pipeline_events(
     have returned as an HTTP error, and the generator then simply stops (ending
     the stream) rather than propagating the exception further.
 
-    Counts the run by how it ended, as run_pipeline does — `cancelled` when
-    the client leaves mid-run (until_disconnected cancels what the stream
-    is waiting on).
+    Counts and times the run by how it ended, as run_pipeline does —
+    `cancelled` when the client leaves mid-run (until_disconnected cancels
+    what the stream is waiting on).
     """
     definition = run.definition
+    started_at = time.monotonic()
     node_outputs: dict[str, NodeResult] = {}
     completed: dict[str, NodeOutput] = {}  # what node_complete sent, reused by `done`
     loop_counts: dict[str, int] = {}
@@ -387,8 +399,9 @@ async def pipeline_events(
                 stream_mode=["updates", "custom", "messages"],
             ),
         )
-        async with aclosing(steps):
-            async for step in steps:
+        limited = steps_within_run_timeout(definition.execution.run_timeout_seconds, steps)
+        async with aclosing(steps), aclosing(limited):
+            async for step in limited:
                 part = extract_stream_part(step)
                 if part is None:
                     logger.warning(
@@ -451,11 +464,16 @@ async def pipeline_events(
                     # Anything else (e.g. the multi-root fan-out node's empty
                     # `{}` update) carries no client-visible information — skip.
     except (asyncio.CancelledError, GeneratorExit):
-        metrics.count_run(definition.name, "cancelled")
+        metrics.record_run(definition.name, "cancelled", started_at)
         raise
+    except RunTimedOut as e:
+        logger.warning(f"Pipeline '{definition.name}' stream stopped: {e}")
+        metrics.record_run(definition.name, "timed_out", started_at)
+        yield "error", build_error_response(request, ErrorCode.RUN_TIMED_OUT, str(e))
+        return
     except PipelineExecutionError as e:
         logger.exception(f"Pipeline '{definition.name}' stream failed")
-        metrics.count_run(definition.name, "failed")
+        metrics.record_run(definition.name, "failed", started_at)
         yield (
             "error",
             build_error_response(
@@ -465,7 +483,7 @@ async def pipeline_events(
         return
     except Exception:
         logger.exception(f"Pipeline '{definition.name}' stream failed unexpectedly")
-        metrics.count_run(definition.name, "failed")
+        metrics.record_run(definition.name, "failed", started_at)
         yield (
             "error",
             build_error_response(request, ErrorCode.INTERNAL_ERROR, UNEXPECTED_RUN_FAILURE),
@@ -474,7 +492,7 @@ async def pipeline_events(
 
     resolved_output_node = _resolve_output_node(definition, node_outputs)
     if resolved_output_node is None:
-        metrics.count_run(definition.name, "failed")
+        metrics.record_run(definition.name, "failed", started_at)
         yield (
             "error",
             build_error_response(
@@ -486,7 +504,7 @@ async def pipeline_events(
         )
         return
 
-    metrics.count_run(definition.name, "completed")
+    metrics.record_run(definition.name, "completed", started_at)
     yield (
         "done",
         StreamDoneEvent(
@@ -537,14 +555,14 @@ def wants_event_stream(request: Request) -> bool:
 
 
 @router.post(
-    "/pipelines/{name}/runs",
+    "/workflows/{name}/runs",
     response_model=RunResponse,
     dependencies=[Depends(require_api_key), Depends(enforce_rate_limit)],
     # A streamed run's status is decided before streaming starts: only these
     # pre-stream errors (and 200) apply to it. Execution failures then
     # arrive as an `error` event within the 200 — see pipeline_events.
     responses={
-        **{k: ERROR_RESPONSES[k] for k in (400, 401, 404, 422, 429, 500, 502)},
+        **{k: ERROR_RESPONSES[k] for k in (400, 401, 404, 422, 429, 500, 502, 504)},
         200: {
             "content": {"text/event-stream": {}},
             "description": (

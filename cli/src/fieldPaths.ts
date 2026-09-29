@@ -169,6 +169,7 @@ const NUMERIC_FIELDS = new Set([
   "max_iterations",
   "max_chars",
   "max_concurrency",
+  "run_timeout_seconds",
 ]);
 const LIST_FIELDS = new Set(["depends_on", "stop", "remember"]);
 const BOOLEAN_FIELDS = new Set(["include_history", "strip_reasoning"]);

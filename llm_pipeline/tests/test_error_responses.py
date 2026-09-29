@@ -75,7 +75,7 @@ def _assert_matches_error_shape(body: dict[str, object]) -> None:
 
 def test_pipeline_not_found_matches_error_shape(client: TestClient) -> None:
     response = client.post(
-        "/v1/pipelines/does-not-exist/runs", json={"prompt": "hi", "history": []}
+        "/v1/workflows/does-not-exist/runs", json={"prompt": "hi", "history": []}
     )
     assert response.status_code == 404
     body = response.json()
@@ -84,12 +84,12 @@ def test_pipeline_not_found_matches_error_shape(client: TestClient) -> None:
     assert body["error"] == "Not Found"
     assert body["code"] == "PIPELINE_NOT_FOUND"
     assert "does-not-exist" in body["message"]
-    assert body["request"] == "POST /v1/pipelines/does-not-exist/runs"
+    assert body["request"] == "POST /v1/workflows/does-not-exist/runs"
     assert body["validations"] == []
 
 
 def test_empty_prompt_matches_error_shape(client: TestClient) -> None:
-    response = client.post("/v1/pipelines/anything/runs", json={"prompt": "   ", "history": []})
+    response = client.post("/v1/workflows/anything/runs", json={"prompt": "   ", "history": []})
     assert response.status_code == 400
     body = response.json()
     _assert_matches_error_shape(body)
@@ -104,7 +104,7 @@ def test_an_oversized_prompt_is_input_too_large(
 ) -> None:
     monkeypatch.setattr(settings, "max_prompt_length", 10)
     response = client.post(
-        "/v1/pipelines/simple-local/runs", json={"prompt": "x" * 11, "history": []}
+        "/v1/workflows/simple-local/runs", json={"prompt": "x" * 11, "history": []}
     )
     assert response.status_code == 400
     assert response.json()["code"] == "INPUT_TOO_LARGE"
@@ -116,7 +116,7 @@ def test_malformed_request_body_matches_error_shape_with_validations(
     """Missing required field `prompt` — FastAPI's automatic 422 must
     be mapped into the same ErrorResponse contract, with each individual
     field problem populated as a ValidationIssue in `validations`."""
-    response = client.post("/v1/pipelines/simple-local/runs", json={"history": []})
+    response = client.post("/v1/workflows/simple-local/runs", json={"history": []})
     assert response.status_code == 422
     body = response.json()
     _assert_matches_error_shape(body)
@@ -133,7 +133,7 @@ def test_missing_api_key_matches_error_shape(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(settings, "api_keys", "secret-key")
-    response = client.post("/v1/pipelines/anything/runs", json={"prompt": "hi", "history": []})
+    response = client.post("/v1/workflows/anything/runs", json={"prompt": "hi", "history": []})
     assert response.status_code == 401
     body = response.json()
     _assert_matches_error_shape(body)
@@ -151,8 +151,8 @@ def test_rate_limit_matches_error_shape_with_retry_after(
     a plain HTTPException carries."""
     monkeypatch.setattr(rate_limit_module, "_limiter", rate_limit_module.RateLimiter(1))
 
-    client.get("/v1/pipelines")  # consumes the 1 allowed request in the window
-    response = client.get("/v1/pipelines")  # 2nd request within the window — should be limited
+    client.get("/v1/workflows")  # consumes the 1 allowed request in the window
+    response = client.get("/v1/workflows")  # 2nd request within the window — should be limited
 
     assert response.status_code == 429
     body = response.json()
@@ -220,14 +220,14 @@ def test_an_unexpected_failure_during_a_run_is_a_500_that_keeps_its_details_priv
     monkeypatch.setattr(runs_module, "_run_config", broken)
     run = {"prompt": "hi", "history": []}
 
-    answered = client.post("/v1/pipelines/simple-local/runs", json=run)
+    answered = client.post("/v1/workflows/simple-local/runs", json=run)
     assert answered.status_code == 500
     _assert_matches_error_shape(answered.json())
     assert answered.json()["code"] == "INTERNAL_ERROR"
     assert "secret internals" not in answered.text
 
     streamed = client.post(
-        "/v1/pipelines/simple-local/runs", json=run, headers={"Accept": "text/event-stream"}
+        "/v1/workflows/simple-local/runs", json=run, headers={"Accept": "text/event-stream"}
     )
     error_block = next(b for b in streamed.text.split("\n\n") if b.startswith("event: error"))
     event = json.loads(error_block.split("data: ", 1)[1])
@@ -239,7 +239,7 @@ def test_request_id_is_consistent_within_one_request(client: TestClient) -> None
     """request_id should match X-Request-ID for the same request, so ops
     can correlate an error body directly with server log lines."""
     response = client.post(
-        "/v1/pipelines/does-not-exist/runs", json={"prompt": "hi", "history": []}
+        "/v1/workflows/does-not-exist/runs", json={"prompt": "hi", "history": []}
     )
     body = response.json()
     assert response.headers.get("X-Request-ID") == body["request_id"]

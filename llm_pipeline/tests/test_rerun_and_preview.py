@@ -100,7 +100,7 @@ def test_rerun_calls_only_the_node_and_what_follows(
     calls = _Calls({("llama3", 0.1): ["new b"], ("llama3", 0.0): ["reconciled"]})
     monkeypatch.setattr(node_types_module, "get_provider", calls.provider_for)
     response = client.post(
-        "/v1/pipelines/consensus-qa/runs",
+        "/v1/workflows/consensus-qa/runs",
         json={
             "prompt": "q",
             "rerun": {
@@ -142,7 +142,7 @@ def test_a_loop_coming_back_to_a_reused_node_runs_it_for_real(
     )
     monkeypatch.setattr(node_types_module, "get_provider", calls.provider_for)
     response = client.post(
-        "/v1/pipelines/iterative-refinement/runs",
+        "/v1/workflows/iterative-refinement/runs",
         json={
             "prompt": "q",
             "rerun": {"from_node": "critique", "outputs": {"generate": "old draft"}},
@@ -163,7 +163,7 @@ def test_a_reused_branch_source_takes_the_same_route(
     calls = _Calls({("qwen3-coder:30b", 0.2): ["try restarting"]})
     monkeypatch.setattr(node_types_module, "get_provider", calls.provider_for)
     response = client.post(
-        "/v1/pipelines/support-router/runs",
+        "/v1/workflows/support-router/runs",
         json={
             "prompt": "my laptop is broken",
             "rerun": {"from_node": "tech_support_flow", "outputs": {"classify": "TECHNICAL"}},
@@ -175,7 +175,7 @@ def test_a_reused_branch_source_takes_the_same_route(
 
 def test_rerun_from_an_unknown_node_is_rejected(client: TestClient) -> None:
     response = client.post(
-        "/v1/pipelines/consensus-qa/runs",
+        "/v1/workflows/consensus-qa/runs",
         json={"prompt": "q", "rerun": {"from_node": "nope"}},
     )
     assert response.status_code == 404

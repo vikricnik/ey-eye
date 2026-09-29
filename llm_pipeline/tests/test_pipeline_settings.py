@@ -115,7 +115,7 @@ def test_nodes_inherit_the_pipeline_defaults(
     )
     recorder = _Recorder()
     monkeypatch.setattr(node_types_module, "get_provider", recorder.provider_for)
-    assert client.post("/v1/pipelines/defaults/runs", json={"prompt": "hi"}).status_code == 200
+    assert client.post("/v1/workflows/defaults/runs", json={"prompt": "hi"}).status_code == 200
 
     (spec_a, _, system_a), (spec_b, _, system_b) = recorder.calls
     assert (spec_a.model, spec_a.temperature, system_a) == ("base", 0.6, "Be kind.")
@@ -193,7 +193,7 @@ def test_history_reaches_only_the_nodes_that_include_it(
     monkeypatch.setattr(node_types_module, "get_provider", recorder.provider_for)
     history = [{"prompt": "earlier", "final_answer": "ok", "outputs": {"classify": "OTHER"}}]
     body = client.post(
-        "/v1/pipelines/chat/runs", json={"prompt": "tell one", "history": history}
+        "/v1/workflows/chat/runs", json={"prompt": "tell one", "history": history}
     ).json()
 
     classify_prompt, answer_prompt = recorder.calls[0][1], recorder.calls[1][1]
@@ -220,7 +220,7 @@ def test_message_and_conversation_say_what_they_hold(
     recorder = _Recorder({"m": "JOKE"})
     monkeypatch.setattr(node_types_module, "get_provider", recorder.provider_for)
     history = [{"prompt": "earlier", "final_answer": "ok"}]
-    client.post("/v1/pipelines/chat/runs", json={"prompt": "tell one", "history": history})
+    client.post("/v1/workflows/chat/runs", json={"prompt": "tell one", "history": history})
 
     classify_prompt, answer_prompt = recorder.calls[0][1], recorder.calls[1][1]
     assert classify_prompt == "Classify: tell one"
@@ -237,7 +237,7 @@ def test_streamed_runs_also_report_remembered_outputs(
     _write(pipelines, _classifier_pipeline())
     monkeypatch.setattr(node_types_module, "get_provider", _Recorder({"m": "STORY"}).provider_for)
     response = client.post(
-        "/v1/pipelines/chat/runs",
+        "/v1/workflows/chat/runs",
         json={
             "prompt": "x",
         },
@@ -260,7 +260,7 @@ def test_older_turns_are_summarized_with_the_chosen_model(
     monkeypatch.setattr(node_types_module, "get_provider", nodes.provider_for)
 
     history = [{"prompt": f"q{i}", "final_answer": f"a{i}"} for i in range(1, 4)]
-    client.post("/v1/pipelines/chat/runs", json={"prompt": "now", "history": history})
+    client.post("/v1/workflows/chat/runs", json={"prompt": "now", "history": history})
 
     ((spec, summary_prompt, _),) = summarizer.calls
     assert spec.model == "small"
@@ -305,7 +305,7 @@ def test_reasoning_is_stripped_per_pipeline_default_and_node_override(
     monkeypatch.setattr(
         node_types_module, "get_provider", _Recorder({"m": "<think>x</think>Done"}).provider_for
     )
-    outputs = client.post("/v1/pipelines/think/runs", json={"prompt": "q"}).json()["node_outputs"]
+    outputs = client.post("/v1/workflows/think/runs", json={"prompt": "q"}).json()["node_outputs"]
     assert outputs["a"]["output"] == "Done"
     assert outputs["b"]["output"] == "<think>x</think>Done"
 
@@ -337,11 +337,68 @@ def test_max_concurrency_limits_parallel_model_calls(
                 return Generation("ok")
 
         monkeypatch.setattr(node_types_module, "get_provider", lambda spec: _Slow())
-        assert client.post(f"/v1/pipelines/{name}/runs", json={"prompt": "q"}).status_code == 200
+        assert client.post(f"/v1/workflows/{name}/runs", json={"prompt": "q"}).status_code == 200
         return state["peak"]
 
     assert measure("limited") == 1
     assert measure("unlimited") == 4
+
+
+def test_a_run_time_limit_is_off_by_default_and_must_be_positive() -> None:
+    base: dict[str, Any] = {
+        "name": "p",
+        "defaults": {"model": {"provider": "ollama", "name": "m"}},
+        "nodes": [{"id": "a", "prompt_template": "{{ input }}"}],
+        "output_nodes": ["a"],
+    }
+    assert PipelineDefinition.model_validate(base).execution.run_timeout_seconds is None
+    for limit in (0, -1):
+        with pytest.raises(ValueError, match="run_timeout_seconds"):
+            PipelineDefinition.model_validate({**base, "execution": {"run_timeout_seconds": limit}})
+
+
+def test_a_run_past_its_time_limit_is_stopped(
+    client: TestClient, pipelines: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each model call has its own timeout, but a run is many of them —
+    retried, some in loops. The run's limit bounds the whole, and stops the
+    model call still in flight rather than only answering early."""
+    _write(
+        pipelines,
+        {
+            "name": "bounded",
+            "execution": {"run_timeout_seconds": 0.2},
+            "defaults": {"model": {"provider": "ollama", "name": "m"}},
+            "nodes": [{"id": "a", "prompt_template": "{{ input }}"}],
+            "output_nodes": ["a"],
+        },
+    )
+    cancelled: list[str] = []
+
+    class _Hangs:
+        async def generate(self, prompt: str, system: str | None = None) -> Generation:
+            try:
+                await asyncio.sleep(10)
+            except asyncio.CancelledError:
+                cancelled.append(prompt)
+                raise
+            return Generation("too late")
+
+    monkeypatch.setattr(node_types_module, "get_provider", lambda spec: _Hangs())
+
+    answered = client.post("/v1/workflows/bounded/runs", json={"prompt": "answered"})
+    assert answered.status_code == 504
+    assert answered.json()["code"] == "RUN_TIMED_OUT"
+    assert "0.2s" in answered.json()["message"]
+
+    streamed = client.post(
+        "/v1/workflows/bounded/runs", json={"prompt": "streamed"}, headers=STREAM
+    )
+    event, data = streamed.text.strip().split("\n\n")[-1].split("\n")
+    assert event == "event: error"
+    assert json.loads(data.removeprefix("data: "))["code"] == "RUN_TIMED_OUT"
+
+    assert cancelled == ["answered", "streamed"]
 
 
 # -- allowlist covers default and summarizer models ------------------------------------
@@ -359,13 +416,13 @@ def _use_catalog(client: TestClient) -> None:
 def test_default_and_summarizer_models_must_be_allowed(client: TestClient) -> None:
     _use_catalog(client)
     definition = _classifier_pipeline(summarize={"model": {"provider": "ollama", "name": "big"}})
-    response = client.put("/v1/pipelines/chat", json={"definition": definition}, headers=CREATE)
+    response = client.put("/v1/workflows/chat", json={"definition": definition}, headers=CREATE)
     assert response.status_code == 422
     assert "history summarizer" in response.json()["message"]
 
     definition = _classifier_pipeline()
     definition["defaults"]["model"]["name"] = "unknown"
-    response = client.put("/v1/pipelines/chat", json={"definition": definition}, headers=CREATE)
+    response = client.put("/v1/workflows/chat", json={"definition": definition}, headers=CREATE)
     assert response.status_code == 422
     assert "pipeline default model" in response.json()["message"]
 
@@ -397,7 +454,7 @@ def test_an_injected_node_template_fails_the_node_instead_of_running(
     )
     recorder = _Recorder()
     monkeypatch.setattr(node_types_module, "get_provider", recorder.provider_for)
-    response = client.post("/v1/pipelines/evil/runs", json={"prompt": "x"})
+    response = client.post("/v1/workflows/evil/runs", json={"prompt": "x"})
     assert response.status_code == 502
     # A template the sandbox refuses fails its node, like any node failure —
     # not an internal error, and named so an editor can point at it.

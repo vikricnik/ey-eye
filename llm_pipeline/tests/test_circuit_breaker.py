@@ -1,5 +1,4 @@
 import asyncio
-import time
 
 import pytest
 
@@ -40,10 +39,12 @@ def test_circuit_opens_at_failure_threshold() -> None:
 
 
 def test_circuit_closes_after_cooldown() -> None:
-    cb = CircuitBreaker(failure_threshold=1, cooldown_seconds=0.2)
+    now = [0.0]  # the breaker's clock, moved on by hand
+    cb = CircuitBreaker(failure_threshold=1, cooldown_seconds=30, clock=lambda: now[0])
     cb.record_failure("model-x")
-    assert cb.is_open("model-x") is True
-    time.sleep(0.25)
+    now[0] = 29.9
+    assert cb.is_open("model-x") is True  # still cooling down
+    now[0] = 30.0
     assert cb.is_open("model-x") is False  # cooldown elapsed
 
 
@@ -108,10 +109,11 @@ async def test_retry_gives_up_after_max_attempts() -> None:
 
 
 def test_half_open_circuit_admits_one_trial_call() -> None:
-    cb = CircuitBreaker(failure_threshold=1, cooldown_seconds=0.05)
+    now = [0.0]
+    cb = CircuitBreaker(failure_threshold=1, cooldown_seconds=30, clock=lambda: now[0])
     cb.record_failure("model-x")
     assert cb.allow_call("model-x") is False  # open
-    time.sleep(0.06)
+    now[0] = 30.0
     assert cb.allow_call("model-x") is True  # the trial call
     assert cb.allow_call("model-x") is False  # everyone else still fails fast
     cb.record_success("model-x")
@@ -120,9 +122,10 @@ def test_half_open_circuit_admits_one_trial_call() -> None:
 
 
 def test_failed_trial_call_reopens_the_circuit() -> None:
-    cb = CircuitBreaker(failure_threshold=1, cooldown_seconds=0.05)
+    now = [0.0]
+    cb = CircuitBreaker(failure_threshold=1, cooldown_seconds=30, clock=lambda: now[0])
     cb.record_failure("model-x")
-    time.sleep(0.06)
+    now[0] = 30.0
     assert cb.allow_call("model-x") is True
     cb.record_failure("model-x")
     assert cb.is_open("model-x") is True
@@ -132,12 +135,14 @@ def test_failed_trial_call_reopens_the_circuit() -> None:
 def test_abandoned_trial_call_is_replaced_after_a_cooldown() -> None:
     """A trial call whose outcome never comes back (its request was
     cancelled) mustn't hold the circuit shut for good."""
-    cb = CircuitBreaker(failure_threshold=1, cooldown_seconds=0.05)
+    now = [0.0]
+    cb = CircuitBreaker(failure_threshold=1, cooldown_seconds=30, clock=lambda: now[0])
     cb.record_failure("model-x")
-    time.sleep(0.06)
+    now[0] = 30.0
     assert cb.allow_call("model-x") is True  # claimed, then abandoned
-    assert cb.allow_call("model-x") is False
-    time.sleep(0.06)
+    now[0] = 59.9
+    assert cb.allow_call("model-x") is False  # it has a cooldown to report back
+    now[0] = 60.0
     assert cb.allow_call("model-x") is True
 
 
@@ -172,9 +177,10 @@ async def test_a_recovering_model_gets_one_trial_call_not_every_waiting_request(
             return Generation("ok")
 
     spec = ModelSpec(ProviderType.OLLAMA, "retry-test-model-4")
-    breaker = CircuitBreaker(failure_threshold=1, cooldown_seconds=0.05)
+    now = [0.0]
+    breaker = CircuitBreaker(failure_threshold=1, cooldown_seconds=30, clock=lambda: now[0])
     breaker.record_failure(spec.identity)
-    await asyncio.sleep(0.06)  # cooldown over: half-open
+    now[0] = 30.0  # cooldown over: half-open
     policy = RetryPolicy(timeout_seconds=5.0, max_attempts=1)
 
     trial = asyncio.ensure_future(

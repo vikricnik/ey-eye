@@ -46,4 +46,8 @@ EXPOSE 8000
 # Pipelines are baked into the image (see root README: "no arbitrary YAML
 # upload" is a deliberate security boundary) — changing a pipeline means
 # rebuilding the image, same as any other code change.
-CMD ["uvicorn", "llm_pipeline.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# One worker, pinned: the rate limiter and circuit breakers live in the
+# worker's memory, so every extra worker would multiply each client's rate
+# limit. Without --workers, uvicorn takes the count from $WEB_CONCURRENCY,
+# which some platforms set. See README "One worker per server".
+CMD ["uvicorn", "llm_pipeline.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

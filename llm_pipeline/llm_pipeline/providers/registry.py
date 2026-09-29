@@ -7,6 +7,8 @@ example), then add one branch here. Nothing else in the pipeline needs to
 change — every consumer only ever depends on the LLMProvider Protocol.
 """
 
+from collections import OrderedDict
+
 from llm_pipeline.providers.anthropic import AnthropicProvider
 from llm_pipeline.providers.base import LLMProvider, ModelSpec, ProviderType
 from llm_pipeline.providers.copilot import CopilotProvider
@@ -16,15 +18,22 @@ from llm_pipeline.providers.openai import OpenAIProvider
 
 # Providers are cheap-ish to reuse and somewhat wasteful to reconstruct per-request,
 # so we cache one instance per unique (provider, model, generation settings)
-# combination — see ModelSpec.cache_key.
-_provider_cache: dict[str, LLMProvider] = {}
+# combination — see ModelSpec.cache_key. Bounded, least recently used first
+# out: draft test runs let a client pick any temperature and options, and
+# every combination ever tried would otherwise stay cached. Well above what
+# saved pipelines use; past it, a provider is only rebuilt (a call in flight
+# keeps its own reference).
+_MAX_CACHED_PROVIDERS = 128
+_provider_cache: OrderedDict[str, LLMProvider] = OrderedDict()
 
 
 def get_provider(spec: ModelSpec) -> LLMProvider:
     """Factory: returns a cached provider instance for the given spec."""
     cache_key = spec.cache_key
-    if cache_key in _provider_cache:
-        return _provider_cache[cache_key]
+    cached = _provider_cache.get(cache_key)
+    if cached is not None:
+        _provider_cache.move_to_end(cache_key)
+        return cached
 
     provider: LLMProvider
     if spec.provider == ProviderType.OLLAMA:
@@ -41,6 +50,8 @@ def get_provider(spec: ModelSpec) -> LLMProvider:
         raise ValueError(f"Unknown provider: {spec.provider}")
 
     _provider_cache[cache_key] = provider
+    if len(_provider_cache) > _MAX_CACHED_PROVIDERS:
+        _provider_cache.popitem(last=False)
     return provider
 
 

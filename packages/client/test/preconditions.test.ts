@@ -57,8 +57,8 @@ describe("preconditions", () => {
     await client.createPipeline(definition);
     await client.updatePipeline(definition, { baseRevision: "r1" });
     assert.deepEqual(seen, [
-      { request: "PUT /v1/pipelines/p", ifMatch: undefined, ifNoneMatch: "*", body: { definition } },
-      { request: "PUT /v1/pipelines/p", ifMatch: '"r1"', ifNoneMatch: undefined, body: { definition } },
+      { request: "PUT /v1/workflows/p", ifMatch: undefined, ifNoneMatch: "*", body: { definition } },
+      { request: "PUT /v1/workflows/p", ifMatch: '"r1"', ifNoneMatch: undefined, body: { definition } },
     ]);
   });
 
@@ -69,8 +69,8 @@ describe("preconditions", () => {
     assert.deepEqual(
       seen.map((s) => [s.request, s.ifMatch]),
       [
-        ["DELETE /v1/pipelines/p", '"r1"'],
-        ["DELETE /v1/pipelines/p", undefined],
+        ["DELETE /v1/workflows/p", '"r1"'],
+        ["DELETE /v1/workflows/p", undefined],
       ]
     );
   });

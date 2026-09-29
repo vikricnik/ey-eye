@@ -240,4 +240,5 @@ ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
     429: {"model": ErrorResponse, "description": "Rate limit exceeded"},
     500: {"model": ErrorResponse, "description": "Unexpected server error"},
     502: {"model": ErrorResponse, "description": "The pipeline run failed"},
+    504: {"model": ErrorResponse, "description": "The run went past its time limit"},
 }

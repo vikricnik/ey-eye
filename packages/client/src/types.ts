@@ -14,7 +14,7 @@ export interface RerunRequest {
   outputs: Record<string, string>;
 }
 
-/** POST /v1/pipelines/{name}/runs — the pipeline is named in the path. */
+/** POST /v1/workflows/{name}/runs — the pipeline is named in the path. */
 export interface RunRequest {
   prompt: string;
   history: ConversationTurn[];
@@ -77,7 +77,7 @@ export interface RunResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Streaming (POST /v1/pipelines/{name}/runs with Accept: text/event-stream) —
+// Streaming (POST /v1/workflows/{name}/runs with Accept: text/event-stream) —
 // Server-Sent Events: node_start, node_token as models generate text,
 // node_complete, loop_iteration, then done. See PipelineClient.askStream()
 // for how these are consumed.
@@ -151,7 +151,7 @@ export interface PipelineSummary {
 // ---------------------------------------------------------------------------
 // Pipeline structure — what a client draws, derived from a definition by
 // graphModel.ts's detailFromDefinition(). Not sent by the server: GET
-// /v1/pipelines/{name} returns the definition itself (PipelineDefinitionResponse).
+// /v1/workflows/{name} returns the definition itself (PipelineDefinitionResponse).
 // ---------------------------------------------------------------------------
 
 export interface PipelineNodeInfo {
@@ -202,7 +202,7 @@ export interface HealthResponse {
 }
 
 /** GET /v1/server-info — what a client needs to start. The pipelines
- * themselves are GET /v1/pipelines. */
+ * themselves are GET /v1/workflows. */
 export interface ServerInfoResponse {
   /** The pipeline to open first; it can't be deleted. */
   default_pipeline_name: string;
@@ -325,6 +325,9 @@ export interface ExecutionConfig {
   retry_backoff_seconds?: number;
   /** At most this many nodes call models at once (unset: no limit). */
   max_concurrency?: number;
+  /** The whole run's limit, in seconds: past it the run is stopped and
+   * answered with RUN_TIMED_OUT (unset: no limit). */
+  run_timeout_seconds?: number;
 }
 
 export interface BranchRoute {
@@ -488,7 +491,7 @@ export interface ValidatePipelineResponse {
   warnings?: DefinitionIssue[];
 }
 
-/** PUT /v1/pipelines/{name}. Whether it creates or updates is said by a
+/** PUT /v1/workflows/{name}. Whether it creates or updates is said by a
  * header — see createPipeline() and updatePipeline(). */
 export interface SavePipelineRequest {
   definition: PipelineDefinition;
@@ -558,6 +561,7 @@ export type ErrorCode =
   | "TEST_CASE_NOT_FOUND"
   | "TEMPLATE_RENDER_FAILED"
   | "PIPELINE_RUN_FAILED"
+  | "RUN_TIMED_OUT"
   | "REQUEST_CANCELLED";
 
 // Matches the server's ErrorResponse model exactly (api_schemas.py) —

@@ -2,17 +2,19 @@
 In-process rate limiting — a fixed-window counter per client.
 
 Deliberately simple and dependency-free (no Redis, no slowapi). This is
-correct and sufficient for a SINGLE server process. If you scale to multiple
-instances behind a load balancer, each instance enforces its own limit
-independently — a client could get up to N_instances * limit through in
-total. Fine for a first pass; swap in a shared store (Redis INCR + EXPIRE is
-the standard pattern) if you actually run multiple instances and need a
-hard global cap.
+correct and sufficient for a SINGLE server process — which is how the server
+runs (the Docker image pins `--workers 1`; see README "One worker per
+server"). With more than one — instances behind a load balancer, or the
+workers of `uvicorn --workers N`, each its own process — each enforces its
+own limit, so a client could get up to N * limit through in total. Enforce
+the limit at the reverse proxy then, or swap in a shared store (Redis INCR
++ EXPIRE is the standard pattern) if you need a hard global cap.
 """
 
 import logging
 import time
 from collections import defaultdict, deque
+from collections.abc import Callable
 
 from fastapi import Header, Request
 
@@ -27,13 +29,21 @@ WINDOW_SECONDS = 60.0
 
 
 class RateLimiter:
-    def __init__(self, requests_per_window: int, window_seconds: float = WINDOW_SECONDS) -> None:
+    def __init__(
+        self,
+        requests_per_window: int,
+        window_seconds: float = WINDOW_SECONDS,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
         self.requests_per_window = requests_per_window
         self.window_seconds = window_seconds
+        # What "now" is — replaceable, so tests move time on instead of
+        # sleeping through windows.
+        self._clock = clock
         # client_id -> deque of request timestamps within the current window
         self._requests: dict[str, deque[float]] = defaultdict(deque)
         # When clients with no request inside the window are next forgotten.
-        self._next_sweep_at = time.monotonic() + window_seconds
+        self._next_sweep_at = clock() + window_seconds
 
     @property
     def tracked_clients(self) -> int:
@@ -44,7 +54,7 @@ class RateLimiter:
     def check(self, client_id: str) -> None:
         """Raises ApiError(RATE_LIMITED) if client_id is over the limit;
         otherwise records this request and returns."""
-        now = time.monotonic()
+        now = self._clock()
         if now >= self._next_sweep_at:
             self._forget_idle_clients(now)
         history = self._requests[client_id]
