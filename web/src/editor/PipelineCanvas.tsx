@@ -24,6 +24,7 @@ import { compactTextScale, fitOptions, isCompact } from "./zoomDetail";
 import { AutoLayoutIcon } from "../ui/icons";
 import { CanvasLegend } from "./CanvasLegend";
 import { canvasHint } from "./canvasHint";
+import { needsReveal, revealCenter } from "./revealNode";
 
 /** Drag-and-drop payload type set by the + Add node palette
  * (AddNodeMenu.tsx). The value is a preset name, or "" for a plain node. */
@@ -58,6 +59,9 @@ export interface PipelineCanvasProps {
   onAutoLayout: () => void;
   /** Shown in the canvas's top-left corner: the + Add node menu. */
   topLeft?: ReactNode;
+  /** How much of the canvas's right edge is covered — by the floating
+   * settings column — so the selected node is kept out from under it. */
+  coveredRight: number;
 }
 
 const isValidConnection: IsValidConnection = (c) => c.source !== c.target;
@@ -73,7 +77,7 @@ function CompactTextScale({ target, textScale }: { target: RefObject<HTMLDivElem
 }
 
 function CanvasInner(props: PipelineCanvasProps) {
-  const { editable, selectedNodeId, selectedEdgeId, textScale } = props;
+  const { editable, selectedNodeId, selectedEdgeId, textScale, coveredRight } = props;
   const flow = useReactFlow();
   const fit = useMemo(() => fitOptions(textScale), [textScale]);
   const canvas = useRef<HTMLDivElement>(null);
@@ -134,6 +138,38 @@ function CanvasInner(props: PipelineCanvasProps) {
     firstScale.current = textScale;
     requestAnimationFrame(() => void flow.fitView({ ...fit, duration: 300 }));
   }, [textScale, fit, flow]);
+
+  // The canvas's size, to notice it narrowing — the settings column docking.
+  const [size, setSize] = useState<{ width: number; height: number } | null>(null);
+  useEffect(() => {
+    const el = canvas.current;
+    if (!el) return;
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry) setSize({ width: entry.contentRect.width, height: entry.contentRect.height });
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  // Keeps the selected node in sight when the canvas narrows or the floating
+  // settings column covers it — e.g. right after selecting it opens the
+  // column. Pans only; the zoom stays. A pan the user makes afterwards is
+  // left alone: this runs when the selection, the size or the cover changes.
+  useEffect(() => {
+    if (!selectedNodeId || !size) return;
+    const node = flow.getInternalNode(selectedNodeId);
+    if (!node) return;
+    const rect = {
+      x: node.internals.positionAbsolute.x,
+      y: node.internals.positionAbsolute.y,
+      width: node.measured.width ?? 0,
+      height: node.measured.height ?? 0,
+    };
+    const viewport = flow.getViewport();
+    if (!needsReveal(rect, viewport, { width: size.width - coveredRight, height: size.height })) return;
+    const center = revealCenter(rect, viewport.zoom, coveredRight);
+    void flow.setCenter(center.x, center.y, { zoom: viewport.zoom, duration: 200 });
+  }, [flow, selectedNodeId, size, coveredRight]);
 
   // Removals go through onNodesDelete/onEdgesDelete (-> the definition);
   // everything else (drag, select, measure) is applied locally.

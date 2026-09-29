@@ -23,6 +23,7 @@ web/
     │   ├── LlmNode.tsx         # a node card: model, temperature, live status, output badge
     │   ├── CanvasLegend.tsx    # the "?" legend in the canvas corner
     │   ├── canvasHint.ts       # the hint across the top while nothing is connected yet
+    │   ├── revealNode.ts       # keeping the selected node in sight beside the settings column
     │   ├── zoomDetail.ts       # compact cards and fit limits when zoomed out
     │   ├── Inspector.tsx       # node / pipeline / edge / branch / loop settings
     │   ├── Section.tsx         # foldable settings sections, remembered open or closed
@@ -179,7 +180,7 @@ without anything switching views. Drag a column's edge to resize it
 (double-click resets; the widths you choose are remembered — a narrower
 window only shows them narrower for as long as it's narrow). When docking
 the settings column would leave the canvas under 480px, it floats over the
-canvas's right edge instead; on a narrow screen (960px or less) everything
+canvas's right edge instead (either way, a selected node it would hide is panned into view); on a narrow screen (960px or less) everything
 stacks — canvas, settings, run panel — and the message box stays at the
 bottom of the screen as you scroll.
 

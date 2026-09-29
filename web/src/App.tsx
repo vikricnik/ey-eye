@@ -1225,6 +1225,7 @@ export function App() {
               selectedNodeId={selection?.kind === "node" ? selection.id : null}
               selectedEdgeId={selection?.kind === "edge" ? dependencyEdgeId(selection.from, selection.to) : null}
               fitSignal={fitSignal}
+              coveredRight={settingsShown && panels.placement === "floating" ? panels.sizes.settings : 0}
               topLeft={
                 <AddNodeMenu
                   editable={editable}
