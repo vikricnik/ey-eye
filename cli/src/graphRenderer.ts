@@ -4,6 +4,7 @@ import type {
   GraphModel,
   GraphNode,
   GraphViewState,
+  LoopEdge,
   NodeExecutionStatus,
 } from "@llm-pipeline/client";
 import { LOOP_EXIT_END } from "@llm-pipeline/client";
@@ -112,19 +113,20 @@ function groupByLevel(nodes: GraphNode[]): Map<number, GraphNode[]> {
   return byLevel;
 }
 
-function edgeGlyphAndColor(edge: GraphEdge): { glyph: string; color: (s: string) => string } {
-  if (edge.kind === "plain") return { glyph: "→", color: chalk.gray };
-  if (edge.kind === "branch") return { glyph: "⇢", color: chalk.cyan };
-  return { glyph: "↻", color: chalk.yellow }; // loop-continue / loop-exit
-}
+/** How each section of the edge list draws its edges. */
+const EDGE_STYLE: Record<"plain" | "branch" | "loop", { glyph: string; color: (s: string) => string }> = {
+  plain: { glyph: "→", color: chalk.gray },
+  branch: { glyph: "⇢", color: chalk.cyan },
+  loop: { glyph: "↻", color: chalk.yellow }, // loop-continue / loop-exit
+};
 
 /** Builds a live loop edge's label, folding in `progress` (iteration vs.
  * max, and "(exhausted)" once known) on top of the static "id (max N)"
  * text — same information the web view's applyGraphViewState() shows,
  * kept consistent across surfaces. Falls back to the static label when no
  * live progress is known yet (User Story 2's static call sites). */
-function loopEdgeLabel(edge: GraphEdge, state: GraphViewState | undefined): string | null {
-  const progress = edge.loopId ? state?.loopProgress[edge.loopId] : undefined;
+function loopEdgeLabel(edge: LoopEdge, state: GraphViewState | undefined): string {
+  const progress = state?.loopProgress[edge.loopId];
   if (!progress) return edge.label;
   const exhausted = progress.exhausted ? " (exhausted)" : "";
   return `${edge.loopId} — iteration ${progress.iteration}/${progress.maxIterations}${exhausted}`;
@@ -143,7 +145,7 @@ function renderEdgeLines(edges: GraphEdge[], state: GraphViewState | undefined):
 
   function section(kind: keyof typeof byKind, heading: string): void {
     const list = byKind[kind];
-    const { glyph, color } = edgeGlyphAndColor(list[0] ?? ({ kind } as GraphEdge));
+    const { glyph, color } = EDGE_STYLE[kind];
     if (list.length === 0) {
       lines.push(`  ${color(glyph)} ${heading.padEnd(8)} (none)`);
       return;
@@ -153,14 +155,14 @@ function renderEdgeLines(edges: GraphEdge[], state: GraphViewState | undefined):
       // FR-010: once a branch has resolved, mark which route was taken and
       // dim the ones that weren't — matches the web view's route-taken /
       // route-not-taken styling.
-      const outcome = edge.branchId ? state?.branchOutcomes[edge.branchId] : undefined;
+      const outcome = edge.kind === "branch" ? state?.branchOutcomes[edge.branchId] : undefined;
       const isTaken = outcome !== undefined && outcome.takenTargets.includes(edge.to);
       const isNotTaken = outcome !== undefined && !isTaken;
       const suffixPlain = isTaken ? " ✓ taken" : isNotTaken ? " (not taken)" : "";
 
       const prefixPlain = i === 0 ? `  ${glyph} ${heading.padEnd(8)} ` : " ".repeat(12);
       const corePlain = `${edge.from} ${glyph} ${targetPlain}${suffixPlain}`;
-      const rawLabel = kind === "loop" ? loopEdgeLabel(edge, state) : edge.label;
+      const rawLabel = edge.kind === "plain" ? null : edge.kind === "branch" ? edge.label : loopEdgeLabel(edge, state);
       const available = maxLineWidth - prefixPlain.length - corePlain.length;
       const labelPlain = rawLabel ? truncatePlain(` — ${rawLabel}`, Math.max(0, available)) : "";
 

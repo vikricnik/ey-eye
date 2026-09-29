@@ -136,6 +136,49 @@ describe("applyStreamStopped", () => {
   });
 });
 
+describe("edges", () => {
+  const looped: PipelineDefinition = {
+    name: "l",
+    nodes: ["cls", "gen", "fix", "done"].map((id, i, ids) => ({
+      id,
+      depends_on: id === "fix" ? ["gen"] : id === "done" ? ["fix"] : [],
+      prompt_template: i === 0 ? "{{ input }}" : `{{ ${ids[Math.max(0, i - 1)]}.output }}`,
+      model: { provider: "ollama" as const, name: "m" },
+    })),
+    branches: [{ id: "br", from: "cls", routes: [{ when: "'G' in output", to: "gen" }, { default: true, to: "done" }] }],
+    loops: [{ id: "lp", from: "fix", back_to: "gen", exit_to: "done", exit_when: "'OK' in output", max_iterations: 3 }],
+    output_nodes: ["done"],
+  };
+
+  it("carry only what their kind needs", () => {
+    const { edges } = buildGraphModel(detailFromDefinition(looped));
+    const shapes = edges.map((e) => [e.kind, Object.keys(e).sort().join(",")]);
+    assert.deepEqual(shapes, [
+      ["plain", "from,kind,to"],
+      ["branch", "branchId,from,isDefaultRoute,kind,label,routeIndex,to"],
+      ["branch", "branchId,from,isDefaultRoute,kind,label,routeIndex,to"],
+      ["loop-continue", "from,kind,label,loopId,maxIterations,to"],
+      ["loop-exit", "from,kind,label,loopId,maxIterations,to"],
+    ]);
+  });
+
+  it("need no null checks once their kind is known", () => {
+    const { edges } = buildGraphModel(detailFromDefinition(looped));
+    for (const edge of edges) {
+      if (edge.kind === "branch") {
+        const route: [string, number] = [edge.branchId, edge.routeIndex];
+        assert.equal(route[0], "br");
+      } else if (edge.kind === "loop-continue" || edge.kind === "loop-exit") {
+        const loop: [string, number] = [edge.loopId, edge.maxIterations];
+        assert.deepEqual(loop, ["lp", 3]);
+      } else {
+        // @ts-expect-error — a plain edge belongs to no branch
+        void edge.branchId;
+      }
+    }
+  });
+});
+
 describe("multi-target branch routes", () => {
   const routed: PipelineDefinition = {
     name: "r",

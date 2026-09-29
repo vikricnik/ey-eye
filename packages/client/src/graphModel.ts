@@ -1,10 +1,12 @@
 import type {
   AskStreamEvent,
+  BranchEdge,
   BranchRouteOutcome,
   GraphEdge,
   GraphModel,
   GraphNode,
   GraphViewState,
+  LoopEdge,
   NodeExecutionStatus,
   PipelineDefinition,
   PipelineDetail,
@@ -134,17 +136,7 @@ export function buildGraphModel(detail: PipelineDetail): GraphModel {
   for (const node of detail.nodes) {
     for (const dep of node.depends_on) {
       if (conditional.has(dep)) continue; // that edge belongs to the branch/loop below instead
-      edges.push({
-        from: dep,
-        to: node.id,
-        kind: "plain",
-        label: null,
-        branchId: null,
-        routeIndex: null,
-        isDefaultRoute: false,
-        loopId: null,
-        loopMaxIterations: null,
-      });
+      edges.push({ kind: "plain", from: dep, to: node.id });
     }
   }
 
@@ -152,15 +144,13 @@ export function buildGraphModel(detail: PipelineDetail): GraphModel {
     for (const [routeIndex, route] of branch.routes.entries()) {
       for (const target of routeTargets(route)) {
         edges.push({
+          kind: "branch",
           from: branch.from,
           to: target,
-          kind: "branch",
-          label: route.default ? "default" : route.when,
           branchId: branch.id,
           routeIndex,
           isDefaultRoute: route.default,
-          loopId: null,
-          loopMaxIterations: null,
+          label: route.default ? "default" : (route.when ?? ""),
         });
       }
     }
@@ -168,15 +158,12 @@ export function buildGraphModel(detail: PipelineDetail): GraphModel {
 
   for (const loop of detail.loops) {
     edges.push({
+      kind: "loop-continue",
       from: loop.from,
       to: loop.back_to,
-      kind: "loop-continue",
-      label: `${loop.id} (max ${loop.max_iterations})`,
-      branchId: null,
-      routeIndex: null,
-      isDefaultRoute: false,
       loopId: loop.id,
-      loopMaxIterations: loop.max_iterations,
+      maxIterations: loop.max_iterations,
+      label: `${loop.id} (max ${loop.max_iterations})`,
     });
     // exit_to may be the literal "END" sentinel (terminate the graph, no
     // real destination node) rather than another node id — the edge is
@@ -184,15 +171,12 @@ export function buildGraphModel(detail: PipelineDetail): GraphModel {
     // is not present in `nodes`, so a renderer must special-case it rather
     // than look up a node box for it.
     edges.push({
+      kind: "loop-exit",
       from: loop.from,
       to: loop.exit_to,
-      kind: "loop-exit",
-      label: `${loop.id} exit (max ${loop.max_iterations})`,
-      branchId: null,
-      routeIndex: null,
-      isDefaultRoute: false,
       loopId: loop.id,
-      loopMaxIterations: loop.max_iterations,
+      maxIterations: loop.max_iterations,
+      label: `${loop.id} exit (max ${loop.max_iterations})`,
     });
   }
 
@@ -213,6 +197,15 @@ export function buildGraphModel(detail: PipelineDetail): GraphModel {
  * target becomes eligible once the source is done); loop back_to/exit_to
  * targets are excluded for the same reason they're excluded from layout
  * (they're not forward dependencies). */
+function branchEdges(graph: GraphModel): BranchEdge[] {
+  return graph.edges.filter((e): e is BranchEdge => e.kind === "branch");
+}
+
+/** One of `loopId`'s edges — each carries the loop's max_iterations. */
+function loopEdge(graph: GraphModel, loopId: string): LoopEdge | undefined {
+  return graph.edges.find((e): e is LoopEdge => e.kind !== "plain" && e.kind !== "branch" && e.loopId === loopId);
+}
+
 function structuralPredecessors(graph: GraphModel, nodeId: string): string[] {
   const branchPreds = graph.edges
     .filter((e) => e.kind === "branch" && e.to === nodeId)
@@ -233,8 +226,8 @@ function isDeadBranchTarget(
   branchOutcomes: Record<string, BranchRouteOutcome>,
   nodeId: string
 ): boolean {
-  return graph.edges.some((e) => {
-    if (e.kind !== "branch" || e.to !== nodeId || e.branchId === null) return false;
+  return branchEdges(graph).some((e) => {
+    if (e.to !== nodeId) return false;
     const outcome = branchOutcomes[e.branchId];
     return outcome !== undefined && !outcome.takenTargets.includes(nodeId);
   });
@@ -337,20 +330,16 @@ export function applyStreamEvent(state: GraphViewState, event: AskStreamEvent): 
     };
     let branchOutcomes = state.branchOutcomes;
 
-    const takenBranchEdges = state.graph.edges.filter(
-      (e) => e.kind === "branch" && e.to === nodeId && e.branchId !== null
-    );
-    for (const edge of takenBranchEdges) {
-      const branchId = edge.branchId!;
+    const branches = branchEdges(state.graph);
+    for (const edge of branches.filter((e) => e.to === nodeId)) {
+      const { branchId } = edge;
       // The route this node belongs to was taken — all of its targets run.
-      const takenTargets = state.graph.edges
-        .filter((e) => e.kind === "branch" && e.branchId === branchId && e.routeIndex === edge.routeIndex)
+      const takenTargets = branches
+        .filter((e) => e.branchId === branchId && e.routeIndex === edge.routeIndex)
         .map((e) => e.to);
       branchOutcomes = { ...branchOutcomes, [branchId]: { branchId, takenTargets } };
 
-      const siblings = state.graph.edges.filter(
-        (e) => e.kind === "branch" && e.branchId === branchId && !takenTargets.includes(e.to)
-      );
+      const siblings = branches.filter((e) => e.branchId === branchId && !takenTargets.includes(e.to));
       for (const sibling of siblings) {
         if (nodeStatus[sibling.to] !== "complete") {
           nodeStatus = { ...nodeStatus, [sibling.to]: "not-started" };
@@ -366,8 +355,7 @@ export function applyStreamEvent(state: GraphViewState, event: AskStreamEvent): 
 
   if (event.type === "loop_iteration") {
     const { loop_id, iteration } = event.data;
-    const edge = state.graph.edges.find((e) => e.loopId === loop_id && e.loopMaxIterations !== null);
-    const maxIterations = edge?.loopMaxIterations ?? iteration;
+    const maxIterations = loopEdge(state.graph, loop_id)?.maxIterations ?? iteration;
     return {
       ...state,
       loopProgress: {
@@ -439,8 +427,7 @@ export function applyStreamError(state: GraphViewState, error: PipelineApiError)
 
   if (loopId !== undefined) {
     const existing = state.loopProgress[loopId];
-    const edge = state.graph.edges.find((e) => e.loopId === loopId && e.loopMaxIterations !== null);
-    const maxIterations = existing?.maxIterations ?? edge?.loopMaxIterations ?? 0;
+    const maxIterations = existing?.maxIterations ?? loopEdge(state.graph, loopId)?.maxIterations ?? 0;
     loopProgress = {
       ...loopProgress,
       [loopId]: {

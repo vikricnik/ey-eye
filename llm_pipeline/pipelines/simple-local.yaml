@@ -5,7 +5,7 @@ version: 2
 execution:
   model_timeout_seconds: 60
 history:
-  max_turns: 6
+  max_turns: 0
 
 nodes:
   - id: clasify

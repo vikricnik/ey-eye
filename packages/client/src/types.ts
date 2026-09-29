@@ -592,25 +592,43 @@ export interface GraphNode {
   isOutputCandidate: boolean;
 }
 
-export type GraphEdgeKind = "plain" | "branch" | "loop-continue" | "loop-exit";
-
-export interface GraphEdge {
+/** A `depends_on` edge. */
+export interface PlainEdge {
+  kind: "plain";
   from: string;
   to: string;
-  kind: GraphEdgeKind;
-  /** Branch: the route's `when` expression, or "default". Loop: id + target/max-iterations. Null for plain edges. */
-  label: string | null;
-  branchId: string | null;
-  /** Which of the branch's routes this edge belongs to — a route with
-   * several targets draws one edge per target. Null for non-branch edges. */
-  routeIndex: number | null;
-  isDefaultRoute: boolean;
-  loopId: string | null;
-  /** The loop's configured max_iterations, structured (not just baked into
-   * `label`'s text) so live-status folding can initialize/compare
-   * LoopProgress.maxIterations numerically. Null for non-loop edges. */
-  loopMaxIterations: number | null;
 }
+
+/** One target of one branch route — a route with several targets draws
+ * one edge per target. */
+export interface BranchEdge {
+  kind: "branch";
+  from: string;
+  to: string;
+  branchId: string;
+  /** Which of the branch's routes this edge belongs to. */
+  routeIndex: number;
+  isDefaultRoute: boolean;
+  /** The route's `when` expression, or "default". */
+  label: string;
+}
+
+/** A loop's way back (`loop-continue`, to `back_to`) or out (`loop-exit`,
+ * to `exit_to` — possibly LOOP_EXIT_END, which is no node). */
+export interface LoopEdge {
+  kind: "loop-continue" | "loop-exit";
+  from: string;
+  to: string;
+  loopId: string;
+  /** The loop's max_iterations, as a number for live progress. */
+  maxIterations: number;
+  /** "<loop> (max N)", or "<loop> exit (max N)". */
+  label: string;
+}
+
+/** An edge of the drawn graph; `kind` says which fields it has. */
+export type GraphEdge = PlainEdge | BranchEdge | LoopEdge;
+export type GraphEdgeKind = GraphEdge["kind"];
 
 export interface GraphModel {
   pipelineName: string;

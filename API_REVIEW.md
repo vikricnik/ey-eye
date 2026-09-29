@@ -59,7 +59,7 @@ problems are where the parts meet:
 | [API-014](#api-014-one-concept-has-three-names-and-several-cli-commands-differ-by-one-keystroke) | SUGGESTION | One concept has three names, and several CLI commands differ by one keystroke — ✅ fixed |
 | [API-015](#api-015-yaml-schema-naming) | SUGGESTION | YAML schema naming — ✅ fixed |
 | [API-016](#api-016-validate-takes-two-mutually-exclusive-fields-and-checks-at-runtime) | SUGGESTION | `validate` takes two mutually exclusive fields and checks at runtime — ✅ fixed |
-| [API-017](#api-017-graphedge-expresses-its-variant-through-nullable-fields) | SUGGESTION | `GraphEdge` expresses its variant through nullable fields |
+| [API-017](#api-017-graphedge-expresses-its-variant-through-nullable-fields) | SUGGESTION | `GraphEdge` expresses its variant through nullable fields — ✅ fixed |
 | [API-018](#api-018-smaller-naming-items) | SUGGESTION | Smaller naming items |
 
 **Suggested order:** start with API-001. Moving the compat router to
@@ -747,6 +747,21 @@ working around them.
 ### API-017: `GraphEdge` expresses its variant through nullable fields
 
 - **Severity**: SUGGESTION
+- **Status**: ✅ Fixed (2026-09-28).
+  - `GraphEdge` is now a union on `kind`, and each member has only its own
+    fields, none nullable:
+    - `PlainEdge {kind: "plain", from, to}`
+    - `BranchEdge {kind: "branch", from, to, branchId, routeIndex, isDefaultRoute, label}`
+    - `LoopEdge {kind: "loop-continue" | "loop-exit", from, to, loopId, maxIterations, label}`
+  - `loopMaxIterations` is now `maxIterations`, since the type already says
+    it's a loop's. `GraphEdgeKind` is now `GraphEdge["kind"]`.
+  - `graphModel.ts` reads edges through two narrowing helpers
+    (`branchEdges`, `loopEdge`), with no `!== null` checks or `!` assertions.
+  - The CLI renderer and the web canvas conversion narrow on `kind` too. The
+    CLI renderer no longer builds a fake `{ kind } as GraphEdge` to pick a
+    glyph; it uses a small style table.
+  - Tests check each kind's exact fields, and a `@ts-expect-error` shows
+    that a plain edge has no `branchId`.
 - **Principle**: Make invalid states unrepresentable
 - **File(s)**:
   - [types.ts:513-531](packages/client/src/types.ts#L513-L531)

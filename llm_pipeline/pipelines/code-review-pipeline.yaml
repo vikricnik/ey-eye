@@ -5,7 +5,7 @@ version: 2
 execution:
   model_timeout_seconds: 90
 history:
-  max_turns: 4
+  max_turns: 300
 
 # Runs entirely on Ollama by default — no cloud API keys needed. See the
 # commented-out alternatives below for swapping in a cloud provider on
