@@ -56,7 +56,7 @@ polish.
 | [UX-003](#ux-003-an-unreachable-ollama-is-only-discovered-when-a-run-fails) | MAJOR | An unreachable Ollama is only discovered when a run fails — ✅ fixed |
 | [UX-004](#ux-004-a-failed-run-discards-the-message-and-offers-no-retry) | MAJOR | A failed run discards the message and offers no retry — ✅ fixed |
 | [UX-005](#ux-005-pipeline-settings-are-hard-to-find) | MAJOR | Pipeline settings are hard to find — ✅ fixed |
-| [UX-006](#ux-006-two-run-buttons-with-different-meanings-on-the-tests-tab) | MINOR | Two Run buttons with different meanings on the Tests tab |
+| [UX-006](#ux-006-two-run-buttons-with-different-meanings-on-the-tests-tab) | MINOR | Two Run buttons with different meanings on the Tests tab — ✅ fixed |
 | [UX-007](#ux-007-the-toolbar-gives-ten-actions-equal-weight) | MINOR | The toolbar gives ten actions equal weight |
 | [UX-008](#ux-008-node-settings-run-three-screens-long-and-repeat-actions) | MINOR | Node settings run three screens long and repeat actions |
 | [UX-009](#ux-009-canvas-status-and-roles-are-hard-to-read-and-the-legend-is-on-the-wrong-tab) | MINOR | Canvas status and roles are hard to read, and the legend is on the wrong tab |
@@ -376,6 +376,21 @@ polish.
 ### UX-006: Two Run buttons with different meanings on the Tests tab
 
 - **Severity**: MINOR
+- **Status**: ✅ Fixed (2026-09-29).
+  - The message box's button now says **Send**, or **Save & send** with
+    unsaved changes. Its tooltip explains the save: runs use what's saved
+    on the server. The placeholder says "Enter to send". "Run" on screen now
+    only means running test cases (and "Re-run from here" for a node). The
+    Composer takes `saveFirst` instead of a label string, so the label and
+    tooltip can't disagree.
+  - The message box is hidden on the Tests tab. It stays mounted, so what
+    you've typed is still there when you come back (checked in the app).
+    Esc still stops a chat run from Tests, and the Chat tab's dot shows one
+    is going.
+  - **Not done**: shrinking the box to one line on Settings until it's
+    focused. It would save about 12px, and the panel would jump every time
+    the box gains or loses focus. UX-008 (shorter node settings) is the
+    better way to win space there.
 - **Principle**: H4 Consistency and standards
 - **File(s)**:
   - [App.tsx:1155-1167](web/src/App.tsx#L1155-L1167)

@@ -225,10 +225,14 @@ export interface ComposerHandle {
   fill(text: string): void;
 }
 
-/** The message box, at the bottom of the panel on every tab. */
+/** The message box, at the bottom of the panel on every tab but Tests
+ * (whose Run buttons run test cases). Its button says Send, so "Run"
+ * means one thing on screen. */
 export function Composer(props: {
   running: boolean;
-  runLabel: string;
+  /** The pipeline has unsaved changes: sending saves it first, since runs
+   * execute what's saved on the server. */
+  saveFirst: boolean;
   disabledReason: string | null;
   onSubmit: (prompt: string) => void;
   /** Stops the run in progress. */
@@ -264,7 +268,7 @@ export function Composer(props: {
           ref={box}
           rows={2}
           aria-label="Message"
-          placeholder={props.disabledReason ?? "Ask something…  (Enter to run, Shift+Enter for a new line)"}
+          placeholder={props.disabledReason ?? "Ask something…  (Enter to send, Shift+Enter for a new line)"}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           onKeyDown={(e) => {
@@ -280,8 +284,17 @@ export function Composer(props: {
             Stop
           </button>
         ) : (
-          <button type="button" disabled={!prompt.trim() || props.disabledReason !== null} onClick={submit}>
-            {props.runLabel}
+          <button
+            type="button"
+            disabled={!prompt.trim() || props.disabledReason !== null}
+            title={
+              props.saveFirst
+                ? "Save the pipeline, then send — runs use what's saved on the server"
+                : "Send the message (Enter)"
+            }
+            onClick={submit}
+          >
+            {props.saveFirst ? "Save & send" : "Send"}
           </button>
         )}
       </div>

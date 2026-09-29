@@ -157,7 +157,8 @@ selected node, or the pipeline when nothing is selected — **⚙** beside the
 pipeline picker opens the pipeline's), **Add** (a blank
 node or one from a preset), **Messages** (what every node received and
 replied) and **Tests**. The message box sits at the bottom of the panel on
-every tab, so you can send a message while editing. Selecting a node opens
+every tab but Tests (whose Run buttons run test cases), so you can send a
+message while editing; what you've typed is kept while you're on Tests. Selecting a node opens
 its Settings. Drag the panel's edge to resize it (double-click resets; the
 width is remembered); on a narrow screen the panel sits under the canvas.
 
@@ -263,10 +264,11 @@ it everything below is read-only and a banner says so):
 - In a node's Settings, its own **Messages** sub-tab shows just that node's
   received messages and replies, newest run first. The sub-tab stays
   selected as you click from node to node.
-- **Stop** (the Run button while a run is going, or Esc) ends it: the
+- **Send** (or Enter) in the message box starts a run.
+- **Stop** (the Send button while a run is going, or Esc) ends it: the
   server stops the model calls, nodes that finished keep their output, and
   nothing is added to the conversation. Test runs have their own Stop.
-- With unsaved changes, the button says **Save & run**: runs execute what's
+- With unsaved changes, the button says **Save & send**: runs execute what's
   saved on the server, never an unsaved draft.
 - Selecting a node after a run shows its last output in its Settings.
 - **Tokens and context**: after a run, each node card shows how much of the

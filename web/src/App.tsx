@@ -1204,11 +1204,15 @@ export function App() {
             chat: running ? <span className="pulse-dot" aria-hidden="true" /> : null,
             tests: testRun?.status === "running" ? <span className="pulse-dot" aria-hidden="true" /> : null,
           }}
+          // Tests has its own Run buttons, for test cases — a message box
+          // there would put two different "runs" side by side. Esc still
+          // stops a chat run from there.
+          footerHidden={panelTab === "tests"}
           footer={
             <Composer
               ref={composer}
               running={running}
-              runLabel={doc?.dirty ? "Save & run" : "Run"}
+              saveFirst={doc?.dirty ?? false}
               disabledReason={runDisabled}
               onSubmit={(prompt) => {
                 // Show the answer coming in — unless the log is what's being watched.

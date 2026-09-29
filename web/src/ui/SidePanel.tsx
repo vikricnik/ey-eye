@@ -13,7 +13,7 @@ export const PANEL_TABS: { id: PanelTab; label: string; title: string }[] = [
 /**
  * The one panel beside the canvas: a tab for everything that isn't the
  * graph itself, and the message box below them — so a message can be sent
- * from any tab.
+ * while editing (every tab but Tests, see App).
  */
 export function SidePanel(props: {
   tab: PanelTab;
@@ -22,6 +22,8 @@ export function SidePanel(props: {
   badges?: Partial<Record<PanelTab, ReactNode>>;
   children: ReactNode;
   footer: ReactNode;
+  /** Hides the footer without unmounting it, so what's typed there is kept. */
+  footerHidden?: boolean;
 }) {
   return (
     <aside className="side-panel" aria-label="Panel">
@@ -46,7 +48,9 @@ export function SidePanel(props: {
       <div className="panel-body" id="panel-body" role="tabpanel" aria-labelledby={`panel-tab-${props.tab}`}>
         {props.children}
       </div>
-      <div className="panel-footer">{props.footer}</div>
+      <div className="panel-footer" hidden={props.footerHidden}>
+        {props.footer}
+      </div>
     </aside>
   );
 }
