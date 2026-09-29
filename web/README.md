@@ -331,10 +331,22 @@ pipeline tiers anymore, since a pipeline's shape is whatever its YAML defines.
 
 Every server error — 400/401/403/404/409/412/422/428/429/502, and even a genuine
 unhandled 500 — comes back as one consistent structured object. When a
-request fails, the transcript shows the error message plus a small
-"reference id" line (the server's `request_id`, same value as its logged
-`X-Request-ID`) — useful to include if reporting an issue, since it's
-searchable directly in server logs.
+run fails, the transcript says what happened in plain words and what to
+do about it, for the failures you can act on
+([`run/runFailure.ts`](src/run/runFailure.ts)):
+a node that couldn't reach Ollama (or another provider), an Ollama model
+that isn't installed (`ollama pull …`), a model call that timed out, the
+circuit breaker pausing a failing model, the run time limit, a branch
+that reached no output node, rate limits, a refused API key, an input
+that's too large, and unexpected server errors. Below that is the
+server's own message and a "reference id" (the server's `request_id`,
+same value as its logged `X-Request-ID`) — useful to include if reporting
+an issue, since it's searchable directly in server logs.
+
+When the latest run failed or was stopped, **Retry** sends it again as it
+was (a re-run starts from the same node again), and **Edit message** puts
+the message back in the message box to change it before sending. Retry is
+disabled for the same reasons as Run (e.g. Ollama unreachable).
 
 ## Conversation history
 

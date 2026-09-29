@@ -742,8 +742,17 @@ button kbd {
   color: var(--invalid);
   padding: 10px 14px;
   border-radius: var(--radius);
+  display: grid;
+  gap: 6px;
 }
-.error-ref { margin-top: 6px; color: var(--text-dim); font-size: var(--fs-xs); }
+/* A failed run (run/RunErrorView.tsx): what happened, what to do about it,
+   then the server's own words and the reference id for bug reports. */
+.error-banner p { margin: 0; }
+.error-summary { font-weight: 700; }
+.error-hint { color: var(--text); line-height: 1.5; }
+.error-ref { color: var(--text-dim); font-size: var(--fs-xs); word-break: break-word; }
+.turn-actions { display: flex; gap: 16px; }
+.stopped-banner .turn-actions { margin-top: 8px; }
 
 .input-row { display: flex; gap: 8px; align-items: flex-end; }
 .input-row textarea { flex: 1; resize: none; min-height: 2.75rem; max-height: 9rem; }

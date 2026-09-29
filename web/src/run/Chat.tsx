@@ -1,6 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useImperativeHandle, useRef, useState } from "react";
+import type { ReactNode, Ref } from "react";
 import type { ConversationTurn, NodeOutput, RunLogEntry, StreamDoneEvent } from "@llm-pipeline/client";
 import { formatDuration, formatWhen } from "../format";
+import { RunErrorView } from "./RunErrorView";
+import type { RunError } from "./runFailure";
 import type { ConversationSummary } from "./runHistory";
 
 export interface Turn {
@@ -17,7 +20,7 @@ export interface Turn {
   log: RunLogEntry[];
   result?: StreamDoneEvent;
   elapsedMs?: number;
-  error?: { message: string; requestId?: string | undefined };
+  error?: RunError;
 }
 
 function NodeCard({ node, isOutput }: { node: NodeOutput; isOutput: boolean }) {
@@ -34,7 +37,8 @@ function NodeCard({ node, isOutput }: { node: NodeOutput; isOutput: boolean }) {
   );
 }
 
-function TurnView({ turn, verbose, pendingAnswer }: { turn: Turn; verbose: boolean; pendingAnswer?: string | undefined }) {
+function TurnView(props: { turn: Turn; verbose: boolean; pendingAnswer?: string | undefined; actions?: ReactNode }) {
+  const { turn, verbose, pendingAnswer, actions } = props;
   const result = turn.result;
   return (
     <div className="turn">
@@ -47,12 +51,10 @@ function TurnView({ turn, verbose, pendingAnswer }: { turn: Turn; verbose: boole
         <div className="stopped-banner">
           stopped — nothing from this run was added to the conversation
           {turn.nodeOutputs.length > 0 ? ` (${turn.nodeOutputs.length} node(s) had finished)` : ""}
+          {actions && <div className="turn-actions">{actions}</div>}
         </div>
       ) : turn.status === "error" ? (
-        <div className="error-banner">
-          error: {turn.error?.message}
-          {turn.error?.requestId && <div className="error-ref">reference id: {turn.error.requestId}</div>}
-        </div>
+        <RunErrorView error={turn.error ?? { message: "the run failed" }} actions={actions} />
       ) : (
         <div className="turn-response">
           <div className="turn-meta">
@@ -106,9 +108,46 @@ export function Chat(props: {
   onOpenConversation: (id: string) => void;
   onDeleteConversation: (id: string) => void;
   onNewConversation: () => void;
+  /** Sends the latest run again as it was, when it failed or was stopped;
+   * unset while it can't be (see App). */
+  onRetry?: (() => void) | undefined;
+  /** Why Retry is disabled right now (the Run button's reason). */
+  retryDisabledReason: string | null;
+  /** Puts a message back in the message box, to change it before sending. */
+  onEditMessage: (prompt: string) => void;
 }) {
   const transcript = useRef<HTMLDivElement>(null);
   const current = props.conversations.find((c) => c.id === props.currentConversation);
+  const last = props.turns.at(-1);
+  const recoverable = last && (last.status === "error" || last.status === "stopped") && !props.running;
+  const actions = recoverable ? (
+    <>
+      {props.onRetry && (
+        <button
+          type="button"
+          className="link"
+          disabled={props.retryDisabledReason !== null}
+          title={
+            props.retryDisabledReason ??
+            (last.rerunFrom ? `Re-run from ${last.rerunFrom} again` : "Send this message again")
+          }
+          onClick={props.onRetry}
+        >
+          Retry
+        </button>
+      )}
+      {!last.rerunFrom && (
+        <button
+          type="button"
+          className="link"
+          title="Put this message back in the box below, to change it before sending"
+          onClick={() => props.onEditMessage(last.prompt)}
+        >
+          Edit message
+        </button>
+      )}
+    </>
+  ) : undefined;
 
   useEffect(() => {
     const el = transcript.current;
@@ -168,6 +207,7 @@ export function Chat(props: {
               turn={t}
               verbose={props.verbose}
               pendingAnswer={i === props.turns.length - 1 && t.status === "running" ? props.pendingAnswer : undefined}
+              actions={t === last ? actions : undefined}
             />
           ))
         )}
@@ -180,6 +220,11 @@ export function Chat(props: {
   );
 }
 
+export interface ComposerHandle {
+  /** Puts `text` in the box and focuses it, ready to change and send. */
+  fill(text: string): void;
+}
+
 /** The message box, at the bottom of the panel on every tab. */
 export function Composer(props: {
   running: boolean;
@@ -188,8 +233,23 @@ export function Composer(props: {
   onSubmit: (prompt: string) => void;
   /** Stops the run in progress. */
   onStop: () => void;
+  ref?: Ref<ComposerHandle>;
 }) {
   const [prompt, setPrompt] = useState("");
+  const box = useRef<HTMLTextAreaElement>(null);
+  useImperativeHandle(
+    props.ref,
+    () => ({
+      fill(text) {
+        setPrompt(text);
+        requestAnimationFrame(() => {
+          box.current?.focus();
+          box.current?.setSelectionRange(text.length, text.length);
+        });
+      },
+    }),
+    []
+  );
   const submit = () => {
     const text = prompt.trim();
     if (!text || props.running || props.disabledReason) return;
@@ -201,6 +261,7 @@ export function Composer(props: {
     <div className="composer">
       <div className="input-row">
         <textarea
+          ref={box}
           rows={2}
           aria-label="Message"
           placeholder={props.disabledReason ?? "Ask something…  (Enter to run, Shift+Enter for a new line)"}

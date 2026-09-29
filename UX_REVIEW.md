@@ -54,7 +54,7 @@ polish.
 | [UX-001](#ux-001-canvas-text-is-too-small-to-read-at-normal-window-sizes) | MAJOR | Canvas text is too small to read at normal window sizes — ✅ fixed |
 | [UX-002](#ux-002-most-text-is-small-and-fails-contrast-minimums) | MAJOR | Most text is small and fails contrast minimums — ✅ fixed |
 | [UX-003](#ux-003-an-unreachable-ollama-is-only-discovered-when-a-run-fails) | MAJOR | An unreachable Ollama is only discovered when a run fails — ✅ fixed |
-| [UX-004](#ux-004-a-failed-run-discards-the-message-and-offers-no-retry) | MAJOR | A failed run discards the message and offers no retry |
+| [UX-004](#ux-004-a-failed-run-discards-the-message-and-offers-no-retry) | MAJOR | A failed run discards the message and offers no retry — ✅ fixed |
 | [UX-005](#ux-005-pipeline-settings-are-hard-to-find) | MAJOR | Pipeline settings are hard to find |
 | [UX-006](#ux-006-two-run-buttons-with-different-meanings-on-the-tests-tab) | MINOR | Two Run buttons with different meanings on the Tests tab |
 | [UX-007](#ux-007-the-toolbar-gives-ten-actions-equal-weight) | MINOR | The toolbar gives ten actions equal weight |
@@ -270,6 +270,36 @@ polish.
 ### UX-004: A failed run discards the message and offers no retry
 
 - **Severity**: MAJOR
+- **Status**: ✅ Fixed (2026-09-29).
+  - **Retry and Edit message** on the latest turn when it failed or was
+    stopped ([Chat.tsx](web/src/run/Chat.tsx)). **Retry** sends it again as
+    it was: the same message, or a re-run from the same node (offered while
+    that node can still be re-run from). **Edit message** puts the message
+    back in the box, focused, to change it before sending. Retry is disabled
+    for the same reasons as Run, e.g. Ollama unreachable (UX-003), and its
+    tooltip gives the reason. The prompt isn't restored into the box
+    automatically, so a Retry can't leave a copy there to be sent twice by
+    accident.
+  - **Plain-language explanations with a next step**
+    ([runFailure.ts](web/src/run/runFailure.ts),
+    [RunErrorView.tsx](web/src/run/RunErrorView.tsx)), used by Chat and the
+    Messages tab. They're built from the error `code`, which a failed turn
+    now keeps, and from the server's actual message formats. Covered: a node
+    couldn't reach Ollama (*"Start it with `ollama serve`, then retry."*) or
+    another provider; an Ollama model that isn't installed (*"Install it
+    with `ollama pull llama3`…"*); a per-call timeout, whose raw message
+    was empty after "failed:"; the circuit breaker, with its cooldown; the
+    run time limit; a branch that reached no output node; rate limits; a
+    refused API key; oversized input; and internal errors. Anything else
+    shows the raw message as before. The server's message and the reference
+    id stay underneath for bug reports. Conversations saved before this
+    change are explained from their message text.
+  - **Checked in the app** against a stand-in Ollama: a live "model not
+    installed" failure; Retry adding a new attempt (which then tripped the
+    circuit breaker, also explained); Edit message; Stop followed by Retry
+    or Edit; and Retry on a failed re-run. Error text is 11px or larger with
+    at least 5.25:1 contrast in both themes. Unit tests:
+    [runFailure.test.ts](web/test/runFailure.test.ts).
 - **Principle**: H3 User control and freedom; H9 Help users recognize, diagnose and recover from errors
 - **File(s)**:
   - [Chat.tsx:193-198](web/src/run/Chat.tsx#L193-L198)

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { MessageEntry } from "./MessageEntry";
+import { RunErrorView } from "./RunErrorView";
 import type { Turn } from "./Chat";
 
 /**
@@ -69,7 +70,7 @@ export function MessagesView(props: {
                   : {})}
               />
             ))}
-            {turn.error && <div className="error-banner">error: {turn.error.message}</div>}
+            {turn.error && <RunErrorView error={turn.error} />}
           </section>
         ))
       )}

@@ -61,7 +61,7 @@ import {
 } from "./run/runHistory";
 import type { ConversationSummary } from "./run/runHistory";
 import { Chat, Composer } from "./run/Chat";
-import type { Turn } from "./run/Chat";
+import type { ComposerHandle, Turn } from "./run/Chat";
 import { SidePanel } from "./ui/SidePanel";
 import type { PanelTab } from "./ui/SidePanel";
 
@@ -127,6 +127,7 @@ export function App() {
   const turnSeq = useRef(0);
   const validationSeq = useRef(0);
   const importInput = useRef<HTMLInputElement>(null);
+  const composer = useRef<ComposerHandle>(null);
 
   const dialogs = useDialogs();
   const panels = usePanelSizes();
@@ -815,7 +816,7 @@ export function App() {
       updateTurn((t) => ({
         ...t,
         status: "error",
-        error: { message: errorText(err), requestId: apiErr.requestId },
+        error: { message: errorText(err), requestId: apiErr.requestId, code: apiErr.code },
       }));
     } finally {
       flushLog(true);
@@ -901,6 +902,19 @@ export function App() {
       ),
     [lastTurn, running]
   );
+
+  // Retry sends the latest run again as it was: its message, or a re-run
+  // from the same node — while that node can still be re-run from (it
+  // needs the outputs of the nodes before it from that run).
+  const retryable =
+    lastTurn &&
+    (lastTurn.status === "error" || lastTurn.status === "stopped") &&
+    (!lastTurn.rerunFrom || rerunnable.has(lastTurn.rerunFrom))
+      ? lastTurn
+      : undefined;
+  const retry = retryable
+    ? () => void (retryable.rerunFrom ? run("", retryable.rerunFrom) : run(retryable.prompt))
+    : undefined;
 
   const graph = useMemo(() => (doc ? graphOf(doc.definition) : null), [doc]);
   // Text the running nodes' models are writing right now, from the current run's log.
@@ -1171,6 +1185,7 @@ export function App() {
           }}
           footer={
             <Composer
+              ref={composer}
               running={running}
               runLabel={doc?.dirty ? "Save & run" : "Run"}
               disabledReason={runDisabled}
@@ -1195,6 +1210,9 @@ export function App() {
               onOpenConversation={(id) => void openConversation(id)}
               onDeleteConversation={(id) => void removeConversation(id)}
               onNewConversation={resetRunState}
+              onRetry={retry}
+              retryDisabledReason={runDisabled}
+              onEditMessage={(prompt) => composer.current?.fill(prompt)}
             />
           ) : panelTab === "messages" ? (
             <MessagesView
