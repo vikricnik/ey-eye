@@ -63,7 +63,7 @@ polish.
 | [UX-010](#ux-010-one-concept-has-several-names-and-one-icon-has-two-meanings) | MINOR | One concept has several names, and one icon has two meanings — ✅ fixed |
 | [UX-011](#ux-011-some-disabled-controls-give-no-reason) | MINOR | Some disabled controls give no reason — ✅ fixed |
 | [UX-012](#ux-012-undo-exists-but-is-never-offered-after-a-delete) | MINOR | Undo exists but is never offered after a delete — ✅ fixed |
-| [UX-013](#ux-013-on-narrow-screens-the-message-box-is-below-the-fold) | MINOR | On narrow screens the message box is below the fold |
+| [UX-013](#ux-013-on-narrow-screens-the-message-box-is-below-the-fold) | MINOR | On narrow screens the message box is below the fold — ✅ fixed |
 | [UX-014](#ux-014-smaller-items) | SUGGESTION | Smaller items |
 
 **Suggested order** (most payoff for the least effort first):
@@ -234,6 +234,8 @@ polish.
     "(Ollama unreachable)" instead of "(not available on server)". The
     "not installed" and "no selectable models" warnings still appear when
     they're the real cause.
+  - **Later fix**: on a phone, the lights made the header row too wide
+    and the page scrolled sideways. Fixed under UX-013.
   - **Checked in the app** with a stand-in for Ollama's `/api/tags`: the
     outage state, Retry recovering at once, and the poll noticing the loss
     again. Unit tests: [providerStatus.test.ts](web/test/providerStatus.test.ts).
@@ -712,6 +714,33 @@ polish.
 ### UX-013: On narrow screens the message box is below the fold
 
 - **Severity**: MINOR
+- **Status**: ✅ Fixed (2026-09-29).
+  - **The message box sticks to the bottom of the screen** in the stacked
+    layout (under 960px): `position: sticky; bottom: 0` on the panel
+    footer, with a background and a shadow above it. It stays in view at
+    the top of the page, halfway down and at the end: at 768×1024 it starts
+    at **957px** (was 1406), and on a 375×812 phone at 745px (was below the
+    fold). On desktop it's unchanged.
+  - **Bug fixed along the way (my own, from UX-003)**: on a phone, the
+    header's title row (name, URL and the new API/Ollama lights) couldn't
+    wrap and was 32px wider than the screen. The page's grid column grew
+    to fit it, so the page scrolled sideways, and the mobile browser widened
+    and lengthened its layout to match, hiding the bottom of the screen. The
+    title row now wraps (the lights move under the name), and the page grid
+    column is `minmax(0, 1fr)`, so no single piece of content can widen the
+    page again. Checked: no sideways overflow at 375px or 768px.
+  - **Bug fixed along the way (existing)**: the splitter saved the
+    window-clamped panel width on every window resize. So a narrow window
+    (or one visit on a phone, or a hidden browser pane at 0px) permanently
+    shrank the panel on desktop too. Now the width you choose is kept,
+    the window only limits what's shown, and it's saved only when you drag
+    or reset the splitter
+    ([Splitter.tsx](web/src/ui/Splitter.tsx), `readPanelSizes` tested).
+    Checked with a chosen 740px: shown at 700px in a 980px window, 740px
+    again at 1024px, and never re-saved.
+  - Not done: the alternative from the recommendation, a Canvas tab in
+    place of stacking. It's a bigger change for a desktop-first tool, and
+    the sticky message box covers the problem.
 - **Principle**: Responsive layout; tools close at hand
 - **File(s)**:
   - [style.css:700-707](web/src/style.css#L700-L707)

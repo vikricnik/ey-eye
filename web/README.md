@@ -171,7 +171,9 @@ replied) and **Tests**. The message box sits at the bottom of the panel on
 every tab but Tests (whose Run buttons run test cases), so you can send a
 message while editing; what you've typed is kept while you're on Tests. Selecting a node opens
 its Settings. Drag the panel's edge to resize it (double-click resets; the
-width is remembered); on a narrow screen the panel sits under the canvas.
+width you choose is remembered — a narrower window only shows it narrower
+for as long as it's narrow); on a narrow screen the panel sits under the
+canvas and the message box stays at the bottom of the screen as you scroll.
 
 **Display** ("Aa" in the header): **light or dark theme** — "System"
 (the default) follows the operating system and switches with it — and

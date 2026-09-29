@@ -112,6 +112,10 @@ code {
   height: 100%;
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr); /* top bar, notices, workspace */
+  /* One column no wider than the window: content that can't shrink must
+     wrap or clip inside it, never widen the page (on a phone that pushes
+     the bottom of the screen — and the message box — out of view). */
+  grid-template-columns: minmax(0, 1fr);
   min-height: 0;
 }
 
@@ -127,7 +131,8 @@ code {
   flex-wrap: wrap;
 }
 
-.title-block { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
+/* Wraps on a narrow screen: the health lights go under the name and URL. */
+.title-block { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; min-width: 0; }
 .title-block h1 {
   font-size: var(--fs-lg);
   font-weight: 700;
@@ -136,7 +141,7 @@ code {
   color: var(--accent);
   white-space: nowrap;
 }
-.subtitle { font-size: var(--fs-xs); color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; }
+.subtitle { font-size: var(--fs-xs); color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 
 .toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .toolbar .sep { width: 1px; height: 22px; background: var(--border); margin: 0 4px; }
@@ -926,6 +931,16 @@ button.loading .btn-spinner { display: inline-block; }
   .canvas-wrap { height: 55vh; }
   .side-panel { border-left: none; border-top: 1px solid var(--border); height: 80vh; }
   .toolbar { width: 100%; }
+  /* Stacked, the panel starts below the canvas, so its footer — the
+     message box — would sit past the fold. It sticks to the bottom of the
+     screen instead, while any of the panel is in view. */
+  .panel-footer {
+    position: sticky;
+    bottom: 0;
+    z-index: 10;
+    background: var(--panel);
+    box-shadow: 0 -6px 16px var(--shadow);
+  }
 }
 
 /* ---------- Resizable panels ---------- */

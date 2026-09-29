@@ -20,50 +20,61 @@ export function clampPanelSizes(sizes: PanelSizes, width: number = window.innerW
   return { panel };
 }
 
+/** The widths someone chose, as saved — not fitted to any window. */
+export function readPanelSizes(raw: string | null): PanelSizes {
+  try {
+    const saved = JSON.parse(raw ?? "{}") as Partial<PanelSizes>;
+    return typeof saved.panel === "number" ? { ...DEFAULT_PANEL_SIZES, panel: saved.panel } : DEFAULT_PANEL_SIZES;
+  } catch {
+    return DEFAULT_PANEL_SIZES;
+  }
+}
+
 function loadSizes(): PanelSizes {
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_PANEL_SIZES;
-    const saved = JSON.parse(raw) as Partial<PanelSizes>;
-    return clampPanelSizes({ ...DEFAULT_PANEL_SIZES, ...saved });
+    return readPanelSizes(window.localStorage.getItem(STORAGE_KEY));
   } catch {
     return DEFAULT_PANEL_SIZES; // storage unavailable (private mode, blocked) — defaults are fine
   }
 }
 
 /** The panel's width, remembered in this browser, applied as the CSS
- * variable the app grid uses. */
+ * variable the app grid uses. What's remembered is the width someone
+ * chose (dragging, or resetting); the window only limits what's shown —
+ * so a narrow window, even a visit on a phone, doesn't shrink it for good. */
 export function usePanelSizes(): {
   sizes: PanelSizes;
   setSize: (panel: keyof PanelSizes, px: number) => void;
   resetSize: (panel: keyof PanelSizes) => void;
   style: CSSProperties;
 } {
-  const [sizes, setSizes] = useState<PanelSizes>(loadSizes);
+  const [chosen, setChosen] = useState<PanelSizes>(loadSizes);
+  const [windowWidth, setWindowWidth] = useState(() => window.innerWidth);
+  const sizes = clampPanelSizes(chosen, windowWidth);
 
-  const update = useCallback((next: (current: PanelSizes) => PanelSizes) => {
-    setSizes((current) => {
-      const clamped = clampPanelSizes(next(current));
+  useEffect(() => {
+    const onResize = () => setWindowWidth(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  /** A width someone picked: fitted to the window it was picked in, and saved. */
+  const choose = useCallback((next: (current: PanelSizes) => PanelSizes) => {
+    setChosen((current) => {
+      const fitted = clampPanelSizes(next(clampPanelSizes(current)));
       try {
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(clamped));
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(fitted));
       } catch {
         // not persisted — still applied for this page
       }
-      return clamped;
+      return fitted;
     });
   }, []);
 
-  // A smaller window may no longer fit the saved sizes — re-clamp.
-  useEffect(() => {
-    const onResize = () => update((s) => s);
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, [update]);
-
   return {
     sizes,
-    setSize: useCallback((panel, px) => update((s) => ({ ...s, [panel]: Math.round(px) })), [update]),
-    resetSize: useCallback((panel) => update((s) => ({ ...s, [panel]: DEFAULT_PANEL_SIZES[panel] })), [update]),
+    setSize: useCallback((panel, px) => choose((s) => ({ ...s, [panel]: Math.round(px) })), [choose]),
+    resetSize: useCallback((panel) => choose((s) => ({ ...s, [panel]: DEFAULT_PANEL_SIZES[panel] })), [choose]),
     style: { "--panel-w": `${sizes.panel}px` } as CSSProperties,
   };
 }
