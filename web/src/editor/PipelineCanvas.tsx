@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { DragEvent, RefObject } from "react";
 import {
   Background,
+  ControlButton,
   Controls,
   MiniMap,
   ReactFlow,
@@ -18,6 +19,7 @@ import { parseDependencyEdgeId } from "./conversion";
 import type { LlmFlowNode } from "./conversion";
 import type { Selection } from "./editorState";
 import { compactTextScale, fitOptions, isCompact } from "./zoomDetail";
+import { AutoLayoutIcon } from "../ui/icons";
 
 /** Drag-and-drop payload type set by the sidebar palette. The value is a
  * preset name, or "" for a plain node. */
@@ -46,6 +48,9 @@ export interface PipelineCanvasProps {
   onMoveNodes: (moves: { id: string; x: number; y: number }[]) => void;
   onSelect: (selection: Selection | null) => void;
   onDropNode: (position: { x: number; y: number }, presetName: string | undefined) => void;
+  /** Re-arranges every node by dependency level (a canvas control, beside
+   * zoom and fit). */
+  onAutoLayout: () => void;
 }
 
 const isValidConnection: IsValidConnection = (c) => c.source !== c.target;
@@ -186,7 +191,16 @@ function CanvasInner(props: PipelineCanvasProps) {
         onPaneClick={() => props.onSelect(null)}
       >
         <Background gap={24} size={1} />
-        <Controls showInteractive={false} />
+        <Controls showInteractive={false}>
+          <ControlButton
+            onClick={props.onAutoLayout}
+            disabled={!editable}
+            title={editable ? "Auto-layout: arrange the nodes by dependency level" : "Auto-layout (editing is disabled)"}
+            aria-label="Auto-layout"
+          >
+            <AutoLayoutIcon />
+          </ControlButton>
+        </Controls>
         <MiniMap pannable zoomable nodeStrokeWidth={3} style={{ width: 140, height: 90 }} />
       </ReactFlow>
     </div>

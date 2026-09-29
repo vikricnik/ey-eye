@@ -177,7 +177,9 @@ settings are remembered in this browser.
 **Building** (needs `PIPELINE_EDITING_ENABLED=true` on the server — without
 it everything below is read-only and a banner says so):
 
-- **New / Save / Save as / Import / Export / Delete** in the header. ⌘S /
+- **Save** in the header (the one filled button), and **New pipeline,
+  Save as, Import YAML, Export YAML and Delete pipeline** in its **File ▾**
+  menu (arrow keys work; Delete is last, set apart). ⌘S /
   Ctrl+S saves — keeping the file's comments and layout. Export downloads
   the canonical YAML; Import loads a `.yaml` file as an unsaved draft.
   Delete moves the file to `pipelines/.deleted/` on the server
@@ -237,8 +239,8 @@ it everything below is read-only and a banner says so):
   include `{{ message }}`, `{{ conversation }}` and `{{ history }}`.
 - Pipelines flow **top to bottom**: each dependency level is a row, and
   nodes that run in parallel sit side by side. Node positions are saved in
-  the YAML (`layout`); **Auto-layout** re-arranges everything by dependency
-  level (use it on pipelines saved before the layout became vertical).
+  the YAML (`layout`); **Auto-layout** (the canvas control under zoom and
+  fit) re-arranges everything by dependency level (use it on pipelines saved before the layout became vertical).
 
 **Running**:
 

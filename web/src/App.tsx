@@ -46,6 +46,8 @@ import { useDialogs } from "./ui/Dialogs";
 import { DisplayMenu, useDisplaySettings } from "./ui/DisplaySettings";
 import { OutageNotice, ServerStatus } from "./ui/ServerStatus";
 import { GearIcon } from "./ui/icons";
+import { MenuButton } from "./ui/Menu";
+import type { MenuItem } from "./ui/Menu";
 import { outageMessage, runBlockedReason, runOutage } from "./providerStatus";
 import { Splitter, usePanelSizes } from "./ui/Splitter";
 import { errorText } from "./format";
@@ -957,6 +959,48 @@ export function App() {
   const ollama = models?.providers.find((p) => p.provider === "ollama");
   const blockedByOutage = runBlockedReason(outage);
 
+  const isDefaultPipeline = doc?.definition.name === serverInfo?.default_pipeline_name;
+  const editingOff = !editable ? "editing is disabled on this server" : undefined;
+  const fileMenu: MenuItem[] = [
+    { label: "New pipeline…", onSelect: () => void newPipeline(), disabled: !editable, detail: editingOff },
+    {
+      label: "Save as…",
+      onSelect: () => void saveAs(),
+      disabled: !editable || !doc,
+      detail: editingOff ?? "a copy under a new name",
+    },
+    {
+      label: "Import YAML…",
+      onSelect: () => importInput.current?.click(),
+      disabled: !editable,
+      detail: editingOff ?? "opens a .yaml file as an unsaved draft",
+    },
+    {
+      label: "Export YAML",
+      onSelect: () => void exportYaml(),
+      disabled: !doc,
+      detail: "downloads it as it is now, unsaved changes included",
+    },
+    {
+      label: "Delete pipeline…",
+      onSelect: () => void deletePipeline(),
+      disabled: !editable || !doc || isDefaultPipeline,
+      detail: isDefaultPipeline
+        ? "the server's default pipeline can't be deleted"
+        : (editingOff ?? "recoverable from pipelines/.deleted/ on the server"),
+      separated: true,
+      danger: true,
+    },
+  ];
+
+  /** Re-arranges every node by dependency level (a canvas control). */
+  const autoLayoutPipeline = () => {
+    if (!graph) return;
+    const positions = autoLayout(graph);
+    edit((d) => d.nodes.reduce((acc, n) => moveNode(acc, n.id, positions[n.id]!.x, positions[n.id]!.y), d));
+    setFitSignal((f) => f + 1);
+  };
+
   const isNew = doc?.baseRevision === null;
   let runDisabled: string | null = null;
   if (!doc) runDisabled = "no pipeline loaded";
@@ -1051,9 +1095,6 @@ export function App() {
           <button type="button" className="ghost icon" onClick={redo} disabled={!editable || !doc?.future.length} title="Redo (⇧⌘Z / Ctrl+Y)" aria-label="Redo">
             ↷
           </button>
-          <button type="button" className="ghost" onClick={() => void newPipeline()} disabled={!editable}>
-            New
-          </button>
           <button
             type="button"
             onClick={() => void save()}
@@ -1062,41 +1103,9 @@ export function App() {
           >
             Save
           </button>
-          <button type="button" className="ghost" onClick={() => void saveAs()} disabled={!editable || !doc}>
-            Save as
-          </button>
-          <button type="button" className="ghost" onClick={() => importInput.current?.click()} disabled={!editable}>
-            Import
-          </button>
-          <button type="button" className="ghost" onClick={() => void exportYaml()} disabled={!doc}>
-            Export
-          </button>
-          <button
-            type="button"
-            className="ghost"
-            disabled={!editable || !doc}
-            onClick={() => {
-              if (!graph) return;
-              const positions = autoLayout(graph);
-              edit((d) => d.nodes.reduce((acc, n) => moveNode(acc, n.id, positions[n.id]!.x, positions[n.id]!.y), d));
-              setFitSignal((s) => s + 1);
-            }}
-          >
-            Auto-layout
-          </button>
-          <button
-            type="button"
-            className="ghost danger-text"
-            onClick={() => void deletePipeline()}
-            disabled={!editable || !doc || doc.definition.name === serverInfo?.default_pipeline_name}
-            title={
-              doc?.definition.name === serverInfo?.default_pipeline_name
-                ? "The server's default pipeline can't be deleted"
-                : "Delete this pipeline (recoverable)"
-            }
-          >
-            Delete
-          </button>
+          {/* Save stays the one filled button; the rest of the file
+              actions are in this menu, with Delete last and set apart. */}
+          <MenuButton label="File" items={fileMenu} />
           <input
             ref={importInput}
             type="file"
@@ -1181,6 +1190,7 @@ export function App() {
               }
               onSelect={setSelection}
               onDropNode={(position, preset) => addNodeAt(position, preset)}
+              onAutoLayout={autoLayoutPipeline}
             />
           ) : (
             <div className="canvas-empty">{loadError ?? "loading…"}</div>

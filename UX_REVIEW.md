@@ -57,7 +57,7 @@ polish.
 | [UX-004](#ux-004-a-failed-run-discards-the-message-and-offers-no-retry) | MAJOR | A failed run discards the message and offers no retry — ✅ fixed |
 | [UX-005](#ux-005-pipeline-settings-are-hard-to-find) | MAJOR | Pipeline settings are hard to find — ✅ fixed |
 | [UX-006](#ux-006-two-run-buttons-with-different-meanings-on-the-tests-tab) | MINOR | Two Run buttons with different meanings on the Tests tab — ✅ fixed |
-| [UX-007](#ux-007-the-toolbar-gives-ten-actions-equal-weight) | MINOR | The toolbar gives ten actions equal weight |
+| [UX-007](#ux-007-the-toolbar-gives-ten-actions-equal-weight) | MINOR | The toolbar gives ten actions equal weight — ✅ fixed |
 | [UX-008](#ux-008-node-settings-run-three-screens-long-and-repeat-actions) | MINOR | Node settings run three screens long and repeat actions |
 | [UX-009](#ux-009-canvas-status-and-roles-are-hard-to-read-and-the-legend-is-on-the-wrong-tab) | MINOR | Canvas status and roles are hard to read, and the legend is on the wrong tab |
 | [UX-010](#ux-010-one-concept-has-several-names-and-one-icon-has-two-meanings) | MINOR | One concept has several names, and one icon has two meanings |
@@ -414,6 +414,31 @@ polish.
 ### UX-007: The toolbar gives ten actions equal weight
 
 - **Severity**: MINOR
+- **Status**: ✅ Fixed (2026-09-29).
+  - The toolbar is now: pipeline picker, ⚙, status chip | Undo, Redo,
+    **Save** (the one filled button), **File ▾**, Aa. At 1024px it takes
+    about 560px of 990, so it stays on one row, with unsaved changes too.
+    The toolbar gap is back to 8px (UX-005 had tightened it to 6px).
+  - **File ▾** ([Menu.tsx](web/src/ui/Menu.tsx)) holds New pipeline…, Save
+    as…, Import YAML…, Export YAML and, last and below a divider, Delete
+    pipeline… in the danger color. Each item has a short second line saying
+    what it does or why it's unavailable: "the server's default pipeline
+    can't be deleted", "editing is disabled on this server", "downloads it
+    as it is now, unsaved changes included".
+  - It's a real ARIA menu button with the full keyboard contract: Enter,
+    Space or ↓ opens it on the first item, ↑ on the last; ↑ ↓ wrap; Home
+    and End jump; Enter picks; Escape closes and returns focus to File (and
+    doesn't also stop a running chat); Tab or a click outside closes it.
+    Unavailable items stay reachable (`aria-disabled`) so their reason can
+    be heard. It's positioned like the existing display menu, absolutely
+    under its button. The web guidance shows CSS anchor positioning isn't
+    broadly supported yet, so this avoids a polyfill. Navigation is
+    unit-tested ([menu.test.ts](web/test/menu.test.ts)).
+  - **Auto-layout** is now a canvas control under zoom and fit, with its own
+    icon and tooltip. It's disabled when editing is off.
+  - **Checked in the app**: every key in the contract, picking New
+    pipeline… and cancelling (focus returns to File), a disabled item
+    ignoring Enter, a click outside, and Auto-layout followed by Undo.
 - **Principle**: Hick's law; visual hierarchy; "hide the ejector seat"
 - **File(s)**:
   - [App.tsx:996-1047](web/src/App.tsx#L996-L1047)
