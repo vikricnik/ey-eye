@@ -1243,11 +1243,11 @@ export function App() {
           <Splitter
             axis="x"
             grow={-1}
-            value={panels.sizes.panel}
-            onResize={(px) => panels.setSize("panel", px)}
-            onReset={() => panels.resetSize("panel")}
-            label="Resize the panel"
-            className="splitter-panel"
+            value={panels.sizes.run}
+            onResize={(px) => panels.setSize("run", px)}
+            onReset={() => panels.resetSize("run")}
+            label="Resize the run panel"
+            className="splitter-run"
           />
         )}
         <SidePanel

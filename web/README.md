@@ -46,7 +46,8 @@ web/
         ├── Menu.tsx            # menu button (File ▾, ⋯) with the ARIA keyboard contract
         ├── ServerStatus.tsx    # API / Ollama health lights and the outage notice
         ├── SidePanel.tsx       # the one panel beside the canvas: tabs + message box
-        ├── Splitter.tsx        # resizing the panel
+        ├── Splitter.tsx        # resizing the columns
+        ├── panelSizes.ts       # column widths, and where the settings column goes
         ├── DisplaySettings.tsx # light/dark theme and text size
         └── icons.tsx           # the few drawn icons (settings, auto-layout)
 ```

@@ -1,51 +1,26 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, PointerEvent } from "react";
-
-export interface PanelSizes {
-  /** Width of the side panel beside the canvas. */
-  panel: number;
-}
-
-export const DEFAULT_PANEL_SIZES: PanelSizes = { panel: 440 };
-
-/** Smallest the canvas may get when the panel grows. */
-const MIN_CANVAS_WIDTH = 280;
-const MIN_PANEL_WIDTH = 320;
-// v2: one side panel (earlier versions stored three panel sizes).
-const STORAGE_KEY = "llm-pipeline.panel-sizes.v2";
-
-/** Keeps the panel within a sensible range for the current window. */
-export function clampPanelSizes(sizes: PanelSizes, width: number = window.innerWidth): PanelSizes {
-  const panel = Math.min(Math.max(sizes.panel, MIN_PANEL_WIDTH), Math.max(MIN_PANEL_WIDTH, width - MIN_CANVAS_WIDTH));
-  return { panel };
-}
-
-/** The widths someone chose, as saved — not fitted to any window. */
-export function readPanelSizes(raw: string | null): PanelSizes {
-  try {
-    const saved = JSON.parse(raw ?? "{}") as Partial<PanelSizes>;
-    return typeof saved.panel === "number" ? { ...DEFAULT_PANEL_SIZES, panel: saved.panel } : DEFAULT_PANEL_SIZES;
-  } catch {
-    return DEFAULT_PANEL_SIZES;
-  }
-}
+import { DEFAULT_PANEL_SIZES, PANEL_SIZES_STORAGE_KEY, clampPanelSizes, readPanelSizes, settingsPlacement } from "./panelSizes";
+import type { PanelSizes, SettingsPlacement } from "./panelSizes";
 
 function loadSizes(): PanelSizes {
   try {
-    return readPanelSizes(window.localStorage.getItem(STORAGE_KEY));
+    return readPanelSizes(window.localStorage.getItem(PANEL_SIZES_STORAGE_KEY));
   } catch {
     return DEFAULT_PANEL_SIZES; // storage unavailable (private mode, blocked) — defaults are fine
   }
 }
 
-/** The panel's width, remembered in this browser, applied as the CSS
- * variable the app grid uses. What's remembered is the width someone
- * chose (dragging, or resetting); the window only limits what's shown —
- * so a narrow window, even a visit on a phone, doesn't shrink it for good. */
+/** The columns' widths, remembered in this browser and applied as the CSS
+ * variables the workspace grid uses, and where the settings column goes.
+ * What's remembered is the width someone chose (dragging, or resetting);
+ * the window only limits what's shown — so a narrow window, even a visit
+ * on a phone, doesn't shrink it for good. */
 export function usePanelSizes(): {
   sizes: PanelSizes;
-  setSize: (panel: keyof PanelSizes, px: number) => void;
-  resetSize: (panel: keyof PanelSizes) => void;
+  placement: SettingsPlacement;
+  setSize: (column: keyof PanelSizes, px: number) => void;
+  resetSize: (column: keyof PanelSizes) => void;
   style: CSSProperties;
 } {
   const [chosen, setChosen] = useState<PanelSizes>(loadSizes);
@@ -61,9 +36,10 @@ export function usePanelSizes(): {
   /** A width someone picked: fitted to the window it was picked in, and saved. */
   const choose = useCallback((next: (current: PanelSizes) => PanelSizes) => {
     setChosen((current) => {
-      const fitted = clampPanelSizes(next(clampPanelSizes(current)));
+      const width = window.innerWidth;
+      const fitted = clampPanelSizes(next(clampPanelSizes(current, width)), width);
       try {
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(fitted));
+        window.localStorage.setItem(PANEL_SIZES_STORAGE_KEY, JSON.stringify(fitted));
       } catch {
         // not persisted — still applied for this page
       }
@@ -73,9 +49,10 @@ export function usePanelSizes(): {
 
   return {
     sizes,
-    setSize: useCallback((panel, px) => choose((s) => ({ ...s, [panel]: Math.round(px) })), [choose]),
-    resetSize: useCallback((panel) => choose((s) => ({ ...s, [panel]: DEFAULT_PANEL_SIZES[panel] })), [choose]),
-    style: { "--panel-w": `${sizes.panel}px` } as CSSProperties,
+    placement: settingsPlacement(sizes, windowWidth),
+    setSize: useCallback((column, px) => choose((s) => ({ ...s, [column]: Math.round(px) })), [choose]),
+    resetSize: useCallback((column) => choose((s) => ({ ...s, [column]: DEFAULT_PANEL_SIZES[column] })), [choose]),
+    style: { "--settings-w": `${sizes.settings}px`, "--run-w": `${sizes.run}px` } as CSSProperties,
   };
 }
 
