@@ -1225,8 +1225,8 @@ export function App() {
               saveFirst={doc?.dirty ?? false}
               disabledReason={runDisabled}
               onSubmit={(prompt) => {
-                // Show the answer coming in — unless the log is what's being watched.
-                if (panelTab !== "messages") setPanelTab("chat");
+                // Show the answer coming in — unless the trace is what's being watched.
+                if (panelTab !== "trace") setPanelTab("chat");
                 void run(prompt);
               }}
               onStop={() => stopRun.current?.abort()}
@@ -1249,7 +1249,7 @@ export function App() {
               retryDisabledReason={runDisabled}
               onEditMessage={(prompt) => composer.current?.fill(prompt)}
             />
-          ) : panelTab === "messages" ? (
+          ) : panelTab === "trace" ? (
             <MessagesView
               turns={turns}
               outputNodeIds={outputIds}

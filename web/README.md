@@ -35,7 +35,7 @@ web/
     │   ├── Chat.tsx            # the Chat tab (conversation picker, transcript) and the message box
     │   ├── RunErrorView.tsx    # a failed run: what happened, what to do, the raw error
     │   ├── runFailure.ts       # plain-language explanations of run failures
-    │   ├── MessagesView.tsx    # every node's received messages and replies, per run
+    │   ├── MessagesView.tsx    # the Trace tab: what every node received and replied, per run
     │   ├── MessageEntry.tsx
     │   └── runHistory.ts       # conversations kept in this browser (IndexedDB)
     ├── tests/TestsView.tsx     # test cases, test runs and model comparison
@@ -166,7 +166,7 @@ already configured server-side via `CORS_ALLOWED_ORIGINS` in `.env`.
 everything else as tabs — **Chat** (the conversation), **Settings** (the
 selected node, or the pipeline when nothing is selected — **⚙** beside the
 pipeline picker opens the pipeline's), **Add** (a blank
-node or one from a preset), **Messages** (what every node received and
+node or one from a preset), **Trace** (what every node received and
 replied) and **Tests**. The message box sits at the bottom of the panel on
 every tab but Tests (whose Run buttons run test cases), so you can send a
 message while editing; what you've typed is kept while you're on Tests. Selecting a node opens
@@ -279,12 +279,12 @@ it everything below is read-only and a banner says so):
 - **Live text**: a running node's card shows the newest words its model is
   writing, and the output node's answer types itself into the transcript as
   it's generated.
-- **Messages** tab: a log of every run in the conversation — each node in
+- **Trace** tab: a log of every run in the conversation — each node in
   the order it started, with the **system prompt and prompt it actually
   received** (its dependencies' outputs filled in) and the **reply** it
   produced, streaming live. Loop passes appear as separate entries
   ("iteration 2", …). Click a node's name to open its Settings.
-- In a node's Settings, its own **Messages** sub-tab shows just that node's
+- In a node's Settings, its own **Trace** sub-tab shows just that node's
   received messages and replies, newest run first. The sub-tab stays
   selected as you click from node to node.
 - **Send** (or Enter) in the message box starts a run.
@@ -297,7 +297,7 @@ it everything below is read-only and a banner says so):
 - **Tokens and context**: after a run, each node card shows how much of the
   model's context window its prompt used ("3.9k/4.1k ctx" — amber from 80%,
   red with ⚠ from 95%; hover for tokens in/out and tokens per second), and
-  each Messages entry lists the same. When the prompt filled the window — or
+  each Trace entry lists the same. When the prompt filled the window — or
   was simply longer than it could hold — Ollama has **cut off the start of
   the prompt** (silently, reporting only the tokens it kept), and the card
   and entry say so.
@@ -306,7 +306,7 @@ it everything below is read-only and a banner says so):
   it — for the latest message with that run's outputs (so it matches a
   re-run), or with placeholders before the first run. Follows your edits.
 - **Re-run from here** (a node's settings, or a node in the latest run's
-  Messages): runs the latest message again from that node — the nodes before
+  Trace): runs the latest message again from that node — the nodes before
   it reuse their outputs ("reused" on the card and in the log), so tuning a
   late prompt doesn't re-run everything before it. The new answer replaces
   the latest one in the conversation.
@@ -375,6 +375,28 @@ When the latest run failed or was stopped, **Retry** sends it again as it
 was (a re-run starts from the same node again), and **Edit message** puts
 the message back in the message box to change it before sending. Retry is
 disabled for the same reasons as Run (e.g. Ollama unreachable).
+
+## Words used in the app
+
+One name per idea, used the same way on every screen:
+
+- **message** — what you type in the message box and send; the pipeline
+  answers it. Prompt templates read it as `{{ message }}` and branch and
+  loop conditions as `message` (`question` is its older name).
+- **conversation** — the earlier messages and answers of this chat.
+  `{{ conversation }}` is those turns followed by the new message,
+  `{{ history }}` the earlier turns only (`{{ input }}` is an older name
+  for `{{ conversation }}`).
+- **run** — one pass of the pipeline for a message. **Send** starts one;
+  **Re-run from here** runs the latest message again from a node.
+- **prompt** — what a node sends its model: its **prompt template** with
+  the variables filled in, after its **system prompt**.
+- **output** — a node's reply. An **output node** is one whose output can
+  be the **answer**: the output of the first output node that ran.
+- **trace** — every node's prompt and output in a run, in order: the
+  **Trace** tab, and a node's own Trace in its settings.
+- **preset** — a saved node configuration you can add to any pipeline.
+- **test case** — a message, and what its answer must satisfy.
 
 ## Conversation history
 

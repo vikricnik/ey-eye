@@ -73,7 +73,7 @@ export interface InspectorProps {
   editable: boolean;
   models: ModelsResponse | null;
   presets: NodePreset[];
-  /** This session's runs — the node Messages tab shows the selected node's part. */
+  /** This session's runs — the node's Trace tab shows its part of them. */
   turns: Turn[];
   validation: ValidationState;
   onEdit: Edit;
@@ -89,7 +89,7 @@ export interface InspectorProps {
   previewContext: PreviewContext | null;
 }
 
-type NodeTab = "config" | "messages";
+type NodeTab = "config" | "trace";
 
 export function Inspector(props: InspectorProps) {
   const { doc, selection } = props;
@@ -376,12 +376,12 @@ function NodeInspector(props: InspectorProps & { node: NodeConfig; tab: NodeTab;
         <button type="button" role="tab" aria-selected={tab === "config"} className={tab === "config" ? "tab active" : "tab"} onClick={() => onTab("config")}>
           Configuration
         </button>
-        <button type="button" role="tab" aria-selected={tab === "messages"} className={tab === "messages" ? "tab active" : "tab"} onClick={() => onTab("messages")}>
-          Messages
+        <button type="button" role="tab" aria-selected={tab === "trace"} className={tab === "trace" ? "tab active" : "tab"} onClick={() => onTab("trace")}>
+          Trace
         </button>
       </div>
 
-      {tab === "messages" ? (
+      {tab === "trace" ? (
         <NodeMessages nodeId={id} turns={props.turns} isOutput={isOutput} />
       ) : (
         <>
@@ -624,7 +624,7 @@ function NodeMessages({ nodeId, turns, isOutput }: { nodeId: string; turns: Turn
   if (runs.length === 0) {
     return (
       <p className="dim tip">
-        <b>{nodeId}</b> hasn&apos;t run in this session yet. Send a prompt below — what it receives and replies shows up
+        <b>{nodeId}</b> hasn&apos;t run in this session yet. Send a message below — what it receives and replies shows up
         here, live.
       </p>
     );
@@ -749,7 +749,7 @@ function BranchForm(props: { branch: BranchConfig; def: PipelineDefinition; edit
     <div className="routing-form">
       <p className="dim">
         After this node runs, the first route whose condition matches runs next; otherwise the default. Conditions read its{" "}
-        <code>output</code> and the user's <code>question</code>. A route can start several nodes. Route targets must have no
+        <code>output</code> and the new <code>message</code>. A route can start several nodes. Route targets must have no
         dependencies of their own.
       </p>
       <Field label="Branch id">

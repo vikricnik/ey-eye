@@ -268,7 +268,7 @@ export function Composer(props: {
           ref={box}
           rows={2}
           aria-label="Message"
-          placeholder={props.disabledReason ?? "Ask something…  (Enter to send, Shift+Enter for a new line)"}
+          placeholder={props.disabledReason ?? "Type a message…  (Enter to send, Shift+Enter for a new line)"}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           onKeyDown={(e) => {

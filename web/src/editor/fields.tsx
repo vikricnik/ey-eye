@@ -194,8 +194,9 @@ export function ModelPicker(props: {
             </optgroup>
           ))}
         </select>
-        <button type="button" className="ghost" onClick={props.onRefresh} title="Refresh model list">
-          ↻
+        {/* Words, not ↻ — that already means "re-run" and "loop" elsewhere. */}
+        <button type="button" className="ghost" onClick={props.onRefresh} title="Ask the server for its model list again">
+          Refresh
         </button>
       </div>
       {props.limits && (

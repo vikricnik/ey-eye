@@ -4,7 +4,7 @@ import { RunErrorView } from "./RunErrorView";
 import type { Turn } from "./Chat";
 
 /**
- * The whole-run message log: for every run in this session, each node in
+ * The Trace tab — every run's message log: for every run in this session, each node in
  * the order it started — what it received and what it replied, streaming
  * live. Clicking a node name opens its settings.
  */
@@ -36,7 +36,7 @@ export function MessagesView(props: {
     >
       {props.turns.length === 0 ? (
         <div className="empty-state">
-          No runs yet. Send a prompt below — every node&apos;s incoming messages and replies appear here as the
+          No runs yet. Send a message below — what every node received and replied appears here as the
           pipeline runs.
         </div>
       ) : (

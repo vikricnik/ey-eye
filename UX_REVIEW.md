@@ -60,7 +60,7 @@ polish.
 | [UX-007](#ux-007-the-toolbar-gives-ten-actions-equal-weight) | MINOR | The toolbar gives ten actions equal weight — ✅ fixed |
 | [UX-008](#ux-008-node-settings-run-three-screens-long-and-repeat-actions) | MINOR | Node settings run three screens long and repeat actions — ✅ fixed |
 | [UX-009](#ux-009-canvas-status-and-roles-are-hard-to-read-and-the-legend-is-on-the-wrong-tab) | MINOR | Canvas status and roles are hard to read, and the legend is on the wrong tab — ✅ fixed |
-| [UX-010](#ux-010-one-concept-has-several-names-and-one-icon-has-two-meanings) | MINOR | One concept has several names, and one icon has two meanings |
+| [UX-010](#ux-010-one-concept-has-several-names-and-one-icon-has-two-meanings) | MINOR | One concept has several names, and one icon has two meanings — ✅ fixed |
 | [UX-011](#ux-011-some-disabled-controls-give-no-reason) | MINOR | Some disabled controls give no reason |
 | [UX-012](#ux-012-undo-exists-but-is-never-offered-after-a-delete) | MINOR | Undo exists but is never offered after a delete |
 | [UX-013](#ux-013-on-narrow-screens-the-message-box-is-below-the-fold) | MINOR | On narrow screens the message box is below the fold |
@@ -571,6 +571,31 @@ polish.
 ### UX-010: One concept has several names, and one icon has two meanings
 
 - **Severity**: MINOR
+- **Status**: ✅ Fixed (2026-09-29).
+  - **"Message" is what you send, everywhere**:
+    - The placeholder is now "Type a message…" (was "Ask something…").
+    - The empty Trace tab and a node's empty Trace say "Send a message
+      below" (was "Send a prompt").
+    - The branch help says conditions read "its `output` and the new
+      `message`" (was the user's "`question`"). The server's condition
+      language does take `message`, with `question` as its older name
+      (`safe_eval.py`).
+  - **"Prompt" now means only what a node sends its model**: the prompt
+    template filled in, after the system prompt. That's how the Add tab,
+    the settings and the trace already used it.
+  - **Messages → Trace**: the panel tab and a node's sub-tab. The internal
+    tab ids changed with them (`"trace"`); the component files kept their
+    names.
+  - **The model list's ↻ is now a Refresh text button** ("Ask the server
+    for its model list again"). ↻ now only means going round again: the
+    re-run marker and "Re-run from here", and loop edges.
+  - **A glossary** in [web/README.md](web/README.md) ("Words used in the
+    app"): message, conversation, run, prompt, output/answer, trace,
+    preset, test case.
+  - **Checked in the app**: tab names, node sub-tabs, the branch help, the
+    Refresh button, and the empty Trace and Chat states. The new
+    placeholder is covered by the code; it only shows while nothing blocks
+    Send, and Ollama was down.
 - **Principle**: H2 Match between system and the real world; H4 Consistency and standards
 - **File(s)**:
   - [Chat.tsx:161](web/src/run/Chat.tsx#L161)
