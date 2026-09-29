@@ -350,15 +350,16 @@ export function TestsView(props: {
           <div className="compare">
             <span className="field-label">Compare models</span>
             <p className="field-hint">Runs every case as the pipeline is now, and again with each model below for one node.</p>
-            <div className="row">
-              <select value={compareNode} onChange={(e) => setCompareNode(e.target.value)} aria-label="Node to compare">
+            <Field label="Swap the model of node">
+              <select value={compareNode} onChange={(e) => setCompareNode(e.target.value)}>
                 {definition.nodes.map((n) => (
                   <option key={n.id} value={n.id}>
                     {n.id}
                   </option>
                 ))}
               </select>
-            </div>
+            </Field>
+            <span className="field-label">…for each of these models</span>
             {compareModels.map((identity, i) => (
               <div className="row" key={i}>
                 <ModelPicker

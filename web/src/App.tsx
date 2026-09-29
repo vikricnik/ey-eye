@@ -125,6 +125,7 @@ export function App() {
   const [saveTick, setSaveTick] = useState(0);
   const [running, setRunning] = useState(false);
   const [verbose, setVerbose] = useState(false);
+  const [formatted, setFormatted] = useState(true);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [fitSignal, setFitSignal] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -1282,6 +1283,8 @@ export function App() {
               pendingAnswer={pendingAnswer}
               verbose={verbose}
               onVerbose={setVerbose}
+              formatted={formatted}
+              onFormatted={setFormatted}
               conversations={conversations}
               currentConversation={conversationId.current}
               onOpenConversation={(id) => void openConversation(id)}

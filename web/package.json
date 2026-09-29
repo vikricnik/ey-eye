@@ -13,6 +13,8 @@
   "dependencies": {
     "@llm-pipeline/client": "^1.0.0",
     "@xyflow/react": "^12.11.6",
+    "dompurify": "^3.4.16",
+    "marked": "^18.0.14",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },

@@ -2,6 +2,7 @@ import { useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { ReactNode, Ref } from "react";
 import type { ConversationTurn, NodeOutput, RunLogEntry, StreamDoneEvent } from "@llm-pipeline/client";
 import { formatDuration, formatWhen } from "../format";
+import { Markdown } from "./Markdown";
 import { RunErrorView } from "./RunErrorView";
 import type { RunError } from "./runFailure";
 import type { ConversationSummary } from "./runHistory";
@@ -37,7 +38,31 @@ function NodeCard({ node, isOutput }: { node: NodeOutput; isOutput: boolean }) {
   );
 }
 
-function TurnView(props: { turn: Turn; verbose: boolean; pendingAnswer?: string | undefined; actions?: ReactNode }) {
+/** The answer: formatted from its Markdown, or as the model wrote it. A
+ * streaming answer is formatted as it grows, with the cursor after it. */
+function Answer({ text, streaming, formatted }: { text: string | undefined; streaming: boolean; formatted: boolean }) {
+  if (!text) return <div className="final-answer final-answer-pending" />;
+  const cursor = streaming && <span className="cursor" aria-hidden="true" />;
+  return formatted ? (
+    <>
+      <Markdown text={text} className="final-answer" />
+      {cursor}
+    </>
+  ) : (
+    <div className="final-answer">
+      {text}
+      {cursor}
+    </div>
+  );
+}
+
+function TurnView(props: {
+  turn: Turn;
+  verbose: boolean;
+  formatted: boolean;
+  pendingAnswer?: string | undefined;
+  actions?: ReactNode;
+}) {
   const { turn, verbose, pendingAnswer, actions } = props;
   const result = turn.result;
   return (
@@ -80,10 +105,7 @@ function TurnView(props: { turn: Turn; verbose: boolean; pendingAnswer?: string 
               ))}
             </div>
           )}
-          <div className={result || pendingAnswer ? "final-answer" : "final-answer final-answer-pending"}>
-            {result?.final_answer ?? pendingAnswer}
-            {!result && pendingAnswer && <span className="cursor" aria-hidden="true" />}
-          </div>
+          <Answer text={result?.final_answer ?? pendingAnswer} streaming={!result} formatted={props.formatted} />
         </div>
       )}
     </div>
@@ -102,6 +124,9 @@ export function Chat(props: {
   pendingAnswer?: string | undefined;
   verbose: boolean;
   onVerbose: (verbose: boolean) => void;
+  /** Answers formatted from their Markdown (on), or as written. */
+  formatted: boolean;
+  onFormatted: (formatted: boolean) => void;
   /** This pipeline's saved conversations, most recent first. */
   conversations: ConversationSummary[];
   currentConversation: string;
@@ -213,16 +238,23 @@ export function Chat(props: {
               key={t.id}
               turn={t}
               verbose={props.verbose}
+              formatted={props.formatted}
               pendingAnswer={i === props.turns.length - 1 && t.status === "running" ? props.pendingAnswer : undefined}
               actions={t === last ? actions : undefined}
             />
           ))
         )}
       </div>
-      <label className="toggle chat-options">
-        <input type="checkbox" checked={props.verbose} onChange={(e) => props.onVerbose(e.target.checked)} />
-        show every node&apos;s output
-      </label>
+      <div className="chat-options">
+        <label className="toggle">
+          <input type="checkbox" checked={props.formatted} onChange={(e) => props.onFormatted(e.target.checked)} />
+          format answers (Markdown)
+        </label>
+        <label className="toggle">
+          <input type="checkbox" checked={props.verbose} onChange={(e) => props.onVerbose(e.target.checked)} />
+          show every node&apos;s output
+        </label>
+      </div>
     </section>
   );
 }

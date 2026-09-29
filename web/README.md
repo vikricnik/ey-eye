@@ -9,7 +9,7 @@ watch each node light up as the server reports it running.
 ```
 web/
 ├── index.html
-├── package.json              # react, react-dom, @xyflow/react + @llm-pipeline/client
+├── package.json              # react, react-dom, @xyflow/react, marked + dompurify (answers as Markdown), @llm-pipeline/client
 ├── tsconfig.json             # "jsx": "react-jsx" — Vite's esbuild compiles TSX directly
 └── src/
     ├── main.tsx              # React entry point
@@ -33,6 +33,8 @@ web/
     │   └── editorState.ts      # the edited document and validation state
     ├── run/
     │   ├── Chat.tsx            # the Chat tab (conversation picker, transcript) and the message box
+    │   ├── Markdown.tsx        # an answer formatted from its Markdown, sanitized
+    │   ├── markdownToHtml.ts   # the formatting rules: no raw HTML, no images, safe links only
     │   ├── RunErrorView.tsx    # a failed run: what happened, what to do, the raw error
     │   ├── runFailure.ts       # plain-language explanations of run failures
     │   ├── MessagesView.tsx    # the Trace tab: what every node received and replied, per run
@@ -321,6 +323,13 @@ it everything below is read-only and a banner says so):
   run: reloading, or coming back to a pipeline, continues its latest
   conversation. The picker at the top of **Chat** lists a pipeline's past
   ones (the last 30) to reopen; "+ new" starts over and ✕ deletes one.
+- **Answers are formatted from their Markdown** (headings, lists, bold,
+  code, tables, links); "format answers (Markdown)" in Chat switches to
+  the text as the model wrote it. A model's answer is untrusted text, so
+  raw HTML in it is shown as text, images are left out (loading one would
+  send its URL — and anything an injected prompt put in it — to another
+  server), links go only to web and mail addresses, and the result is
+  sanitized again with DOMPurify. The Trace always shows raw text.
 - **"show every node's output"** (in Chat) lists every node's output in the
   transcript.
 

@@ -64,7 +64,7 @@ polish.
 | [UX-011](#ux-011-some-disabled-controls-give-no-reason) | MINOR | Some disabled controls give no reason — ✅ fixed |
 | [UX-012](#ux-012-undo-exists-but-is-never-offered-after-a-delete) | MINOR | Undo exists but is never offered after a delete — ✅ fixed |
 | [UX-013](#ux-013-on-narrow-screens-the-message-box-is-below-the-fold) | MINOR | On narrow screens the message box is below the fold — ✅ fixed |
-| [UX-014](#ux-014-smaller-items) | SUGGESTION | Smaller items |
+| [UX-014](#ux-014-smaller-items) | SUGGESTION | Smaller items — ✅ fixed |
 
 **Suggested order** (most payoff for the least effort first):
 
@@ -759,6 +759,33 @@ polish.
 ### UX-014: Smaller items
 
 - **Severity**: SUGGESTION
+- **Status**: ✅ Fixed (2026-09-29).
+  - **Answers are formatted from their Markdown**
+    ([Markdown.tsx](web/src/run/Markdown.tsx),
+    [markdownToHtml.ts](web/src/run/markdownToHtml.ts)), including while
+    they stream in. "format answers (Markdown)" in Chat switches back to
+    the raw text. Node outputs under "show every node's output", and the
+    Trace, stay raw: they're for debugging.
+  - **Two small dependencies**: `marked` and `dompurify`, both widely used
+    and with no dependencies of their own. They add about 25–35 KB gzipped
+    to a 199 KB bundle. `react-markdown` would have pulled in the unified
+    toolchain (about 50 packages).
+  - **Safe for untrusted text**, because a prompt injection can make a
+    model write anything:
+    - raw HTML is escaped;
+    - images are dropped, since loading one sends its URL, which an injected
+      prompt could fill with the conversation;
+    - links are allowed only to http(s) and mailto addresses, and open in a
+      new tab without a referrer;
+    - DOMPurify then keeps only formatting tags and a few attributes.
+    All four rules are unit-tested
+    ([markdownToHtml.test.ts](web/test/markdownToHtml.test.ts)).
+  - **Compare models** now labels its controls: "Swap the model of node"
+    (a real `<label>` on the dropdown) and "…for each of these models".
+  - **Checked in the app with a real run** (Ollama was up): a Markdown
+    answer rendered with bold titles and paragraphs in 8.8 s; the toggle
+    showed the raw `**…**` and switched back; the new labels; no console
+    errors; `npm run build` passes.
 - **File(s)**:
   - [Chat.tsx:81](web/src/run/Chat.tsx#L81)
   - [style.css:625](web/src/style.css#L625)
