@@ -52,7 +52,7 @@ polish.
 | ID | Severity | Title |
 |----|----------|-------|
 | [UX-001](#ux-001-canvas-text-is-too-small-to-read-at-normal-window-sizes) | MAJOR | Canvas text is too small to read at normal window sizes — ✅ fixed |
-| [UX-002](#ux-002-most-text-is-small-and-fails-contrast-minimums) | MAJOR | Most text is small and fails contrast minimums |
+| [UX-002](#ux-002-most-text-is-small-and-fails-contrast-minimums) | MAJOR | Most text is small and fails contrast minimums — ✅ fixed |
 | [UX-003](#ux-003-an-unreachable-ollama-is-only-discovered-when-a-run-fails) | MAJOR | An unreachable Ollama is only discovered when a run fails |
 | [UX-004](#ux-004-a-failed-run-discards-the-message-and-offers-no-retry) | MAJOR | A failed run discards the message and offers no retry |
 | [UX-005](#ux-005-pipeline-settings-are-hard-to-find) | MAJOR | Pipeline settings are hard to find |
@@ -137,6 +137,34 @@ polish.
 ### UX-002: Most text is small and fails contrast minimums
 
 - **Severity**: MAJOR
+- **Status**: ✅ Fixed (2026-09-29).
+  - **Type scale**: five tokens in [style.css](web/src/style.css) replace
+    the ad-hoc sizes. `--fs-xs` 11px (uppercase labels, badges, meta),
+    `--fs-sm` 12px (controls, hints), `--fs-md` 13px (body, fields, prompts,
+    answers), `--fs-lg` 15px and `--fs-xl` 17px (titles). They're in rem, so
+    the text size setting still scales them. The base went from 12px to
+    13px. Canvas cards (px, in flow coordinates) went up one step:
+    13/12/11px, with the status pill at 11px instead of 9px.
+  - **Contrast**: every text use of `--text-faint` now uses `--text-dim`
+    (hints, kicker, placeholders, meta, idle pills, empty states).
+    `--text-faint` is left only for disabled controls, borders and the
+    scrollbar. In the light theme, four status colors were darkened slightly
+    so they also read on their own tinted backgrounds (badges, notices, test
+    results): accent `#0A6A62`, valid `#04694C`, invalid `#AC2A2A`, warn
+    `#865206`. The dark theme already passed.
+  - **Hierarchy**: section headings ("DEPENDS ON", "PRESETS", "TEST CASES")
+    are now full-strength text in bold, above the dim field labels, instead
+    of the faintest text on the page.
+  - **Guarded by a test**: [readability.test.ts](web/test/readability.test.ts)
+    reads `style.css` and fails if any font size falls below 11px or skips
+    the scale, if a text color (or a status color on its own tint) drops
+    below 4.5:1 on any surface in either theme, or if `--text-faint` colors
+    any text other than disabled controls.
+  - **Measured in the app** at 1024×768, in every panel tab, the header and
+    on the canvas, in both themes: the smallest text is 11px and no visible
+    text is below 4.5:1.
+  - **Not done**: the optional switch to a sans-serif interface font. It
+    changes the app's look, so it's left as a separate decision.
 - **Principle**: WCAG 2.2 SC 1.4.3 Contrast (Minimum); visual hierarchy
 - **File(s)**:
   - [style.css:8](web/src/style.css#L8) (`--text-faint`, dark)
