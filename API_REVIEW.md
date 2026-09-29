@@ -60,7 +60,7 @@ problems are where the parts meet:
 | [API-015](#api-015-yaml-schema-naming) | SUGGESTION | YAML schema naming — ✅ fixed |
 | [API-016](#api-016-validate-takes-two-mutually-exclusive-fields-and-checks-at-runtime) | SUGGESTION | `validate` takes two mutually exclusive fields and checks at runtime — ✅ fixed |
 | [API-017](#api-017-graphedge-expresses-its-variant-through-nullable-fields) | SUGGESTION | `GraphEdge` expresses its variant through nullable fields — ✅ fixed |
-| [API-018](#api-018-smaller-naming-items) | SUGGESTION | Smaller naming items |
+| [API-018](#api-018-smaller-naming-items) | SUGGESTION | Smaller naming items — ✅ fixed |
 
 **Suggested order:** start with API-001. Moving the compat router to
 `/openai/v1` is cheap now and prevents a real break once spec 003 lands.
@@ -773,6 +773,27 @@ working around them.
 ### API-018: Smaller naming items
 
 - **Severity**: SUGGESTION
+- **Status**: ✅ Fixed (2026-09-29).
+  - **Request id:** `ErrorResponse.exceptionUID` is now `request_id`, and
+    so is the OpenAI-shaped error. On the client, `PipelineApiError`
+    exposes it as `requestId`, next to `statusCode`. The CLI and the web
+    chat show it as before.
+  - **`ModelCatalog` names:**
+    - `ollama()` → `list_ollama_models()`.
+    - The `check()`/`issues()` pair → `ensure_allowed()` (raises) and
+      `find_disallowed()` (lists).
+    - The replaceable Ollama calls are now `OllamaModelsFetcher`,
+      `OllamaModelDetailsFetcher` and `OllamaRunningModelsFetcher`, passed
+      as `fetch_ollama_models=`, `fetch_ollama_model_details=` and
+      `fetch_running_ollama_models=`.
+    - Their defaults are named after the Ollama endpoint each one calls:
+      `_ollama_api_tags`, `_ollama_api_show`, `_ollama_api_ps`.
+  - **Presets:** `read_preset` and `delete_preset` raise a new
+    `PresetNotFoundError` (in `errors.py`, next to `PipelineNotFoundError`)
+    instead of the built-in `FileNotFoundError`. The router catches that.
+  - **Model identity:** `modelIdentity(model)` takes a model only. Its
+    callers already had a model, and a missing one is the caller's label
+    to choose.
 - **Principle**: Naming conventions
 - **File(s)**:
   - [api_schemas.py:452](llm_pipeline/llm_pipeline/api_schemas.py#L452)

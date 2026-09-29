@@ -188,7 +188,7 @@ def _replay(run_request: RunRequest, definition: PipelineDefinition) -> dict[str
 
 
 # An unexpected failure is a bug: its text stays in the server log (found
-# by exceptionUID), not in the response.
+# by request_id), not in the response.
 UNEXPECTED_RUN_FAILURE = "Internal server error while running the pipeline"
 
 

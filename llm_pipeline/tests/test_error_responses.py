@@ -23,7 +23,7 @@ EXPECTED_KEYS = {
     "code",
     "message",
     "request",
-    "exceptionUID",
+    "request_id",
     "details",
     "validations",
 }
@@ -68,7 +68,7 @@ def _assert_matches_error_shape(body: dict[str, object]) -> None:
     assert isinstance(body["code"], str) and body["code"].isupper()
     assert isinstance(body["message"], str)
     assert isinstance(body["request"], str)
-    assert isinstance(body["exceptionUID"], str) and body["exceptionUID"] != ""
+    assert isinstance(body["request_id"], str) and body["request_id"] != ""
     assert isinstance(body["details"], dict)
     assert isinstance(body["validations"], list)
 
@@ -231,9 +231,9 @@ def test_an_unexpected_failure_during_a_run_is_a_500_that_keeps_its_details_priv
     assert "secret internals" not in streamed.text
 
 
-def test_exception_uid_is_consistent_within_one_request(client: TestClient) -> None:
-    """exceptionUID should match X-Request-ID for the same request, so ops
+def test_request_id_is_consistent_within_one_request(client: TestClient) -> None:
+    """request_id should match X-Request-ID for the same request, so ops
     can correlate an error body directly with server log lines."""
     response = client.post("/pipelines/does-not-exist/runs", json={"prompt": "hi", "history": []})
     body = response.json()
-    assert response.headers.get("X-Request-ID") == body["exceptionUID"]
+    assert response.headers.get("X-Request-ID") == body["request_id"]

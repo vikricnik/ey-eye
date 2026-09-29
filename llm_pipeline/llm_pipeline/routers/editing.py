@@ -45,7 +45,7 @@ from llm_pipeline.auth import require_api_key
 from llm_pipeline.dag_builder import build_graph
 from llm_pipeline.disconnects import until_disconnected
 from llm_pipeline.error_handling import ERROR_RESPONSES
-from llm_pipeline.errors import PipelineNotFoundError
+from llm_pipeline.errors import PipelineNotFoundError, PresetNotFoundError
 from llm_pipeline.evaluation import Variant, make_judge, run_tests
 from llm_pipeline.pipeline_config import EvalCase, PipelineDefinition
 from llm_pipeline.pipeline_loader import PipelineCache, get_pipeline_cache
@@ -410,7 +410,7 @@ async def get_preset(
 ) -> PresetResponse:
     try:
         stored = store.read_preset(name)
-    except FileNotFoundError:
+    except PresetNotFoundError:
         raise ApiError(ErrorCode.PRESET_NOT_FOUND, f"No preset named '{name}'") from None
     response.headers["ETag"] = _etag(stored.revision)
     return PresetResponse(
@@ -455,6 +455,6 @@ async def delete_preset(
     If-Match with the ETag you loaded to refuse if it changed since."""
     try:
         moved = await store.delete_preset(name, precondition)
-    except FileNotFoundError:
+    except PresetNotFoundError:
         raise ApiError(ErrorCode.PRESET_NOT_FOUND, f"No preset named '{name}'") from None
     return DeletedResponse(name=name, recoverable_as=moved)

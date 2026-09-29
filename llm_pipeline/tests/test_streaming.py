@@ -243,7 +243,7 @@ def test_stream_provider_failure_yields_error_event_with_200_status(
         "code",
         "message",
         "request",
-        "exceptionUID",
+        "request_id",
         "details",
         "validations",
     }

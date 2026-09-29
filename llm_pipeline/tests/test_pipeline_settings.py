@@ -352,7 +352,7 @@ def _use_catalog(client: TestClient) -> None:
         return [CatalogModel(name="m:latest"), CatalogModel(name="small:latest")]
 
     client.app.state.pipeline_store.catalog = ModelCatalog(  # type: ignore[attr-defined]
-        "http://ollama.test", [], ollama_lister=installed
+        "http://ollama.test", [], fetch_ollama_models=installed
     )
 
 

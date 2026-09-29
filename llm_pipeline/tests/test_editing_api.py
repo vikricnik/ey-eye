@@ -2,6 +2,8 @@
 presets, the model allowlist — and that nothing is ever written unless a
 definition passes all of it."""
 
+import asyncio
+import re
 import shutil
 from collections.abc import Iterator
 from pathlib import Path
@@ -13,12 +15,19 @@ from fastapi.testclient import TestClient
 
 import llm_pipeline.dag_builder.node_types as node_types_module
 import llm_pipeline.rate_limit as rate_limit_module
+from llm_pipeline.errors import PresetNotFoundError
 from llm_pipeline.main import app
-from llm_pipeline.model_catalog import CatalogModel, ModelCatalog, ModelLimits
-from llm_pipeline.pipeline_config import load_pipeline_definition
+from llm_pipeline.model_catalog import (
+    CatalogModel,
+    ModelCatalog,
+    ModelLimits,
+    ModelNotAllowedError,
+    ModelUse,
+)
+from llm_pipeline.pipeline_config import NodeModelConfig, load_pipeline_definition
 from llm_pipeline.pipeline_loader import PipelineCache
 from llm_pipeline.pipeline_store import definition_to_yaml, parse_definition_yaml
-from llm_pipeline.providers import Generation
+from llm_pipeline.providers import Generation, ProviderType
 from llm_pipeline.settings import settings
 
 SHIPPED_PIPELINES = Path(__file__).parent.parent / "pipelines"
@@ -71,8 +80,8 @@ def _use_catalog(client: TestClient, lister: Any = _installed_models, shower: An
     client.app.state.pipeline_store.catalog = ModelCatalog(  # type: ignore[attr-defined]
         ollama_base_url="http://ollama.test",
         cloud_models=settings.editor_cloud_models_list,
-        ollama_lister=lister,
-        ollama_shower=shower,
+        fetch_ollama_models=lister,
+        fetch_ollama_model_details=shower,
     )
 
 
@@ -701,7 +710,27 @@ def test_presets_can_be_deleted(client: TestClient, dirs: tuple[Path, Path]) -> 
     assert not (dirs[1] / "terse-llama.yaml").exists()
     assert (dirs[1] / response.json()["recoverable_as"]).is_file()
     assert client.get("/presets").json() == {"presets": []}
-    assert client.delete("/presets/terse-llama").status_code == 404
+    gone = client.delete("/presets/terse-llama")
+    assert gone.status_code == 404 and gone.json()["code"] == "PRESET_NOT_FOUND"
+
+
+def test_a_missing_preset_has_its_own_error(client: TestClient) -> None:
+    store = client.app.state.pipeline_store  # type: ignore[attr-defined]
+    for name in ("missing", "../escape"):
+        with pytest.raises(PresetNotFoundError, match=f"No preset named '{re.escape(name)}'"):
+            store.read_preset(name)
+
+
+def test_the_allowlist_can_list_every_problem_or_stop_at_the_first(client: TestClient) -> None:
+    catalog = client.app.state.pipeline_store.catalog  # type: ignore[attr-defined]
+    uses = [
+        ModelUse("a", NodeModelConfig(provider=ProviderType.OLLAMA, name="not-pulled"), "node 'a'"),
+        ModelUse("b", NodeModelConfig(provider=ProviderType.OPENAI, name="gpt-5"), "node 'b'"),
+    ]
+    found = asyncio.run(catalog.find_disallowed(uses))
+    assert [e.node_id for e in found] == ["a", "b"]
+    with pytest.raises(ModelNotAllowedError, match="not-pulled"):
+        asyncio.run(catalog.ensure_allowed(uses))
 
 
 def test_preset_writes_honour_preconditions_when_sent(client: TestClient) -> None:

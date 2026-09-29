@@ -61,8 +61,8 @@ export function findNode(def: PipelineDefinition, id: string): NodeConfig {
 }
 
 /** "provider:name", e.g. "ollama:gemma3:12b" (model names may contain ':'). */
-export function modelIdentity(model: NodeModelConfig | undefined): string {
-  return model ? `${model.provider}:${model.name}` : "(no model)";
+export function modelIdentity(model: NodeModelConfig): string {
+  return `${model.provider}:${model.name}`;
 }
 
 const DEFAULT_TEMPERATURE = 0.2;

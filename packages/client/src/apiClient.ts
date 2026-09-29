@@ -42,7 +42,7 @@ export class RequestCancelledError extends Error {
 export interface PipelineApiErrorInfo {
   statusCode?: number | undefined;
   code?: ErrorCode | undefined;
-  exceptionUID?: string | undefined;
+  requestId?: string | undefined;
   validations?: ValidationIssue[] | undefined;
   details?: Record<string, unknown> | undefined;
   serverMessage?: string | undefined;
@@ -53,7 +53,8 @@ export class PipelineApiError extends Error {
   /** Which failure this is — branch on this, not on `statusCode`. Unset
    * when the server was never reached. */
   readonly code: ErrorCode | undefined;
-  readonly exceptionUID: string | undefined;
+  /** The server's request_id — quote it when reporting a failure. */
+  readonly requestId: string | undefined;
   readonly validations: ValidationIssue[] | undefined;
   /** Structured extra context — for a pipeline execution failure, this is
    * where node_id/loop_id live (see api_schemas.py's ErrorResponse.details
@@ -70,7 +71,7 @@ export class PipelineApiError extends Error {
     this.name = "PipelineApiError";
     this.statusCode = info.statusCode;
     this.code = info.code;
-    this.exceptionUID = info.exceptionUID;
+    this.requestId = info.requestId;
     this.validations = info.validations;
     this.details = info.details;
     this.serverMessage = info.serverMessage;
@@ -105,7 +106,7 @@ function errorFromBody(
   return new PipelineApiError(message, {
     statusCode,
     code: body.code,
-    exceptionUID: body.exceptionUID,
+    requestId: body.request_id,
     validations: body.validations,
     details: body.details,
     serverMessage: body.message,

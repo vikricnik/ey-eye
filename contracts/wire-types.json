@@ -43,9 +43,9 @@
       "code",
       "details",
       "error",
-      "exceptionUID",
       "message",
       "request",
+      "request_id",
       "status",
       "timestamp",
       "validations"

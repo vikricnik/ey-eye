@@ -830,7 +830,7 @@ helper:
   "code": "PIPELINE_NOT_FOUND",
   "message": "No pipeline named 'does-not-exist'",
   "request": "POST /pipelines/does-not-exist/runs",
-  "exceptionUID": "a1b2c3d4e5f6",
+  "request_id": "a1b2c3d4e5f6",
   "details": {},
   "validations": []
 }
@@ -844,7 +844,7 @@ helper:
 | `code` | Which failure this is — see below. **Branch on this, not on `status`**: failures that share a status (a `412` is a stale revision or a taken name) have different codes |
 | `message` | Human-readable detail — what a plain `HTTPException(detail=...)` used to surface alone |
 | `request` | `"<METHOD> <path>"` of the request that failed |
-| `exceptionUID` | Same value as the `X-Request-ID` response header — ties this error directly to server log lines carrying the same id (see `logging_context.py`) |
+| `request_id` | Same value as the `X-Request-ID` response header — ties this error directly to server log lines carrying the same id (see `logging_context.py`) |
 | `details` | Extra structured context: `retry_after_seconds` for rate limits, `node_id` (or `loop_id`) when a node is at fault; `{}` otherwise |
 | `validations` | One entry per field problem, **only** non-empty for `422` schema validation errors — each entry is `{"field": ..., "message": ..., "type": ...}` |
 
@@ -860,7 +860,7 @@ be added, so a client should handle a code it doesn't know by its `status`.
 | `REQUEST_INVALID` | `422` | The request body fails schema validation (`validations` lists each problem), or asks for something contradictory (e.g. both `definition` and `yaml`) |
 | `UNAUTHENTICATED` | `401` | Missing or unknown API key (when `API_KEYS` is set) |
 | `RATE_LIMITED` | `429` | Rate limit exceeded — `Retry-After` header, mirrored in `details.retry_after_seconds` |
-| `INTERNAL_ERROR` | `500` | A genuinely unexpected exception (a bug) — `message` stays generic; quote `exceptionUID` when reporting it, the server log has the rest |
+| `INTERNAL_ERROR` | `500` | A genuinely unexpected exception (a bug) — `message` stays generic; quote `request_id` when reporting it, the server log has the rest |
 | `NAME_INVALID` | `400` | A pipeline or preset name that isn't filename-safe (`^[a-zA-Z0-9_-]+$`) |
 | `PIPELINE_NOT_FOUND` | `404` | No pipeline with that name |
 | `PRESET_NOT_FOUND` | `404` | No preset with that name |

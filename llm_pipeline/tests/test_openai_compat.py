@@ -179,6 +179,7 @@ def test_errors_use_openais_shape(client: TestClient) -> None:
     assert missing.json()["error"]["type"] == "invalid_request_error"
     assert missing.json()["error"]["code"] == "pipeline_not_found"
     assert "no-such-pipeline" in missing.json()["error"]["message"]
+    assert missing.json()["error"]["request_id"] == missing.headers["X-Request-ID"]
 
     not_asked = client.post(
         f"{BASE}/chat/completions",

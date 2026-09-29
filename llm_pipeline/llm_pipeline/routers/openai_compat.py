@@ -86,7 +86,7 @@ def openai_error(body: ErrorResponse) -> dict[str, object]:
             "type": error_type,
             "param": None,
             "code": body.code.lower(),  # e.g. "pipeline_not_found"
-            "exceptionUID": body.exceptionUID,
+            "request_id": body.request_id,
         }
     }
 

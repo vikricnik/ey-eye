@@ -66,7 +66,7 @@ def build_error_response(
         code=code,
         message=message,
         request=f"{request.method} {request.url.path}",
-        exceptionUID=get_request_id(),
+        request_id=get_request_id(),
         details=details or {},
         validations=validations or [],
     )

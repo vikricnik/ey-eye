@@ -16,6 +16,7 @@ import {
   uniqueCaseName,
   upsertTestCase,
   newDefinition,
+  modelIdentity,
   parseModelIdentity,
   presetFromNode,
   removeNode,
@@ -206,6 +207,14 @@ describe("models and presets", () => {
     assert.deepEqual(parseModelIdentity("ollama:gemma3:12b"), { provider: "ollama", name: "gemma3:12b" });
     assert.deepEqual(parseModelIdentity("gemma3:12b"), { provider: "ollama", name: "gemma3:12b" });
     assert.deepEqual(parseModelIdentity("anthropic:claude-x"), { provider: "anthropic", name: "claude-x" });
+  });
+
+  it("an identity is a model's, never a stand-in label", () => {
+    assert.equal(modelIdentity(parseModelIdentity("ollama:gemma3:12b")), "ollama:gemma3:12b");
+    // Compile-time only: no model, no identity — callers choose their own label.
+    // @ts-expect-error
+    const _noModel = () => modelIdentity(undefined);
+    void _noModel;
   });
 
   it("applying a preset copies values, not a reference", () => {

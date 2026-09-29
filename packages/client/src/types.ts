@@ -570,7 +570,8 @@ export interface ErrorResponse {
   code: ErrorCode;
   message: string;
   request: string;
-  exceptionUID: string;
+  /** The X-Request-ID — the id server log lines carry. Quote it when reporting an error. */
+  request_id: string;
   details: Record<string, unknown>;
   validations: ValidationIssue[];
 }

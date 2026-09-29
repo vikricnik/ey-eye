@@ -30,6 +30,15 @@ class PipelineNotFoundError(Exception):
         super().__init__(f"No pipeline named '{name}'")
 
 
+class PresetNotFoundError(Exception):
+    """Raised when a client requests a preset with no matching
+    <presets_dir>/<name>.yaml file."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        super().__init__(f"No preset named '{name}'")
+
+
 class PipelineDefinitionError(Exception):
     """Raised when a pipeline YAML file fails schema/DAG validation."""
 

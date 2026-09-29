@@ -86,10 +86,13 @@ class ModelUse(NamedTuple):
     where: str  # how messages name it: "node 'x'", "pipeline default model", …
 
 
-OllamaLister = Callable[[], Awaitable[list[CatalogModel]]]
-OllamaShower = Callable[[str], Awaitable[ModelLimits]]
-# Loaded Ollama models -> the context size each is running with (/api/ps).
-OllamaRunning = Callable[[], Awaitable[dict[str, int]]]
+# How the catalog asks Ollama — replaceable, so tests need no Ollama server.
+# Installed models (/api/tags).
+OllamaModelsFetcher = Callable[[], Awaitable[list[CatalogModel]]]
+# One installed model's details (/api/show).
+OllamaModelDetailsFetcher = Callable[[str], Awaitable[ModelLimits]]
+# Loaded models -> the context size each is running with (/api/ps).
+OllamaRunningModelsFetcher = Callable[[], Awaitable[dict[str, int]]]
 # Loaded models barely change between calls in one run; a snapshot this
 # fresh is reused, and a model missing from it triggers a refetch anyway.
 _RUNNING_TTL_SECONDS = 5.0
@@ -111,21 +114,21 @@ class ModelCatalog:
         ollama_base_url: str,
         cloud_models: Iterable[str],
         ttl_seconds: float = 30.0,
-        ollama_lister: OllamaLister | None = None,
-        ollama_shower: OllamaShower | None = None,
-        ollama_running: OllamaRunning | None = None,
+        fetch_ollama_models: OllamaModelsFetcher | None = None,
+        fetch_ollama_model_details: OllamaModelDetailsFetcher | None = None,
+        fetch_running_ollama_models: OllamaRunningModelsFetcher | None = None,
     ) -> None:
         self.ollama_base_url = ollama_base_url
         self.cloud_models = sorted(set(cloud_models))
         self.ttl_seconds = ttl_seconds
-        self._ollama_lister = ollama_lister or self._list_ollama_models
-        self._ollama_shower = ollama_shower or self._show_ollama_model
-        self._ollama_running = ollama_running or self._running_ollama_models
+        self._fetch_ollama_models = fetch_ollama_models or self._ollama_api_tags
+        self._fetch_ollama_model_details = fetch_ollama_model_details or self._ollama_api_show
+        self._fetch_running_ollama_models = fetch_running_ollama_models or self._ollama_api_ps
         self._running: tuple[float, dict[str, int]] | None = None
         self._cached: tuple[float, ProviderCatalog] | None = None
         self._limits: dict[str, tuple[float, ModelLimits]] = {}
 
-    async def _list_ollama_models(self) -> list[CatalogModel]:
+    async def _ollama_api_tags(self) -> list[CatalogModel]:
         from ollama import AsyncClient
 
         response = await AsyncClient(host=self.ollama_base_url).list()
@@ -145,7 +148,7 @@ class ModelCatalog:
             )
         return sorted(models, key=lambda model: model.name)
 
-    async def _show_ollama_model(self, name: str) -> ModelLimits:
+    async def _ollama_api_show(self, name: str) -> ModelLimits:
         from ollama import AsyncClient
 
         shown = await AsyncClient(host=self.ollama_base_url).show(name)
@@ -161,7 +164,7 @@ class ModelCatalog:
             family=details.family if details else None,
         )
 
-    async def _running_ollama_models(self) -> dict[str, int]:
+    async def _ollama_api_ps(self) -> dict[str, int]:
         from ollama import AsyncClient
 
         response = await AsyncClient(host=self.ollama_base_url).ps()
@@ -184,7 +187,7 @@ class ModelCatalog:
         snapshot = self._running
         if snapshot is None or now - snapshot[0] > _RUNNING_TTL_SECONDS or key not in snapshot[1]:
             try:
-                snapshot = (now, await self._ollama_running())
+                snapshot = (now, await self._fetch_running_ollama_models())
             except Exception as e:
                 logger.info(f"model catalog: can't list loaded Ollama models: {e}")
                 return None
@@ -200,7 +203,7 @@ class ModelCatalog:
         if cached and now - cached[0] < self.ttl_seconds:
             return cached[1]
         try:
-            found = await self._ollama_shower(name)
+            found = await self._fetch_ollama_model_details(name)
         except Exception as e:
             logger.info(f"model catalog: no details for Ollama model '{name}': {e}")
             return None
@@ -227,7 +230,7 @@ class ModelCatalog:
                 )
         return warnings
 
-    async def ollama(self, refresh: bool = False) -> ProviderCatalog:
+    async def list_ollama_models(self, refresh: bool = False) -> ProviderCatalog:
         """Installed Ollama models, cached for `ttl_seconds`. Never raises:
         an unreachable server is reported as `reachable=False`."""
         now = time.monotonic()
@@ -237,7 +240,7 @@ class ModelCatalog:
             catalog = ProviderCatalog(
                 provider=ProviderType.OLLAMA.value,
                 reachable=True,
-                models=await self._ollama_lister(),
+                models=await self._fetch_ollama_models(),
             )
         except Exception as e:
             logger.warning(f"model catalog: Ollama at {self.ollama_base_url} unreachable: {e}")
@@ -251,7 +254,7 @@ class ModelCatalog:
         return catalog
 
     async def providers(self, refresh: bool = False) -> list[ProviderCatalog]:
-        catalogs = [await self.ollama(refresh=refresh)]
+        catalogs = [await self.list_ollama_models(refresh=refresh)]
         by_provider: dict[str, list[CatalogModel]] = {}
         for identity in self.cloud_models:
             provider, _, model = identity.partition(":")
@@ -260,12 +263,13 @@ class ModelCatalog:
             catalogs.append(ProviderCatalog(provider=provider, reachable=True, models=models))
         return catalogs
 
-    async def issues(
+    async def find_disallowed(
         self,
         models: Iterable[ModelUse],
         already_stored: set[str] | None = None,
     ) -> list[ModelNotAllowedError]:
-        """Every model in `models` that isn't on the allowlist. `models`
+        """Every model in `models` that isn't on the allowlist — reported,
+        not raised (see ensure_allowed). `models`
         pairs each model block with the node id it belongs to (None for a
         preset). `already_stored` holds the model identities the stored
         version already uses — see module docstring."""
@@ -278,7 +282,7 @@ class ModelCatalog:
                 continue
             if model.provider == ProviderType.OLLAMA:
                 if ollama is None:
-                    ollama = await self.ollama()
+                    ollama = await self.list_ollama_models()
                 if not ollama.reachable:
                     found.append(
                         ModelNotAllowedError(
@@ -307,13 +311,14 @@ class ModelCatalog:
                 )
         return found
 
-    async def check(
+    async def ensure_allowed(
         self,
         models: Iterable[ModelUse],
         already_stored: set[str] | None = None,
     ) -> None:
-        """Fail-closed gate used before any write: raises the first issue."""
-        found = await self.issues(models, already_stored)
+        """Fail-closed gate used before any write: raises the first model
+        find_disallowed() reports."""
+        found = await self.find_disallowed(models, already_stored)
         if found:
             raise found[0]
 

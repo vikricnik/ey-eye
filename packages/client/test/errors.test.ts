@@ -15,7 +15,7 @@ function errorBody(status: number, code: ErrorResponse["code"], message: string,
     code,
     message,
     request: "-",
-    exceptionUID: "ref123",
+    request_id: "ref123",
     details,
     validations: [],
   };
@@ -64,7 +64,7 @@ describe("error codes", () => {
     assert.equal(err.code, "ALREADY_EXISTS");
     assert.equal(err.statusCode, 412);
     assert.equal(err.serverMessage, "pipeline 'fresh' already exists");
-    assert.equal(err.exceptionUID, "ref123");
+    assert.equal(err.requestId, "ref123");
   });
 
   it("are exposed on a failure mid-stream, like any other error", async () => {

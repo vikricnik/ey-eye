@@ -136,7 +136,7 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClie
 
     with TestClient(app, raise_server_exceptions=False) as c:
         c.app.state.pipeline_store.catalog = ModelCatalog(  # type: ignore[attr-defined]
-            "http://ollama.test", [], ollama_lister=installed
+            "http://ollama.test", [], fetch_ollama_models=installed
         )
         yield c
 

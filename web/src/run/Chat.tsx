@@ -17,7 +17,7 @@ export interface Turn {
   log: RunLogEntry[];
   result?: StreamDoneEvent;
   elapsedMs?: number;
-  error?: { message: string; exceptionUID?: string | undefined };
+  error?: { message: string; requestId?: string | undefined };
 }
 
 function NodeCard({ node, isOutput }: { node: NodeOutput; isOutput: boolean }) {
@@ -51,7 +51,7 @@ function TurnView({ turn, verbose, pendingAnswer }: { turn: Turn; verbose: boole
       ) : turn.status === "error" ? (
         <div className="error-banner">
           error: {turn.error?.message}
-          {turn.error?.exceptionUID && <div className="error-ref">reference id: {turn.error.exceptionUID}</div>}
+          {turn.error?.requestId && <div className="error-ref">reference id: {turn.error.requestId}</div>}
         </div>
       ) : (
         <div className="turn-response">

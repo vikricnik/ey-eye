@@ -49,6 +49,7 @@ from llm_pipeline.errors import (
     DefinitionInvalidError,
     InvalidNameError,
     PipelineNotFoundError,
+    PresetNotFoundError,
     ProtectedPipelineError,
     RevisionConflictError,
     ValidationProblem,
@@ -572,7 +573,7 @@ class PipelineStore:
         """What a save of `definition` under `name` would reject, without
         saving — used for live validation feedback."""
         already = self._stored_model_identities(name) if is_safe_name(name) else set()
-        return await self.catalog.issues(model_blocks(definition), already)
+        return await self.catalog.find_disallowed(model_blocks(definition), already)
 
     async def save_pipeline(
         self, name: str, raw_definition: object, precondition: Precondition = NO_PRECONDITION
@@ -592,7 +593,9 @@ class PipelineStore:
                 revision_of(current) if current is not None else None, f"pipeline '{name}'"
             )
 
-            await self.catalog.check(model_blocks(definition), self._stored_model_identities(name))
+            await self.catalog.ensure_allowed(
+                model_blocks(definition), self._stored_model_identities(name)
+            )
 
             text, comments_preserved = self._pipeline_text(
                 definition, current.decode("utf-8") if current is not None else None
@@ -681,9 +684,9 @@ class PipelineStore:
         try:
             path = self._preset_path(name)
         except InvalidNameError:
-            raise FileNotFoundError(name) from None
+            raise PresetNotFoundError(name) from None
         if not path.is_file():
-            raise FileNotFoundError(name)
+            raise PresetNotFoundError(name)
         return self._read_preset_file(path)
 
     async def save_preset(
@@ -704,9 +707,9 @@ class PipelineStore:
         async with self._lock(path):
             precondition.check(_revision_on_disk(path), f"preset '{name}'")
             stored: set[str] = set()
-            with contextlib.suppress(FileNotFoundError, DefinitionInvalidError):
+            with contextlib.suppress(PresetNotFoundError, DefinitionInvalidError):
                 stored = {model_identity(self.read_preset(name).preset.model)}
-            await self.catalog.check([ModelUse(None, preset.model, "preset")], stored)
+            await self.catalog.ensure_allowed([ModelUse(None, preset.model, "preset")], stored)
             data = _to_json(preset)
             if not data.get("description"):
                 data.pop("description", None)
@@ -733,7 +736,7 @@ class PipelineStore:
         path = self._preset_path(name)
         async with self._lock(path):
             if not path.is_file():
-                raise FileNotFoundError(name)
+                raise PresetNotFoundError(name)
             precondition.check(_revision_on_disk(path), f"preset '{name}'")
             moved = _soft_delete(path)
         return str(moved.relative_to(self.presets_dir))

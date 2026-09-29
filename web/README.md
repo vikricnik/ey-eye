@@ -319,7 +319,7 @@ pipeline tiers anymore, since a pipeline's shape is whatever its YAML defines.
 Every server error — 400/401/403/404/409/412/422/428/429/502, and even a genuine
 unhandled 500 — comes back as one consistent structured object. When a
 request fails, the transcript shows the error message plus a small
-"reference id" line (the server's `exceptionUID`, same value as its logged
+"reference id" line (the server's `request_id`, same value as its logged
 `X-Request-ID`) — useful to include if reporting an issue, since it's
 searchable directly in server logs.
 

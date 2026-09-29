@@ -70,7 +70,7 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClie
         return {"small:latest": 4096}
 
     # Before startup: the app's catalog is handed to every node it builds.
-    monkeypatch.setattr(ModelCatalog, "_running_ollama_models", running)
+    monkeypatch.setattr(ModelCatalog, "_ollama_api_ps", running)
     with TestClient(app) as c:
         yield c
 
@@ -126,7 +126,9 @@ async def test_running_context_refetches_for_a_model_missing_from_the_snapshot()
         calls += 1
         return snapshots[min(calls - 1, 1)]
 
-    catalog = ModelCatalog(ollama_base_url="http://unused", cloud_models=[], ollama_running=running)
+    catalog = ModelCatalog(
+        ollama_base_url="http://unused", cloud_models=[], fetch_running_ollama_models=running
+    )
     assert await catalog.running_context("a") == 2048
     assert await catalog.running_context("a:latest") == 2048 and calls == 1  # cached
     assert await catalog.running_context("b:7b") == 8192 and calls == 2  # just loaded
@@ -135,7 +137,7 @@ async def test_running_context_refetches_for_a_model_missing_from_the_snapshot()
         raise ConnectionError("ollama down")
 
     down = ModelCatalog(
-        ollama_base_url="http://unused", cloud_models=[], ollama_running=unreachable
+        ollama_base_url="http://unused", cloud_models=[], fetch_running_ollama_models=unreachable
     )
     assert await down.running_context("a") is None  # best effort, never raises
 

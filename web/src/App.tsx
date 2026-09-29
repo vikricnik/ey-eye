@@ -809,7 +809,7 @@ export function App() {
       updateTurn((t) => ({
         ...t,
         status: "error",
-        error: { message: errorText(err), exceptionUID: apiErr.exceptionUID },
+        error: { message: errorText(err), requestId: apiErr.requestId },
       }));
     } finally {
       flushLog(true);

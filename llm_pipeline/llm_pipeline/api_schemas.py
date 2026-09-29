@@ -456,7 +456,7 @@ class ErrorCode(StrEnum):
     REQUEST_INVALID = "REQUEST_INVALID"  # malformed or contradictory request; see `validations`
     UNAUTHENTICATED = "UNAUTHENTICATED"  # missing or unknown API key
     RATE_LIMITED = "RATE_LIMITED"  # retry after the `Retry-After` header
-    INTERNAL_ERROR = "INTERNAL_ERROR"  # a server bug; quote `exceptionUID` when reporting it
+    INTERNAL_ERROR = "INTERNAL_ERROR"  # a server bug; quote `request_id` when reporting it
     # -- pipelines, presets and models
     NAME_INVALID = "NAME_INVALID"  # not usable as a file name
     PIPELINE_NOT_FOUND = "PIPELINE_NOT_FOUND"
@@ -501,6 +501,6 @@ class ErrorResponse(BaseModel):
     code: ErrorCode  # which failure this is — what clients branch on
     message: str  # human-readable detail — what used to be the bare "detail" string
     request: str  # "<METHOD> <path>", e.g. "POST /pipelines/support-router/runs"
-    exceptionUID: str  # ties this error to server log lines carrying the same id
+    request_id: str  # the X-Request-ID: ties this error to server log lines with the same id
     details: dict[str, object] = {}  # extra structured context, varies by error type
     validations: list[ValidationIssue] = []  # populated only for 422 schema validation errors
