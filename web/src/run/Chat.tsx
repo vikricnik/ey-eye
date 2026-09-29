@@ -4,8 +4,10 @@ import type { ConversationTurn, NodeOutput, RunLogEntry, StreamDoneEvent } from 
 import { formatDuration, formatWhen } from "../format";
 import { Markdown } from "./Markdown";
 import { RunErrorView } from "./RunErrorView";
+import { RunTrace } from "./RunTrace";
 import type { RunError } from "./runFailure";
 import type { ConversationSummary } from "./runHistory";
+import { isNearBottom } from "./stickToBottom";
 
 export interface Turn {
   id: number;
@@ -22,20 +24,6 @@ export interface Turn {
   result?: StreamDoneEvent;
   elapsedMs?: number;
   error?: RunError;
-}
-
-function NodeCard({ node, isOutput }: { node: NodeOutput; isOutput: boolean }) {
-  return (
-    <div className={`candidate ${isOutput ? "winner" : ""}`}>
-      <div className="candidate-header">
-        <span className="model-name">{node.node_id}</span>
-        <span className="badge">{node.model_name}</span>
-        <span className="badge">{formatDuration(node.duration_ms)}</span>
-        {isOutput && <span className="badge winner-badge">output node</span>}
-      </div>
-      <div className="candidate-answer">{node.output}</div>
-    </div>
-  );
 }
 
 /** The answer: formatted from its Markdown, or as the model wrote it. A
@@ -58,12 +46,13 @@ function Answer({ text, streaming, formatted }: { text: string | undefined; stre
 
 function TurnView(props: {
   turn: Turn;
-  verbose: boolean;
+  /** The run's trace (see Chat), between the message and the answer. */
+  trace: ReactNode;
   formatted: boolean;
   pendingAnswer?: string | undefined;
   actions?: ReactNode;
 }) {
-  const { turn, verbose, pendingAnswer, actions } = props;
+  const { turn, pendingAnswer, actions } = props;
   const result = turn.result;
   return (
     <div className="turn">
@@ -72,6 +61,7 @@ function TurnView(props: {
         <span>{turn.prompt}</span>
         {turn.rerunFrom && <span className="tag-mini">re-run from {turn.rerunFrom}</span>}
       </div>
+      {props.trace}
       {turn.status === "stopped" ? (
         <div className="stopped-banner">
           stopped — nothing from this run was added to the conversation
@@ -97,14 +87,6 @@ function TurnView(props: {
               <span className="tag">running… {turn.nodeOutputs.length} node(s) done</span>
             )}
           </div>
-          {verbose && turn.nodeOutputs.length > 0 && (
-            <div className="candidates">
-              <div className="candidates-label">Node outputs ({turn.nodeOutputs.length})</div>
-              {turn.nodeOutputs.map((n, i) => (
-                <NodeCard key={`${n.node_id}-${i}`} node={n} isOutput={result?.output_node === n.node_id} />
-              ))}
-            </div>
-          )}
           <Answer text={result?.final_answer ?? pendingAnswer} streaming={!result} formatted={props.formatted} />
         </div>
       )}
@@ -114,16 +96,25 @@ function TurnView(props: {
 
 /**
  * The Chat tab: which conversation this is (saved in this browser — pick
- * an earlier one, start a new one or delete this one) and its transcript.
- * Node status on the canvas updates live from the same runs.
+ * an earlier one, start a new one or delete this one) and its transcript,
+ * each run with its trace. Node status on the canvas updates live from the
+ * same runs.
  */
 export function Chat(props: {
   turns: Turn[];
   running: boolean;
   /** The output node's text so far, while the latest turn is running. */
   pendingAnswer?: string | undefined;
-  verbose: boolean;
-  onVerbose: (verbose: boolean) => void;
+  /** Whether each run's trace starts open ("open traces"). */
+  openTraces: boolean;
+  onOpenTraces: (open: boolean) => void;
+  /** The output nodes, marked in traces. */
+  outputNodeIds: ReadonlySet<string>;
+  /** Opens a node's settings (its name in a trace). */
+  onSelectNode: (nodeId: string) => void;
+  /** Nodes the latest run can be re-run from (empty while running). */
+  rerunnable: ReadonlySet<string>;
+  onRerun: (nodeId: string) => void;
   /** Answers formatted from their Markdown (on), or as written. */
   formatted: boolean;
   onFormatted: (formatted: boolean) => void;
@@ -142,6 +133,9 @@ export function Chat(props: {
   onEditMessage: (prompt: string) => void;
 }) {
   const transcript = useRef<HTMLDivElement>(null);
+  // Follows new text only while scrolled to the end, so a streaming trace
+  // doesn't pull the view away from an earlier turn being read.
+  const stickToBottom = useRef(true);
   const current = props.conversations.find((c) => c.id === props.currentConversation);
   const last = props.turns.at(-1);
   const recoverable = last && (last.status === "error" || last.status === "stopped") && !props.running;
@@ -174,10 +168,37 @@ export function Chat(props: {
     </>
   ) : undefined;
 
+  // A new message, or another conversation, always shows its end. (Declared
+  // before the effect below, which reads it, so it runs first.)
+  useEffect(() => {
+    stickToBottom.current = true;
+  }, [props.turns.length]);
+
   useEffect(() => {
     const el = transcript.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (el && stickToBottom.current) el.scrollTop = el.scrollHeight;
   }, [props.turns, props.pendingAnswer]);
+
+  /** A run's trace, folded between its message and its answer. "open
+   * traces" sets whether it starts open; each can still be folded alone. */
+  const trace = (turn: Turn, latest: boolean) => {
+    if (turn.log.length === 0 && turn.status !== "running") return null;
+    const nodes = new Set(turn.log.map((entry) => entry.nodeId)).size;
+    return (
+      <details className="turn-trace" open={props.openTraces}>
+        <summary>
+          Trace · {nodes} node{nodes === 1 ? "" : "s"}
+        </summary>
+        <RunTrace
+          turn={turn}
+          outputNodeIds={props.outputNodeIds}
+          onSelectNode={props.onSelectNode}
+          rerunnable={latest ? props.rerunnable : undefined}
+          onRerun={props.onRerun}
+        />
+      </details>
+    );
+  };
 
   return (
     <section className="chat" aria-label="Chat">
@@ -226,7 +247,13 @@ export function Chat(props: {
           </button>
         )}
       </div>
-      <div className="transcript" ref={transcript}>
+      <div
+        className="transcript"
+        ref={transcript}
+        onScroll={(e) => {
+          stickToBottom.current = isNearBottom(e.currentTarget);
+        }}
+      >
         {props.turns.length === 0 ? (
           <div className="empty-state">
             Type a message below and press <span className="accent">Enter</span> — nodes light up on the canvas as
@@ -237,7 +264,7 @@ export function Chat(props: {
             <TurnView
               key={t.id}
               turn={t}
-              verbose={props.verbose}
+              trace={trace(t, i === props.turns.length - 1)}
               formatted={props.formatted}
               pendingAnswer={i === props.turns.length - 1 && t.status === "running" ? props.pendingAnswer : undefined}
               actions={t === last ? actions : undefined}
@@ -250,9 +277,9 @@ export function Chat(props: {
           <input type="checkbox" checked={props.formatted} onChange={(e) => props.onFormatted(e.target.checked)} />
           format answers (Markdown)
         </label>
-        <label className="toggle">
-          <input type="checkbox" checked={props.verbose} onChange={(e) => props.onVerbose(e.target.checked)} />
-          show every node&apos;s output
+        <label className="toggle" title="Start each run's trace open — what every node received and replied">
+          <input type="checkbox" checked={props.openTraces} onChange={(e) => props.onOpenTraces(e.target.checked)} />
+          open traces
         </label>
       </div>
     </section>

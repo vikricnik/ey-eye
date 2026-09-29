@@ -823,6 +823,11 @@ button kbd {
 .turn { max-width: 900px; width: 100%; margin: 0 auto; }
 .turn-prompt { color: var(--text-dim); font-size: var(--fs-md); margin-bottom: 8px; display: flex; gap: 8px; }
 .turn-prompt .marker { color: var(--accent); flex-shrink: 0; }
+/* A run's trace, folded between its message and its answer (run/RunTrace.tsx). */
+.turn-trace { margin-bottom: 8px; }
+.turn-trace > summary { cursor: pointer; color: var(--text-dim); font-size: var(--fs-sm); width: fit-content; }
+.turn-trace[open] > summary { margin-bottom: 8px; }
+.run-trace { display: grid; gap: 8px; }
 .turn-response { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; }
 .turn-meta {
   display: flex;
@@ -882,24 +887,6 @@ button kbd {
   animation: dot-blink 1s steps(1) infinite;
 }
 .final-answer-pending::before { content: "waiting for the output node…"; color: var(--text-dim); font-style: italic; }
-.candidates + .final-answer { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--border); }
-.candidates { display: flex; flex-direction: column; gap: 8px; }
-.candidates-label { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); }
-.candidate { background: var(--panel-raised); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; }
-.candidate.winner { border-color: var(--accent-dim); }
-.candidate-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: var(--fs-sm); flex-wrap: wrap; }
-.candidate-header .model-name { color: var(--accent); font-weight: 600; }
-.badge {
-  font-size: var(--fs-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  padding: 2px 6px;
-  border-radius: 2px;
-  background: color-mix(in srgb, var(--valid) 12%, transparent);
-  color: var(--valid);
-}
-.badge.winner-badge { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); margin-left: auto; }
-.candidate-answer { color: var(--text-dim); white-space: pre-wrap; line-height: 1.5; max-height: 8.75rem; overflow-y: auto; }
 
 .error-banner {
   background: color-mix(in srgb, var(--invalid) 8%, transparent);
@@ -1042,18 +1029,6 @@ body.resizing-y, body.resizing-y * { cursor: row-resize !important; user-select:
 .conversation-open:disabled { background: transparent; color: var(--text); cursor: default; }
 .conversation-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .conversation-meta { font-size: var(--fs-xs); color: var(--text-dim); }
-.messages-view {
-  min-height: 0;
-  overflow-y: auto;
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-.messages-run { max-width: 1000px; width: 100%; margin: 0 auto; display: grid; gap: 10px; }
-.messages-run-head { display: flex; gap: 10px; align-items: baseline; font-size: var(--fs-md); }
-.messages-run-head .marker { color: var(--accent); }
-.messages-run-prompt { color: var(--text); flex: 1; }
 
 .message-entry {
   background: var(--panel);

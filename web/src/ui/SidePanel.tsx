@@ -1,12 +1,11 @@
 import type { ReactNode } from "react";
 
-export type PanelTab = "chat" | "settings" | "add" | "trace" | "tests";
+export type PanelTab = "chat" | "settings" | "add" | "tests";
 
 export const PANEL_TABS: { id: PanelTab; label: string; title: string }[] = [
-  { id: "chat", label: "Chat", title: "The conversation with this pipeline" },
+  { id: "chat", label: "Chat", title: "The conversation with this pipeline, and each run's trace" },
   { id: "settings", label: "Settings", title: "The selected node — or the pipeline, with nothing selected (⚙ beside the pipeline picker)" },
   { id: "add", label: "Add", title: "Add a node: blank, or from a preset" },
-  { id: "trace", label: "Trace", title: "What every node received and replied, run by run" },
   { id: "tests", label: "Tests", title: "Test cases and model comparisons" },
 ];
 

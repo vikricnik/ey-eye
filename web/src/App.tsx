@@ -51,7 +51,6 @@ import { outageMessage, runBlockedReason, runOutage } from "./providerStatus";
 import { Splitter, usePanelSizes } from "./ui/Splitter";
 import { errorText } from "./format";
 import type { PreviewContext } from "./editor/PromptPreview";
-import { MessagesView } from "./run/MessagesView";
 import { TestsView, resultKey } from "./tests/TestsView";
 import type { TestRunState } from "./tests/TestsView";
 import {
@@ -124,7 +123,8 @@ export function App() {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [saveTick, setSaveTick] = useState(0);
   const [running, setRunning] = useState(false);
-  const [verbose, setVerbose] = useState(false);
+  // Whether each run's trace in Chat starts open (for this session).
+  const [openTraces, setOpenTraces] = useState(false);
   const [formatted, setFormatted] = useState(true);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [fitSignal, setFitSignal] = useState(0);
@@ -1268,8 +1268,8 @@ export function App() {
               saveFirst={doc?.dirty ?? false}
               disabledReason={runDisabled}
               onSubmit={(prompt) => {
-                // Show the answer coming in — unless the trace is what's being watched.
-                if (panelTab !== "trace") setPanelTab("chat");
+                // Show the answer coming in (and its trace).
+                setPanelTab("chat");
                 void run(prompt);
               }}
               onStop={() => stopRun.current?.abort()}
@@ -1281,8 +1281,12 @@ export function App() {
               turns={turns}
               running={running}
               pendingAnswer={pendingAnswer}
-              verbose={verbose}
-              onVerbose={setVerbose}
+              openTraces={openTraces}
+              onOpenTraces={setOpenTraces}
+              outputNodeIds={outputIds}
+              onSelectNode={(nodeId) => setSelection({ kind: "node", id: nodeId })}
+              rerunnable={rerunnable}
+              onRerun={(id) => void run("", id)}
               formatted={formatted}
               onFormatted={setFormatted}
               conversations={conversations}
@@ -1293,14 +1297,6 @@ export function App() {
               onRetry={retry}
               retryDisabledReason={runDisabled}
               onEditMessage={(prompt) => composer.current?.fill(prompt)}
-            />
-          ) : panelTab === "trace" ? (
-            <MessagesView
-              turns={turns}
-              outputNodeIds={outputIds}
-              onSelectNode={(nodeId) => setSelection({ kind: "node", id: nodeId })}
-              rerunnable={rerunnable}
-              onRerun={(id) => void run("", id)}
             />
           ) : panelTab === "add" ? (
             <Sidebar

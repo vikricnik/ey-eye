@@ -34,12 +34,13 @@ web/
     │   ├── conversion.ts       # pipeline definition -> React Flow nodes/edges
     │   └── editorState.ts      # the edited document and validation state
     ├── run/
-    │   ├── Chat.tsx            # the Chat tab (conversation picker, transcript) and the message box
+    │   ├── Chat.tsx            # the Chat tab (conversation picker, transcript with traces) and the message box
     │   ├── Markdown.tsx        # an answer formatted from its Markdown, sanitized
     │   ├── markdownToHtml.ts   # the formatting rules: no raw HTML, no images, safe links only
     │   ├── RunErrorView.tsx    # a failed run: what happened, what to do, the raw error
     │   ├── runFailure.ts       # plain-language explanations of run failures
-    │   ├── MessagesView.tsx    # the Trace tab: what every node received and replied, per run
+    │   ├── RunTrace.tsx        # a run's trace in Chat: what every node received and replied
+    │   ├── stickToBottom.ts    # follow new text only while scrolled to the end
     │   ├── MessageEntry.tsx
     │   └── runHistory.ts       # conversations kept in this browser (IndexedDB)
     ├── tests/TestsView.tsx     # test cases, test runs and model comparison
@@ -291,11 +292,12 @@ it everything below is read-only and a banner says so):
 - **Live text**: a running node's card shows the newest words its model is
   writing, and the output node's answer types itself into the transcript as
   it's generated.
-- **Trace** tab: a log of every run in the conversation — each node in
-  the order it started, with the **system prompt and prompt it actually
+- **Trace** (under each message in Chat — "Trace · 3 nodes"): each node
+  in the order it started, with the **system prompt and prompt it actually
   received** (its dependencies' outputs filled in) and the **reply** it
   produced, streaming live. Loop passes appear as separate entries
-  ("iteration 2", …). Click a node's name to open its Settings.
+  ("iteration 2", …). Click a node's name to open its settings. **open
+  traces** (in Chat) starts every run's trace open.
 - In a node's settings, its own **Trace** section (the first one) shows
   just that node's received messages and replies, newest run first —
   folded, it says when the node last ran ("run 3 · 1.8s", "live"). It
@@ -334,8 +336,6 @@ it everything below is read-only and a banner says so):
   send its URL — and anything an injected prompt put in it — to another
   server), links go only to web and mail addresses, and the result is
   sanitized again with DOMPurify. The Trace always shows raw text.
-- **"show every node's output"** (in Chat) lists every node's output in the
-  transcript.
 
 **Tests** (a tab in the panel): the pipeline's test cases — a message
 each, and what the answer must satisfy: contains / doesn't contain
@@ -413,8 +413,8 @@ One name per idea, used the same way on every screen:
   the variables filled in, after its **system prompt**.
 - **output** — a node's reply. An **output node** is one whose output can
   be the **answer**: the output of the first output node that ran.
-- **trace** — every node's prompt and output in a run, in order: the
-  **Trace** tab, and a node's own Trace in its settings.
+- **trace** — every node's prompt and output in a run, in order: under
+  each message in Chat, and a node's own Trace in its settings.
 - **preset** — a saved node configuration you can add to any pipeline.
 - **test case** — a message, and what its answer must satisfy.
 
