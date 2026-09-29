@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { NodePreset } from "@llm-pipeline/client";
 import { NODE_DRAG_TYPE } from "./PipelineCanvas";
 
@@ -28,13 +28,15 @@ function summary(p: NodePreset): string {
 /** Things to put on the canvas: a blank LLM node, or a node from a
  * preset. Drag onto the canvas, or click to add (below the selected node,
  * connected to it). */
-export function Sidebar(props: {
+function Palette(props: {
   editable: boolean;
   presets: NodePreset[];
   onAdd: (presetName: string | undefined) => void;
+  /** An item was dropped on the canvas — not a drag that was cancelled. */
+  onDropped: () => void;
   onDeletePreset: (name: string) => void;
 }) {
-  const { editable, presets, onAdd, onDeletePreset } = props;
+  const { editable, presets, onAdd, onDropped, onDeletePreset } = props;
   const [filter, setFilter] = useState("");
   const query = filter.trim().toLowerCase();
   const shown = query
@@ -61,6 +63,10 @@ export function Sidebar(props: {
         e.dataTransfer.setData(NODE_DRAG_TYPE, preset?.name ?? "");
         e.dataTransfer.effectAllowed = "copy";
       }}
+      onDragEnd={(e) => {
+        // "none" when the drag was cancelled (Esc, or dropped off the canvas).
+        if (e.dataTransfer.dropEffect !== "none") onDropped();
+      }}
       onClick={() => onAdd(preset?.name)}
     >
       <span className="palette-label">{label}</span>
@@ -78,8 +84,7 @@ export function Sidebar(props: {
   );
 
   return (
-    <nav className="sidebar" aria-label="Node palette">
-      <h3>Add</h3>
+    <nav className="palette" aria-label="Node palette">
       {item("LLM node", "a model call with a prompt", undefined)}
       <h3>Presets</h3>
       {presets.length === 0 ? (
@@ -129,5 +134,77 @@ export function Sidebar(props: {
         </>
       )}
     </nav>
+  );
+}
+
+/**
+ * "+ Add node" in the canvas corner: a popover with a blank LLM node and
+ * the saved presets. Click one to add it below the selected node (connected
+ * to it), or drag it onto the canvas. It closes once a node is added, on
+ * Escape, or on a click elsewhere — and stays open during a drag, since
+ * removing what's being dragged can cancel the drop.
+ */
+export function AddNodeMenu(props: {
+  editable: boolean;
+  presets: NodePreset[];
+  onAdd: (presetName: string | undefined) => void;
+  onDeletePreset: (name: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapper = useRef<HTMLDivElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  const id = useId();
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as Element;
+      // Confirming a preset's removal (a dialog) is still using the menu.
+      if (!wrapper.current?.contains(target) && !target.closest?.("dialog")) setOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [open]);
+
+  return (
+    <div
+      className="add-node-menu"
+      ref={wrapper}
+      onKeyDown={(e) => {
+        if (e.key === "Escape" && open) {
+          e.stopPropagation(); // not also "stop the run" (App's Esc)
+          setOpen(false);
+          button.current?.focus();
+        }
+      }}
+    >
+      <button
+        ref={button}
+        type="button"
+        className="ghost"
+        aria-expanded={open}
+        aria-controls={`${id}-palette`}
+        disabled={!props.editable}
+        title={props.editable ? "Add a node: blank, or from a preset" : "Add node — editing is disabled on this server"}
+        onClick={() => setOpen((o) => !o)}
+      >
+        + Add node
+      </button>
+      {open && (
+        // nowheel/nopan: scrolling or dragging in here doesn't move the canvas.
+        <div className="add-node-popover nowheel nopan" id={`${id}-palette`}>
+          <Palette
+            editable={props.editable}
+            presets={props.presets}
+            onAdd={(presetName) => {
+              props.onAdd(presetName);
+              setOpen(false);
+            }}
+            onDropped={() => setOpen(false)}
+            onDeletePreset={props.onDeletePreset}
+          />
+        </div>
+      )}
+    </div>
   );
 }

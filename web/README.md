@@ -30,7 +30,7 @@ web/
     │   ├── traceSummary.ts     # the folded Trace section's one-line summary
     │   ├── fields.tsx          # model picker, Ollama options, inputs
     │   ├── PromptPreview.tsx   # what a node would receive, rendered by the server
-    │   ├── Sidebar.tsx         # the Add tab: blank node, presets
+    │   ├── AddNodeMenu.tsx     # "+ Add node" in the canvas corner: blank node, presets
     │   ├── conversion.ts       # pipeline definition -> React Flow nodes/edges
     │   └── editorState.ts      # the edited document and validation state
     ├── run/
@@ -213,10 +213,10 @@ it everything below is read-only and a banner says so):
   undoes that delete.
 - Names, confirmations and deletes use in-app dialogs with inline
   validation (no browser popups).
-- **Add nodes** by dragging "LLM node" (or a preset)
-  from the **Add** tab onto the canvas, or by clicking it — with a node
-  selected, the new node is added *after* it (below it; further clicks place
-  siblings side by side).
+- **Add nodes** with **+ Add node** in the canvas corner: drag "LLM node"
+  (or a preset) onto the canvas, or click it — with a node selected, the
+  new node is added *after* it (below it; further clicks place siblings
+  side by side).
 - **Duplicate a node** with **Duplicate** in its settings or ⌘D / Ctrl+D:
   the copy has the same settings and inputs and sits beside the original.
 - **Draw edges** by dragging from a node's bottom dot to another node's
@@ -244,7 +244,7 @@ it everything below is read-only and a banner says so):
   system prompt, prompt template, history and reasoning settings (a model or
   system prompt it inherits from the pipeline defaults is written out) —
   under a name and optional description. Presets are listed in the
-  **Add** tab (hover for the details, filter when there are many): drag or
+  **+ Add node** menu (hover for the details, filter when there are many): drag or
   click one to add it to any pipeline, pick one under **Start with** when
   creating a pipeline, or give an existing node its configuration from the
   node's **Presets** section. It's always a copy — changing a preset

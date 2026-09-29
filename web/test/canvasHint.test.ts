@@ -5,7 +5,7 @@ import { canvasHint } from "../src/editor/canvasHint";
 
 describe("canvasHint", () => {
   it("suggests adding nodes to a pipeline of one", () => {
-    assert.match(canvasHint({ nodes: 1, edges: 0, editable: true }) ?? "", /Add tab/);
+    assert.match(canvasHint({ nodes: 1, edges: 0, editable: true }) ?? "", /\+ Add node/);
   });
 
   it("explains connecting nodes while none are connected", () => {

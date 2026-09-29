@@ -36,7 +36,7 @@ import type {
 import { BASE_URL, client } from "./config";
 import { Inspector } from "./editor/Inspector";
 import { PipelineCanvas } from "./editor/PipelineCanvas";
-import { Sidebar } from "./editor/Sidebar";
+import { AddNodeMenu } from "./editor/AddNodeMenu";
 import { LEVEL_SPACING, SIBLING_SPACING, autoLayout, definitionToFlow, dependencyEdgeId, graphOf } from "./editor/conversion";
 import { applyCanvasDeletion, deletionSummary } from "./editor/canvasDeletion";
 import { docReducer } from "./editor/editorState";
@@ -191,7 +191,7 @@ export function App() {
     try {
       setPresets((await client.listPresets()).presets);
     } catch {
-      /* optional feature — the sidebar just shows none */
+      /* optional feature — + Add node just lists none */
     }
   }, []);
 
@@ -470,7 +470,7 @@ export function App() {
       body: (
         <>
           Saves its model, options, prompts and history and reasoning settings, so you can add it to any pipeline
-          from the sidebar.
+          with + Add node on the canvas.
         </>
       ),
       confirmLabel: "Save",
@@ -486,7 +486,7 @@ export function App() {
           name: "description",
           label: "Description",
           optional: true,
-          placeholder: "what it's for — shown in the sidebar",
+          placeholder: "what it's for — shown under + Add node",
           initial: presets.find((p) => p.name === id)?.description ?? "",
         },
       ],
@@ -597,7 +597,7 @@ export function App() {
                   { value: "", label: "a blank LLM node" },
                   ...presets.map((p) => ({ value: p.name, label: `${p.name} — ${p.model.name} (preset)` })),
                 ],
-                hint: "add more from the presets in the sidebar",
+                hint: "add more with + Add node on the canvas",
               },
             ]
           : []),
@@ -1216,6 +1216,14 @@ export function App() {
               selectedNodeId={selection?.kind === "node" ? selection.id : null}
               selectedEdgeId={selection?.kind === "edge" ? dependencyEdgeId(selection.from, selection.to) : null}
               fitSignal={fitSignal}
+              topLeft={
+                <AddNodeMenu
+                  editable={editable}
+                  presets={presets}
+                  onAdd={(preset) => addNodeAt(undefined, preset)}
+                  onDeletePreset={(name) => void deletePreset(name)}
+                />
+              }
               onConnect={(from, to) => edit((d) => connect(d, from, to))}
               onDelete={(deletion) => {
                 edit((d) => applyCanvasDeletion(d, deletion), undefined, deletionSummary(deletion));
@@ -1297,13 +1305,6 @@ export function App() {
               onRetry={retry}
               retryDisabledReason={runDisabled}
               onEditMessage={(prompt) => composer.current?.fill(prompt)}
-            />
-          ) : panelTab === "add" ? (
-            <Sidebar
-              editable={editable && Boolean(doc)}
-              presets={presets}
-              onAdd={(preset) => addNodeAt(undefined, preset)}
-              onDeletePreset={(name) => void deletePreset(name)}
             />
           ) : !doc ? (
             <div className="empty-state">{loadError ?? "loading…"}</div>

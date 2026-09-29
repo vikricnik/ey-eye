@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { DragEvent, RefObject } from "react";
+import type { DragEvent, ReactNode, RefObject } from "react";
 import {
   Background,
   ControlButton,
@@ -25,8 +25,8 @@ import { AutoLayoutIcon } from "../ui/icons";
 import { CanvasLegend } from "./CanvasLegend";
 import { canvasHint } from "./canvasHint";
 
-/** Drag-and-drop payload type set by the sidebar palette. The value is a
- * preset name, or "" for a plain node. */
+/** Drag-and-drop payload type set by the + Add node palette
+ * (AddNodeMenu.tsx). The value is a preset name, or "" for a plain node. */
 export const NODE_DRAG_TYPE = "application/x-llm-pipeline-node";
 
 const nodeTypes: NodeTypes = { llm: LlmNode };
@@ -56,6 +56,8 @@ export interface PipelineCanvasProps {
   /** Re-arranges every node by dependency level (a canvas control, beside
    * zoom and fit). */
   onAutoLayout: () => void;
+  /** Shown in the canvas's top-left corner: the + Add node menu. */
+  topLeft?: ReactNode;
 }
 
 const isValidConnection: IsValidConnection = (c) => c.source !== c.target;
@@ -211,6 +213,7 @@ function CanvasInner(props: PipelineCanvasProps) {
           </ControlButton>
         </Controls>
         <MiniMap pannable zoomable nodeStrokeWidth={3} style={{ width: 140, height: 90 }} />
+        {props.topLeft && <Panel position="top-left">{props.topLeft}</Panel>}
         <Panel position="top-right">
           <CanvasLegend />
         </Panel>
