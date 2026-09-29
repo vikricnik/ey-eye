@@ -243,89 +243,103 @@ const NUMERIC_OPTIONS: { key: NumericOption; label: string; hint: string }[] = [
   { key: "num_thread", label: "num_thread", hint: "CPU threads" },
 ];
 
-/** Every Ollama generation option; empty means "the model's default". */
-export function OllamaOptionsForm(props: {
+interface OllamaOptionsProps {
   options: OllamaOptions | undefined;
   onChange: <K extends keyof OllamaOptions>(key: K, value: OllamaOptions[K]) => void;
   /** The model's maximum context length, when known — shown on num_ctx. */
   maxContext?: number | null | undefined;
   disabled?: boolean;
-}) {
-  const o = props.options ?? {};
-  const set = props.onChange;
-  const count = Object.keys(o).length;
+}
 
+/** "3 set", or "model defaults" — what a group of Ollama options holds. */
+export function ollamaOptionsSummary(options: OllamaOptions | undefined): ReactNode {
+  const count = Object.keys(options ?? {}).length;
+  return count > 0 ? <span className="count">{count} set</span> : <span className="dim">model defaults</span>;
+}
+
+/** Every Ollama generation option; empty means "the model's default". A
+ * folding group of its own for the pipeline's defaults. */
+export function OllamaOptionsForm(props: OllamaOptionsProps) {
+  const count = Object.keys(props.options ?? {}).length;
   return (
     <details className="options" open={count > 0}>
-      <summary>
-        Ollama options {count > 0 ? <span className="count">{count} set</span> : <span className="dim">model defaults</span>}
-      </summary>
-      <div className="field-stack">
-        {NUMERIC_OPTIONS.map((opt) => (
-          <Field
-            key={opt.key}
-            label={opt.label}
-            hint={
-              opt.key === "num_ctx" && props.maxContext
-                ? `${opt.hint} (model max ${props.maxContext.toLocaleString("en-US")})`
-                : opt.hint
-            }
-          >
-            <NumberField
-              value={o[opt.key]}
-              disabled={props.disabled}
-              ariaLabel={opt.label}
-              onChange={(v) => set(opt.key, v)}
-            />
-          </Field>
-        ))}
-        <Field label="mirostat" hint="0 off · 1 · 2 (Mirostat 2.0)">
-          <select
-            value={o.mirostat === undefined ? "" : String(o.mirostat)}
-            disabled={props.disabled}
-            onChange={(e) => set("mirostat", e.target.value === "" ? undefined : (Number(e.target.value) as 0 | 1 | 2))}
-          >
-            <option value="">default</option>
-            <option value="0">0 — off</option>
-            <option value="1">1</option>
-            <option value="2">2</option>
-          </select>
-        </Field>
-        <Field label="format" hint="json forces valid JSON output">
-          <select
-            value={o.format ?? ""}
-            disabled={props.disabled}
-            onChange={(e) => set("format", e.target.value === "" ? undefined : (e.target.value as "json"))}
-          >
-            <option value="">text</option>
-            <option value="json">json</option>
-          </select>
-        </Field>
-        <Field label="keep_alive" hint='keep loaded: "5m", "1h", 0 = unload'>
-          <input
-            type="text"
-            value={o.keep_alive === undefined ? "" : String(o.keep_alive)}
-            placeholder="default"
-            disabled={props.disabled}
-            onChange={(e) => {
-              const v = e.target.value.trim();
-              set("keep_alive", v === "" ? undefined : /^-?\d+$/.test(v) ? Number(v) : v);
-            }}
-          />
-        </Field>
-        <Field label="stop" hint="comma-separated stop sequences">
-          <input
-            type="text"
-            value={(o.stop ?? []).join(",")}
-            placeholder="none"
-            disabled={props.disabled}
-            onChange={(e) => {
-              const parts = e.target.value.split(",").filter((s) => s !== "");
-              set("stop", parts.length ? parts : undefined);
-            }}
-          />
-        </Field>
-      </div>
+      <summary>Ollama options {ollamaOptionsSummary(props.options)}</summary>
+      <OllamaOptionFields {...props} />
     </details>
+  );
+}
+
+/** The fields alone — a node's settings put them in a Section. */
+export function OllamaOptionFields(props: OllamaOptionsProps) {
+  const o = props.options ?? {};
+  const set = props.onChange;
+
+  return (
+    <div className="field-stack">
+      {NUMERIC_OPTIONS.map((opt) => (
+        <Field
+          key={opt.key}
+          label={opt.label}
+          hint={
+            opt.key === "num_ctx" && props.maxContext
+              ? `${opt.hint} (model max ${props.maxContext.toLocaleString("en-US")})`
+              : opt.hint
+          }
+        >
+          <NumberField
+            value={o[opt.key]}
+            disabled={props.disabled}
+            ariaLabel={opt.label}
+            onChange={(v) => set(opt.key, v)}
+          />
+        </Field>
+      ))}
+      <Field label="mirostat" hint="0 off · 1 · 2 (Mirostat 2.0)">
+        <select
+          value={o.mirostat === undefined ? "" : String(o.mirostat)}
+          disabled={props.disabled}
+          onChange={(e) => set("mirostat", e.target.value === "" ? undefined : (Number(e.target.value) as 0 | 1 | 2))}
+        >
+          <option value="">default</option>
+          <option value="0">0 — off</option>
+          <option value="1">1</option>
+          <option value="2">2</option>
+        </select>
+      </Field>
+      <Field label="format" hint="json forces valid JSON output">
+        <select
+          value={o.format ?? ""}
+          disabled={props.disabled}
+          onChange={(e) => set("format", e.target.value === "" ? undefined : (e.target.value as "json"))}
+        >
+          <option value="">text</option>
+          <option value="json">json</option>
+        </select>
+      </Field>
+      <Field label="keep_alive" hint='keep loaded: "5m", "1h", 0 = unload'>
+        <input
+          type="text"
+          value={o.keep_alive === undefined ? "" : String(o.keep_alive)}
+          placeholder="default"
+          disabled={props.disabled}
+          onChange={(e) => {
+            const v = e.target.value.trim();
+            set("keep_alive", v === "" ? undefined : /^-?\d+$/.test(v) ? Number(v) : v);
+          }}
+        />
+      </Field>
+      <Field label="stop" hint="comma-separated stop sequences">
+        <input
+          type="text"
+          value={(o.stop ?? []).join(",")}
+          placeholder="none"
+          disabled={props.disabled}
+          onChange={(e) => {
+            const parts = e.target.value.split(",").filter((s) => s !== "");
+            set("stop", parts.length ? parts : undefined);
+          }}
+        />
+      </Field>
+    </div>
   );
 }

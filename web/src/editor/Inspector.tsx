@@ -1,5 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useId, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import {
+  DraftError,
   applyPreset,
   disconnect,
   effectiveModel,
@@ -35,7 +37,19 @@ import type {
   PipelineSections,
 } from "@llm-pipeline/client";
 import type { EditorDoc, Selection, ValidationState } from "./editorState";
-import { CommitInput, Field, ModelPicker, NumberField, OllamaOptionsForm, useModelLimits } from "./fields";
+import {
+  CommitInput,
+  Field,
+  ModelPicker,
+  NumberField,
+  OllamaOptionFields,
+  OllamaOptionsForm,
+  ollamaOptionsSummary,
+  useModelLimits,
+} from "./fields";
+import { Section } from "./Section";
+import { useDialogs } from "../ui/Dialogs";
+import { MenuButton } from "../ui/Menu";
 import { PromptPreview } from "./PromptPreview";
 import { parseList } from "../format";
 import type { PreviewContext } from "./PromptPreview";
@@ -121,17 +135,28 @@ function Breadcrumb({ pipeline, kind, onPipeline }: { pipeline: string; kind: st
   );
 }
 
+/** A variable a prompt template can use, and what it holds — its insert
+ * button's tooltip, and a line of the template syntax. */
+interface TemplateVariable {
+  text: string;
+  meaning: string;
+}
+
 function PromptEditor(props: {
   label: string;
-  hint: string;
+  hint?: string;
   value: string;
-  refs: string[];
+  /** Insert buttons above the text box; none for a plain-text prompt. */
+  variables: TemplateVariable[];
   disabled: boolean;
   rows: number;
   onChange: (value: string) => void;
   placeholder?: string;
+  /** Shown under the hint (the template syntax). */
+  children?: ReactNode;
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
+  const boxId = useId();
 
   const insert = (text: string) => {
     const el = ref.current;
@@ -145,18 +170,25 @@ function PromptEditor(props: {
     });
   };
 
+  // Not a <label> around it all (see Field): a label passes clicks to its
+  // first control — here an insert button, so clicking the label's text
+  // would insert a variable into the prompt.
   return (
-    <Field label={props.label} hint={props.hint}>
-      {props.refs.length > 0 && !props.disabled && (
+    <div className="field">
+      <label className="field-label" htmlFor={boxId}>
+        {props.label}
+      </label>
+      {props.variables.length > 0 && !props.disabled && (
         <div className="chips">
-          {props.refs.map((r) => (
-            <button type="button" key={r} className="chip" onClick={() => insert(r)}>
-              {r}
+          {props.variables.map((v) => (
+            <button type="button" key={v.text} className="chip" title={`${v.meaning} — click to insert`} onClick={() => insert(v.text)}>
+              {v.text}
             </button>
           ))}
         </div>
       )}
       <textarea
+        id={boxId}
         ref={ref}
         className="prompt"
         rows={props.rows}
@@ -166,12 +198,49 @@ function PromptEditor(props: {
         spellCheck={false}
         onChange={(e) => props.onChange(e.target.value)}
       />
-    </Field>
+      {props.hint && <span className="field-hint">{props.hint}</span>}
+      {props.children}
+    </div>
   );
+}
+
+/** The whole template syntax, one line per variable — opened on demand
+ * instead of a paragraph under the text box. */
+function TemplateSyntax({ variables }: { variables: TemplateVariable[] }) {
+  return (
+    <details className="syntax">
+      <summary>Template syntax</summary>
+      <dl>
+        {variables.map((v) => (
+          <Fragment key={v.text}>
+            <dt>
+              <code>{v.text}</code>
+            </dt>
+            <dd>{v.meaning}</dd>
+          </Fragment>
+        ))}
+        <dt>
+          <code>{"{{ node.output }}"}</code>
+        </dt>
+        <dd>a node&apos;s reply — that node must be one this one depends on, or loop back to it</dd>
+        <dt>
+          <code>{"{{ question }}"}</code> <code>{"{{ input }}"}</code>
+        </dt>
+        <dd>older names for message and conversation</dd>
+      </dl>
+    </details>
+  );
+}
+
+/** One line of a template, for a folded section's summary. */
+function excerpt(text: string, max = 40): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 }
 
 function NodeInspector(props: InspectorProps & { node: NodeConfig; tab: NodeTab; onTab: (tab: NodeTab) => void }) {
   const { node, doc, editable, onEdit, onSelect, presets, validation, tab, onTab } = props;
+  const dialogs = useDialogs();
   const def = doc.definition;
   const id = node.id;
   /** One of the node's settings; `coalesce` folds a burst of edits (typing,
@@ -189,11 +258,20 @@ function NodeInspector(props: InspectorProps & { node: NodeConfig; tab: NodeTab;
   const branch = (def.branches ?? []).find((b) => b.from === id);
   const loop = (def.loops ?? []).find((l) => l.from === id);
   const loopBackSources = (def.loops ?? []).filter((l) => l.back_to === id).map((l) => l.from);
-  const refs = [
-    "{{ message }}",
-    "{{ conversation }}",
-    "{{ history }}",
-    ...[...deps, ...loopBackSources].map((d) => `{{ ${d}.output }}`),
+  const variables: TemplateVariable[] = [
+    { text: "{{ message }}", meaning: "the new message" },
+    {
+      text: "{{ conversation }}",
+      meaning:
+        node.include_history === false
+          ? "just the new message (this node doesn't see the history)"
+          : "earlier turns, then the new message",
+    },
+    { text: "{{ history }}", meaning: "earlier turns only" },
+    ...[...new Set([...deps, ...loopBackSources])].map((d) => ({
+      text: `{{ ${d}.output }}`,
+      meaning: deps.includes(d) ? `what ${d} replied` : `what ${d} replied on the loop's last pass`,
+    })),
   ];
   const defaults = def.defaults ?? {};
   const effective = effectiveModel(def, node);
@@ -206,6 +284,36 @@ function NodeInspector(props: InspectorProps & { node: NodeConfig; tab: NodeTab;
             .map((i) => i.message)
             .join("\n") || undefined
         : undefined;
+
+  /** Renaming updates every reference; the dialog checks the new id as
+   * it's typed, by trying the rename. */
+  const rename = async () => {
+    const next = await dialogs.prompt({
+      title: `Rename "${id}"`,
+      label: "New id — every reference to it is updated",
+      initial: id,
+      confirmLabel: "Rename",
+      validate: (value) => {
+        try {
+          renameNode(def, id, value);
+          return null;
+        } catch (err) {
+          if (err instanceof DraftError) return err.message;
+          throw err;
+        }
+      },
+    });
+    if (!next || next === id) return;
+    onEdit((d) => renameNode(d, id, next));
+    onSelect({ kind: "node", id: next });
+  };
+
+  const inputOutput = [
+    isOutput ? "output node" : null,
+    node.include_history === false ? "no history" : null,
+    node.strip_reasoning === true ? "strips reasoning" : node.strip_reasoning === false ? "keeps reasoning" : null,
+    node.labels?.length ? `labels: ${node.labels.join(", ")}` : null,
+  ].filter(Boolean);
 
   return (
     <div className="inspector-body">
@@ -238,6 +346,27 @@ function NodeInspector(props: InspectorProps & { node: NodeConfig; tab: NodeTab;
                 Save as preset
               </button>
             )}
+            {editable && (
+              <MenuButton
+                label="⋯"
+                ariaLabel="More node actions"
+                caret={false}
+                align="end"
+                items={[
+                  { label: "Rename…", onSelect: () => void rename(), detail: "updates every reference to it" },
+                  {
+                    label: "Delete node",
+                    onSelect: () => {
+                      onEdit((d) => removeNode(d, id));
+                      onSelect(null);
+                    },
+                    detail: "undo with ⌘Z / Ctrl+Z",
+                    separated: true,
+                    danger: true,
+                  },
+                ]}
+              />
+            )}
           </div>
         )}
       </header>
@@ -255,249 +384,231 @@ function NodeInspector(props: InspectorProps & { node: NodeConfig; tab: NodeTab;
       {tab === "messages" ? (
         <NodeMessages nodeId={id} turns={props.turns} isOutput={isOutput} />
       ) : (
-      <>
-      <section>
-        <Field label="Id" hint="renaming updates every reference to it">
-          <CommitInput
-            value={id}
-            disabled={!editable}
-            ariaLabel="Node id"
-            onCommit={(next) => {
-              if (!next) return;
-              onEdit((d) => renameNode(d, id, next));
-              onSelect({ kind: "node", id: next });
-            }}
-          />
-        </Field>
-        <Field label="Model">
-          <ModelPicker
-            model={node.model}
-            models={props.models}
-            limits={limits}
-            {...(defaults.model ? { emptyOption: `pipeline default (${modelIdentity(defaults.model)})` } : {})}
-            disabled={!editable}
-            onRefresh={props.onRefreshModels}
-            onChange={(identity) =>
-              onEdit((d) => setNodeModel(d, id, identity ? modelWithIdentity(findNode(d, id).model, identity) : undefined))
-            }
-          />
-        </Field>
-        {node.model ? (
-          <Field
-            label={`Temperature · ${effective?.temperature ?? 0.2}${node.model.temperature === undefined ? " (inherited)" : ""}`}
-            hint="0 = deterministic, higher = more varied"
+        <>
+          <Section
+            id="model"
+            title="Model"
+            defaultOpen
+            summary={`${node.model ? modelIdentity(node.model) : "pipeline default"} · T ${effective?.temperature ?? 0.2}`}
           >
-            <div className="row">
+            <ModelPicker
+              model={node.model}
+              models={props.models}
+              limits={limits}
+              {...(defaults.model ? { emptyOption: `pipeline default (${modelIdentity(defaults.model)})` } : {})}
+              disabled={!editable}
+              onRefresh={props.onRefreshModels}
+              onChange={(identity) =>
+                onEdit((d) => setNodeModel(d, id, identity ? modelWithIdentity(findNode(d, id).model, identity) : undefined))
+              }
+            />
+            {node.model ? (
+              <Field
+                label={`Temperature · ${effective?.temperature ?? 0.2}${node.model.temperature === undefined ? " (inherited)" : ""}`}
+                hint="0 = deterministic, higher = more varied"
+              >
+                <div className="row">
+                  <input
+                    type="range"
+                    min={0}
+                    max={2}
+                    step={0.05}
+                    value={effective?.temperature ?? 0.2}
+                    disabled={!editable}
+                    aria-label="Temperature"
+                    onChange={(e) => {
+                      const temperature = Number(e.target.value);
+                      tuneModel((m) => withTemperature(m, temperature), "temperature");
+                    }}
+                  />
+                  <NumberField
+                    value={node.model.temperature}
+                    placeholder={`${effective?.temperature ?? 0.2}`}
+                    disabled={!editable}
+                    ariaLabel="Temperature value"
+                    onChange={(v) => tuneModel((m) => withTemperature(m, v), "temperature")}
+                  />
+                </div>
+              </Field>
+            ) : (
+              <p className="dim">
+                Runs with the pipeline default model — temperature {effective?.temperature ?? 0.2}
+                {Object.keys(effective?.options ?? {}).length > 0 ? " and its Ollama options" : ""}. Pick a model above
+                to customize this node.
+              </p>
+            )}
+          </Section>
+
+          <Section id="prompts" title="Prompts" defaultOpen summary={excerpt(node.prompt_template)}>
+            <PromptEditor
+              label="System prompt"
+              hint="sent as the model's system message; plain text"
+              value={node.system_prompt ?? ""}
+              {...(defaults.system_prompt ? { placeholder: `pipeline default: ${defaults.system_prompt}` } : {})}
+              variables={[]}
+              rows={3}
+              disabled={!editable}
+              onChange={(v) => set("system_prompt", v === "" ? undefined : v)}
+            />
+            <PromptEditor
+              label="Prompt template"
+              {...(editable ? { hint: "Click a variable to insert it — hover for what it holds." } : {})}
+              value={node.prompt_template}
+              variables={variables}
+              rows={7}
+              disabled={!editable}
+              onChange={(v) => set("prompt_template", v)}
+            >
+              <TemplateSyntax variables={variables} />
+            </PromptEditor>
+            {editable && <PromptPreview definition={def} nodeId={id} context={props.previewContext} />}
+          </Section>
+
+          <Section id="io" title="Input & output" defaultOpen={false} summary={inputOutput.join(" · ") || "defaults"}>
+            <label className="check">
               <input
-                type="range"
-                min={0}
-                max={2}
-                step={0.05}
-                value={effective?.temperature ?? 0.2}
-                disabled={!editable}
-                aria-label="Temperature"
+                type="checkbox"
+                checked={isOutput}
+                disabled={!editable || (isOutput && def.output_nodes.length === 1)}
                 onChange={(e) => {
-                  const temperature = Number(e.target.value);
-                  tuneModel((m) => withTemperature(m, temperature), "temperature");
+                  const current = def.output_nodes;
+                  onEdit((d) => setOutput(d, e.target.checked ? [...current, id] : current.filter((o) => o !== id)));
                 }}
               />
-              <NumberField
-                value={node.model.temperature}
-                placeholder={`${effective?.temperature ?? 0.2}`}
+              output node — its answer is the pipeline&apos;s answer
+            </label>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={node.include_history ?? true}
                 disabled={!editable}
-                ariaLabel="Temperature value"
-                onChange={(v) => tuneModel((m) => withTemperature(m, v), "temperature")}
+                onChange={(e) => set("include_history", e.target.checked ? undefined : false, false)}
               />
-            </div>
-          </Field>
-        ) : (
-          <p className="dim">
-            Runs with the pipeline default model — temperature {effective?.temperature ?? 0.2}
-            {Object.keys(effective?.options ?? {}).length > 0 ? " and its Ollama options" : ""}. Pick a model above
-            to customize this node.
-          </p>
-        )}
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={node.include_history ?? true}
-            disabled={!editable}
-            onChange={(e) => set("include_history", e.target.checked ? undefined : false, false)}
-          />
-          sees the conversation history — off: {"{{ conversation }}"} is just the new message
-        </label>
-        <Field label="Strip <think> reasoning">
-          <select
-            value={node.strip_reasoning === undefined ? "" : node.strip_reasoning ? "on" : "off"}
-            disabled={!editable}
-            onChange={(e) =>
-              set("strip_reasoning", e.target.value === "" ? undefined : e.target.value === "on", false)
-            }
-          >
-            <option value="">pipeline default ({defaults.strip_reasoning ? "on" : "off"})</option>
-            <option value="on">on — remove reasoning from this node&apos;s output</option>
-            <option value="off">off — keep it</option>
-          </select>
-        </Field>
-        <Field label="Classifier labels" hint="comma-separated — the output becomes exactly one of them, for branches to route on">
-          <CommitInput
-            value={(node.labels ?? []).join(", ")}
-            disabled={!editable}
-            ariaLabel="Classifier labels"
-            onCommit={(v) => set("labels", parseList(v), false)}
-          />
-        </Field>
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={isOutput}
-            disabled={!editable || (isOutput && def.output_nodes.length === 1)}
-            onChange={(e) => {
-              const current = def.output_nodes;
-              onEdit((d) => setOutput(d, e.target.checked ? [...current, id] : current.filter((o) => o !== id)));
-            }}
-          />
-          output node — its answer is the pipeline&apos;s answer
-        </label>
-      </section>
+              sees the conversation history — off: {"{{ conversation }}"} is just the new message
+            </label>
+            <Field label="Strip <think> reasoning">
+              <select
+                value={node.strip_reasoning === undefined ? "" : node.strip_reasoning ? "on" : "off"}
+                disabled={!editable}
+                onChange={(e) =>
+                  set("strip_reasoning", e.target.value === "" ? undefined : e.target.value === "on", false)
+                }
+              >
+                <option value="">pipeline default ({defaults.strip_reasoning ? "on" : "off"})</option>
+                <option value="on">on — remove reasoning from this node&apos;s output</option>
+                <option value="off">off — keep it</option>
+              </select>
+            </Field>
+            <Field label="Classifier labels" hint="comma-separated — the output becomes exactly one of them, for branches to route on">
+              <CommitInput
+                value={(node.labels ?? []).join(", ")}
+                disabled={!editable}
+                ariaLabel="Classifier labels"
+                onCommit={(v) => set("labels", parseList(v), false)}
+              />
+            </Field>
+          </Section>
 
-      <section>
-        <PromptEditor
-          label="System prompt"
-          hint="sent as the model's system message; plain text"
-          value={node.system_prompt ?? ""}
-          {...(defaults.system_prompt ? { placeholder: `pipeline default: ${defaults.system_prompt}` } : {})}
-          refs={[]}
-          rows={3}
-          disabled={!editable}
-          onChange={(v) => set("system_prompt", v === "" ? undefined : v)}
-        />
-        <PromptEditor
-          label="Prompt template"
-          hint="{{ message }}: the new message · {{ conversation }}: earlier turns + the new message · {{ history }}: earlier turns only · {{ node.output }} needs that node as a dependency · {{ question }} and {{ input }} are older names for message and conversation"
-          value={node.prompt_template}
-          refs={refs}
-          rows={7}
-          disabled={!editable}
-          onChange={(v) => set("prompt_template", v)}
-        />
-        {editable && <PromptPreview definition={def} nodeId={id} context={props.previewContext} />}
-      </section>
-
-      {node.model?.provider === "ollama" && (
-        <section>
-          {defaults.model?.provider === "ollama" && Object.keys(defaults.model.options ?? {}).length > 0 && (
-            <p className="dim">Options left empty use the pipeline default&apos;s.</p>
-          )}
-          <OllamaOptionsForm
-            options={node.model.options}
-            maxContext={limits?.context_length}
-            disabled={!editable}
-            onChange={(key, value) => tuneModel((m) => modelWithOption(m, key, value), `options.${key}`)}
-          />
-        </section>
-      )}
-
-      <section>
-        <h3>Depends on</h3>
-        {deps.length === 0 ? (
-          <p className="dim">nothing — starts as soon as the run does. Drag from another node&apos;s bottom handle to this node&apos;s top handle to add one.</p>
-        ) : (
-          <ul className="dep-list">
-            {deps.map((dep) => (
-              <li key={dep}>
-                <button type="button" className="link" onClick={() => onSelect({ kind: "node", id: dep })}>
-                  {dep}
-                </button>
-                {editable && (
-                  <button type="button" className="ghost small" onClick={() => onEdit((d) => disconnect(d, dep, id))}>
-                    remove
-                  </button>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section>
-        <h3>Routing</h3>
-        {branch ? (
-          <BranchForm branch={branch} def={def} editable={editable} onEdit={onEdit} />
-        ) : loop ? (
-          <LoopForm loop={loop} def={def} editable={editable} onEdit={onEdit} />
-        ) : (
-          <>
-            <p className="dim">Plain edges. Add a branch to pick ONE next node by its output, or a loop to repeat an earlier step.</p>
-            {editable && (
-              <div className="row">
-                <button type="button" className="ghost" onClick={() => onEdit((d) => upsertBranch(d, newBranch(d, id)))}>
-                  + branch
-                </button>
-                <button type="button" className="ghost" onClick={() => onEdit((d) => upsertLoop(d, newLoop(d, id)))}>
-                  + loop
-                </button>
-              </div>
-            )}
-          </>
-        )}
-      </section>
-
-      <section>
-        <h3>Presets</h3>
-        <p className="field-hint">
-          A preset keeps a model, its options, prompts and history and reasoning settings. Add one from the sidebar,
-          or give this node its configuration (the node&apos;s id and connections stay).
-        </p>
-        {editable && presets.length > 0 && (
-          <div className="row">
-            <select value={presetChoice} onChange={(e) => setPresetChoice(e.target.value)} aria-label="Preset">
-              <option value="">use a preset&apos;s configuration…</option>
-              {presets.map((p) => (
-                <option key={p.name} value={p.name}>
-                  {p.name} — {p.model.provider}:{p.model.name}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              disabled={!presetChoice}
-              onClick={() => {
-                const preset = presets.find((p) => p.name === presetChoice);
-                if (preset) onEdit((d) => applyPreset(d, id, preset));
-                setPresetChoice("");
-              }}
+          {node.model?.provider === "ollama" && (
+            <Section
+              id="ollama"
+              title="Ollama options"
+              defaultOpen={Object.keys(node.model.options ?? {}).length > 0}
+              summary={ollamaOptionsSummary(node.model.options)}
             >
-              Apply
-            </button>
-          </div>
-        )}
-        {editable && (
-          <button type="button" className="ghost" onClick={() => props.onSaveAsPreset(id)}>
-            Save as preset…
-          </button>
-        )}
-        {!editable && <p className="dim">Editing is disabled on this server.</p>}
-      </section>
+              {defaults.model?.provider === "ollama" && Object.keys(defaults.model.options ?? {}).length > 0 && (
+                <p className="dim">Options left empty use the pipeline default&apos;s.</p>
+              )}
+              <OllamaOptionFields
+                options={node.model.options}
+                maxContext={limits?.context_length}
+                disabled={!editable}
+                onChange={(key, value) => tuneModel((m) => modelWithOption(m, key, value), `options.${key}`)}
+              />
+            </Section>
+          )}
 
-      {editable && (
-        <section className="row">
-          <button type="button" className="ghost" onClick={() => props.onDuplicate(id)}>
-            Duplicate <kbd>⌘D</kbd>
-          </button>
-          <button
-            type="button"
-            className="danger"
-            onClick={() => {
-              onEdit((d) => removeNode(d, id));
-              onSelect(null);
-            }}
+          <Section id="depends" title="Depends on" defaultOpen={false} summary={deps.length ? deps.join(", ") : "nothing — starts first"}>
+            {deps.length === 0 ? (
+              <p className="dim">nothing — starts as soon as the run does. Drag from another node&apos;s bottom handle to this node&apos;s top handle to add one.</p>
+            ) : (
+              <ul className="dep-list">
+                {deps.map((dep) => (
+                  <li key={dep}>
+                    <button type="button" className="link" onClick={() => onSelect({ kind: "node", id: dep })}>
+                      {dep}
+                    </button>
+                    {editable && (
+                      <button type="button" className="ghost small" onClick={() => onEdit((d) => disconnect(d, dep, id))}>
+                        remove
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Section>
+
+          <Section
+            id="routing"
+            title="Routing"
+            defaultOpen={Boolean(branch || loop)}
+            summary={branch ? `branch · ${branch.routes.length} routes` : loop ? `loop back to ${loop.back_to}` : "plain edges"}
           >
-            Delete node
-          </button>
-        </section>
-      )}
-      </>
+            {branch ? (
+              <BranchForm branch={branch} def={def} editable={editable} onEdit={onEdit} />
+            ) : loop ? (
+              <LoopForm loop={loop} def={def} editable={editable} onEdit={onEdit} />
+            ) : (
+              <>
+                <p className="dim">Plain edges. Add a branch to pick ONE next node by its output, or a loop to repeat an earlier step.</p>
+                {editable && (
+                  <div className="row">
+                    <button type="button" className="ghost" onClick={() => onEdit((d) => upsertBranch(d, newBranch(d, id)))}>
+                      + branch
+                    </button>
+                    <button type="button" className="ghost" onClick={() => onEdit((d) => upsertLoop(d, newLoop(d, id)))}>
+                      + loop
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </Section>
+
+          <Section id="presets" title="Presets" defaultOpen={false} summary={presets.length ? `${presets.length} saved` : "none saved"}>
+            {!editable ? (
+              <p className="dim">Editing is disabled on this server.</p>
+            ) : presets.length === 0 ? (
+              <p className="dim">None yet — Save as preset (above) keeps this node&apos;s configuration to reuse anywhere.</p>
+            ) : (
+              <>
+                <p className="field-hint">Give this node a preset&apos;s configuration — its id and connections stay.</p>
+                <div className="row">
+                  <select value={presetChoice} onChange={(e) => setPresetChoice(e.target.value)} aria-label="Preset">
+                    <option value="">choose a preset…</option>
+                    {presets.map((p) => (
+                      <option key={p.name} value={p.name}>
+                        {p.name} — {p.model.provider}:{p.model.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    disabled={!presetChoice}
+                    onClick={() => {
+                      const preset = presets.find((p) => p.name === presetChoice);
+                      if (preset) onEdit((d) => applyPreset(d, id, preset));
+                      setPresetChoice("");
+                    }}
+                  >
+                    Apply
+                  </button>
+                </div>
+              </>
+            )}
+          </Section>
+        </>
       )}
     </div>
   );

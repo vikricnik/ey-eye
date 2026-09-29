@@ -198,13 +198,21 @@ it everything below is read-only and a banner says so):
 - **Draw edges** by dragging from a node's bottom handle to another node's
   top handle (that's `depends_on`). Select an edge or node and press
   Backspace/Delete to remove it.
-- **Configure a node** in **Settings**: id (renaming rewrites every
-  reference), model (picked from what `GET /v1/models` says is installed or
-  allowlisted, with its max context, size and quantization), temperature, system prompt, prompt template (with insert
-  buttons for `{{ message }}`, `{{ conversation }}` and each dependency's `{{ node.output }}`), all
-  Ollama options (`num_ctx`, `num_predict`, `top_p`, `top_k`,
-  `repeat_penalty`, `seed`, `stop`, `mirostat`, `keep_alive`, `format`, …),
-  output-node flag, and its branch or loop.
+- **Configure a node** in **Settings**, in sections that fold — each
+  folded one shows a one-line summary, and which are open is remembered in
+  this browser (the same for every node):
+  **Model** (picked from what `GET /v1/models` says is installed or
+  allowlisted, with its max context, size and quantization; temperature),
+  **Prompts** (system prompt, and the prompt template with insert buttons
+  for `{{ message }}`, `{{ conversation }}`, `{{ history }}` and each
+  dependency's `{{ node.output }}` — hover one for what it holds; **Template
+  syntax** lists them all), **Input & output** (output node, conversation
+  history, reasoning stripping, classifier labels), **Ollama options**
+  (`num_ctx`, `num_predict`, `top_p`, `top_k`, `repeat_penalty`, `seed`,
+  `stop`, `mirostat`, `keep_alive`, `format`, …), **Depends on**,
+  **Routing** (its branch or loop) and **Presets**. The **⋯** menu beside
+  Duplicate and Save as preset has **Rename…** (rewrites every reference,
+  checking the new id as you type) and **Delete node**.
 - **Presets**: **Save as preset** (in a node's settings)
   keeps everything the node runs with — model, temperature, Ollama options,
   system prompt, prompt template, history and reasoning settings (a model or

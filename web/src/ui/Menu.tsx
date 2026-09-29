@@ -39,7 +39,18 @@ export function menuIndexFor(key: string, current: number, count: number): numbe
  * Positioned like the display menu — absolutely, under its button — so it
  * needs no anchor positioning.
  */
-export function MenuButton({ label, items }: { label: string; items: MenuItem[] }) {
+export function MenuButton(props: {
+  label: string;
+  items: MenuItem[];
+  /** For a button whose label is only a symbol, e.g. "⋯". */
+  ariaLabel?: string;
+  /** Show ▾ after the label (the default). */
+  caret?: boolean;
+  /** Which edge of the button the menu lines up with: "end" opens it
+   * leftwards, for a button near the right edge of a panel. */
+  align?: "start" | "end";
+}) {
+  const { label, items, caret = true, align = "start" } = props;
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
   const wrapper = useRef<HTMLDivElement>(null);
@@ -91,6 +102,8 @@ export function MenuButton({ label, items }: { label: string; items: MenuItem[] 
         type="button"
         className="ghost"
         id={`${id}-button`}
+        aria-label={props.ariaLabel}
+        title={props.ariaLabel}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? `${id}-menu` : undefined}
@@ -103,12 +116,14 @@ export function MenuButton({ label, items }: { label: string; items: MenuItem[] 
         }}
       >
         {label}
-        <span className="caret" aria-hidden="true">
-          ▾
-        </span>
+        {caret && (
+          <span className="caret" aria-hidden="true">
+            ▾
+          </span>
+        )}
       </button>
       {open && (
-        <div className="menu" role="menu" id={`${id}-menu`} aria-labelledby={`${id}-button`} onKeyDown={onMenuKeyDown}>
+        <div className={align === "end" ? "menu align-end" : "menu"} role="menu" id={`${id}-menu`} aria-labelledby={`${id}-button`} onKeyDown={onMenuKeyDown}>
           {items.map((item, i) => (
             <Fragment key={item.label}>
               {item.separated && <div role="separator" className="menu-separator" />}

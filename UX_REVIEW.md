@@ -58,7 +58,7 @@ polish.
 | [UX-005](#ux-005-pipeline-settings-are-hard-to-find) | MAJOR | Pipeline settings are hard to find — ✅ fixed |
 | [UX-006](#ux-006-two-run-buttons-with-different-meanings-on-the-tests-tab) | MINOR | Two Run buttons with different meanings on the Tests tab — ✅ fixed |
 | [UX-007](#ux-007-the-toolbar-gives-ten-actions-equal-weight) | MINOR | The toolbar gives ten actions equal weight — ✅ fixed |
-| [UX-008](#ux-008-node-settings-run-three-screens-long-and-repeat-actions) | MINOR | Node settings run three screens long and repeat actions |
+| [UX-008](#ux-008-node-settings-run-three-screens-long-and-repeat-actions) | MINOR | Node settings run three screens long and repeat actions — ✅ fixed |
 | [UX-009](#ux-009-canvas-status-and-roles-are-hard-to-read-and-the-legend-is-on-the-wrong-tab) | MINOR | Canvas status and roles are hard to read, and the legend is on the wrong tab |
 | [UX-010](#ux-010-one-concept-has-several-names-and-one-icon-has-two-meanings) | MINOR | One concept has several names, and one icon has two meanings |
 | [UX-011](#ux-011-some-disabled-controls-give-no-reason) | MINOR | Some disabled controls give no reason |
@@ -459,6 +459,39 @@ polish.
 ### UX-008: Node settings run three screens long and repeat actions
 
 - **Severity**: MINOR
+- **Status**: ✅ Fixed (2026-09-29).
+  - **Foldable sections** ([Section.tsx](web/src/editor/Section.tsx), built
+    on `<details>`): **Model**, **Prompts**, **Input & output**, **Ollama
+    options**, **Depends on**, **Routing** and **Presets**. A folded section
+    shows a one-line summary (e.g. "ollama:llama3 · T 0", "branch · 3
+    routes", "nothing — starts first"). Which are open is remembered in this
+    browser, the same for every node. Model and Prompts start open; Routing
+    starts open when the node has a branch or loop; Ollama options start
+    open when any are set.
+  - **Prompts come right after the model.** Measured at 1024×768: node
+    settings went from **3.57 screens to 2.50** for a branch node and to
+    **1.88** for a plain one. The prompt template moved from 753px down
+    (below the fold) to 483px.
+  - **One copy of each action.** Duplicate and Save as preset are only in
+    the header. A **⋯** menu (reusing the File menu component) holds
+    **Rename…** and **Delete node** ("undo with ⌘Z"). The Id field became
+    Rename…, a dialog that checks the new id as you type ("node 'joke'
+    already exists", the id pattern) by trying the rename on a copy.
+  - **The syntax paragraph is gone.** Each insert button's tooltip says what
+    its variable holds ("earlier turns, then the new message"; "what
+    clasify replied"). A one-line hint and a **Template syntax** disclosure
+    list them all, including the older `question`/`input` names.
+  - **Bug fixed along the way**: the prompt template's `<label>` wrapped its
+    insert buttons, and a label passes clicks to its first control. So
+    clicking the words "PROMPT TEMPLATE" (or the hint) inserted
+    `{{ message }}` into the prompt; confirmed in the app. The prompt editors
+    now use `<label htmlFor>` on the text box.
+  - **Checked in the app**: default open sections, folding remembered across
+    nodes and a reload, the label click, the ⋯ menu inside the panel,
+    Rename… validation and a real rename (the branch followed), and Delete
+    node plus undo. The pipeline defaults' Ollama options now wrap the same
+    fields. No saved pipeline has a default model to show them live, so
+    that one is covered by the type check only.
 - **Principle**: H8 Aesthetic and minimalist design; progressive disclosure; serial position effect
 - **File(s)**:
   - [Inspector.tsx:201-229](web/src/editor/Inspector.tsx#L201-L229)
