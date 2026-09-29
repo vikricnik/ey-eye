@@ -373,7 +373,9 @@ button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-
   font-family: var(--mono);
   /* The canvas is a zoomable drawing laid out in fixed coordinates: its
      text stays this size (cards would outgrow their slots otherwise), and
-     the canvas zoom — which fits to the text size — scales it instead. */
+     the canvas zoom — which fits to the text size — scales it instead.
+     Zoomed out, cards switch to a compact form whose text cancels the
+     zoom (see "Zoomed-out cards" below). */
   font-size: 12px;
 }
 .llm-node .status-pill { font-size: 9px; }
@@ -382,7 +384,21 @@ button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-
 .react-flow__minimap-node { fill: var(--panel-raised); stroke: var(--accent-dim); }
 /* On a narrow canvas the minimap would cover the graph itself. */
 @container (max-width: 520px) { .react-flow__minimap { display: none; } }
-.react-flow__handle { width: 10px; height: 10px; }
+/* --handle-scale is 1, or the compact text scale when zoomed out. Handles
+   grow on hover and as a connection's target, and an invisible ring widens
+   the area that picks them up (only while they're connectable — it
+   inherits the handle's pointer-events). */
+.react-flow__handle {
+  width: calc(10px * var(--handle-scale, 1));
+  height: calc(10px * var(--handle-scale, 1));
+  transition: width 0.1s ease, height 0.1s ease;
+}
+.react-flow__handle::after { content: ""; position: absolute; inset: -6px; border-radius: 50%; }
+.react-flow__handle.connectionindicator:hover,
+.react-flow__handle.connectingto {
+  width: calc(14px * var(--handle-scale, 1));
+  height: calc(14px * var(--handle-scale, 1));
+}
 /* Anchors for loop back-edges only — invisible, not a place to connect. */
 .react-flow__handle.loop-handle { opacity: 0; pointer-events: none; }
 .react-flow__edge.edge-branch path.react-flow__edge-path { stroke: var(--graph-branch); stroke-dasharray: 6 4; }
@@ -393,7 +409,7 @@ button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-
 
 /* ---------- Node card ---------- */
 .llm-node {
-  width: 220px;
+  width: 200px; /* keep in step with SIBLING_SPACING in editor/conversion.ts */
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -484,6 +500,35 @@ button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-
   animation: dot-blink 1s ease-in-out infinite;
 }
 @keyframes dot-blink { 50% { opacity: 0.25; } }
+
+/* ---------- Zoomed-out cards ----------
+   .detail-compact is set on the canvas below COMPACT_BELOW
+   (editor/zoomDetail.ts). A card then keeps only its id, model and a
+   status mark, in text multiplied by --node-text-scale (set from the zoom)
+   so it reads at the display text size on screen. Problems still show as
+   the dashed border; the details are one zoom-in away. */
+.detail-compact { --handle-scale: var(--node-text-scale, 1); }
+.detail-compact .llm-node {
+  font-size: calc(13px * var(--node-text-scale, 1));
+  gap: calc(4px * var(--node-text-scale, 1));
+}
+.detail-compact .llm-node-model { font-size: calc(11px * var(--node-text-scale, 1)); }
+.detail-compact .llm-node-live,
+.detail-compact .llm-node-meta,
+.detail-compact .status-pill.status-not-started { display: none; }
+.detail-compact .llm-node .status-pill { font-size: inherit; padding: 0; background: none; }
+.detail-compact .llm-node .pulse-dot { width: 0.5em; height: 0.5em; }
+/* The status word stays for screen readers; a mark replaces it on screen. */
+.detail-compact .llm-node .status-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.detail-compact .llm-node .status-pill.status-complete::before { content: "✓"; content: "✓" / ""; }
+.detail-compact .llm-node .status-pill.status-failed::before { content: "✕"; content: "✕" / ""; }
 
 /* ---------- Inspector ---------- */
 .inspector { overflow-y: auto; min-height: 0; }

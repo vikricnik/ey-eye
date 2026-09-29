@@ -15,7 +15,9 @@ const STATUS_LABEL: Record<NodeExecutionStatus, string> = {
 };
 
 /** One LLM step on the canvas: its id, model and temperature, and — while
- * a run is in progress — whether the server says it is running right now. */
+ * a run is in progress — whether the server says it is running right now.
+ * Zoomed out, CSS shows only the id, model and a status mark (see
+ * "Zoomed-out cards" in style.css). */
 function LlmNodeView({ data, selected }: NodeProps<LlmFlowNode>) {
   const classes = [
     "llm-node",
@@ -32,7 +34,9 @@ function LlmNodeView({ data, selected }: NodeProps<LlmFlowNode>) {
     <div className={classes} data-testid={`node-${data.nodeId}`}>
       <Handle type="target" position={Position.Top} />
       <div className="llm-node-head">
-        <span className="llm-node-id">{data.nodeId}</span>
+        <span className="llm-node-id" title={data.nodeId}>
+          {data.nodeId}
+        </span>
         {data.isOutput && (
           <span className="llm-node-output" title="output node">
             ★
@@ -40,10 +44,9 @@ function LlmNodeView({ data, selected }: NodeProps<LlmFlowNode>) {
         )}
         <span className={`status-pill status-${data.status}`}>
           {data.status === "running" && <span className="pulse-dot" aria-hidden="true" />}
-          {data.status === "complete" && data.replayed ? "reused" : STATUS_LABEL[data.status]}
-          {data.status === "complete" && data.durationMs !== undefined && !data.replayed
-            ? ` · ${formatDuration(data.durationMs)}`
-            : ""}
+          <span className="status-label">
+            {data.status === "complete" && data.replayed ? "reused" : STATUS_LABEL[data.status]}
+          </span>
         </span>
       </div>
       <div className="llm-node-model" title={data.model}>
@@ -58,6 +61,9 @@ function LlmNodeView({ data, selected }: NodeProps<LlmFlowNode>) {
         <span>T={data.temperature ?? "default"}</span>
         {data.optionCount > 0 && <span>{data.optionCount} opt</span>}
         {data.hasSystemPrompt && <span>system</span>}
+        {data.status === "complete" && data.durationMs !== undefined && !data.replayed && (
+          <span>{formatDuration(data.durationMs)}</span>
+        )}
         {usage && tokens && (
           <span
             className={`meta-usage level-${usage.level ?? "ok"}`}

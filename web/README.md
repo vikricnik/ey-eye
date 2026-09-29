@@ -165,7 +165,12 @@ width is remembered); on a narrow screen the panel sits under the canvas.
 **text size** from 87.5% to 150%. Text also follows the browser's own
 font-size setting. Canvas cards are a zoomable drawing in fixed
 coordinates, so their text stays put; fitting the view zooms up to the
-text size instead. Both settings are remembered in this browser.
+text size instead. Zoomed out, cards switch to a compact form — id, model
+and a status mark (✓ done, ✕ failed, a pulsing dot while running) — whose
+text stays at the text size on screen; zoom in for the details. Fitting
+never zooms out further than that text can keep up with, so a very wide
+pipeline extends past the edges (the minimap shows the rest). Both
+settings are remembered in this browser.
 
 **Building** (needs `PIPELINE_EDITING_ENABLED=true` on the server — without
 it everything below is read-only and a banner says so):

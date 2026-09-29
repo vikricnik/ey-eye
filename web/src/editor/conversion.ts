@@ -43,8 +43,9 @@ export const LOOP_IN_HANDLE = "loop-in";
 /** Vertical distance between dependency levels — room for a node card
  * (~80px) plus the live-text preview it grows by while running. */
 export const LEVEL_SPACING = 170;
-/** Horizontal distance between siblings on one level (card is 220px wide). */
-export const SIBLING_SPACING = 260;
+/** Horizontal distance between siblings on one level (card is 200px wide).
+ * Kept tight so a wide level needs less zooming out to fit. */
+export const SIBLING_SPACING = 230;
 
 /** A top-to-bottom position per node from the shared layout levels
  * (buildGraphModel) — the same leveling the CLI's diagram uses. Each

@@ -51,7 +51,7 @@ polish.
 
 | ID | Severity | Title |
 |----|----------|-------|
-| [UX-001](#ux-001-canvas-text-is-too-small-to-read-at-normal-window-sizes) | MAJOR | Canvas text is too small to read at normal window sizes |
+| [UX-001](#ux-001-canvas-text-is-too-small-to-read-at-normal-window-sizes) | MAJOR | Canvas text is too small to read at normal window sizes — ✅ fixed |
 | [UX-002](#ux-002-most-text-is-small-and-fails-contrast-minimums) | MAJOR | Most text is small and fails contrast minimums |
 | [UX-003](#ux-003-an-unreachable-ollama-is-only-discovered-when-a-run-fails) | MAJOR | An unreachable Ollama is only discovered when a run fails |
 | [UX-004](#ux-004-a-failed-run-discards-the-message-and-offers-no-retry) | MAJOR | A failed run discards the message and offers no retry |
@@ -83,6 +83,30 @@ polish.
 ### UX-001: Canvas text is too small to read at normal window sizes
 
 - **Severity**: MAJOR
+- **Status**: ✅ Fixed (2026-09-29).
+  - **Compact cards when zoomed out** ([zoomDetail.ts](web/src/editor/zoomDetail.ts),
+    "Zoomed-out cards" in [style.css](web/src/style.css)). Below 0.85 × the
+    display text size, a card shows only its id, model and a status mark:
+    ✓ done, ✕ failed, a pulsing dot while running, nothing when idle. The
+    text is scaled to cancel the zoom (`--node-text-scale`). At 1024×768 the
+    node id now reads at **13px** on screen, up from 7.6px. The status word
+    stays available to screen readers.
+  - **Narrower cards**: 200px (was 220) and 230px sibling spacing (was 260).
+    Auto-layout of the example now fits at zoom 0.74 (was 0.64). The status
+    pill shows only the status word, so the id keeps its room; a node's run
+    time moved to the meta line. Ids have a tooltip for when they're cut off.
+  - **Fit floor**: fitting never zooms out below 0.4 × the text size, where
+    compact text reaches its largest scale (2.5×). A very wide pipeline then
+    extends past the edges. This is lower than the 0.85 suggested below:
+    compact cards keep the text readable, so a floor that high would hide
+    most of a wide graph for no gain.
+  - **Handles**: an invisible 6px ring widens the area that picks them up,
+    they grow to 14px on hover and as a connection's target, and they scale
+    with compact text.
+  - **Still small**: edge labels stay at 10px, scaled by the zoom. React
+    Flow measures a label's background only when the label text changes, so
+    scaling them needs custom edges with HTML labels (`EdgeLabelRenderer`).
+    That's left as a follow-up.
 - **Principle**: Legibility; Fitts's law; visual hierarchy (the primary object should be the easiest to read)
 - **File(s)**:
   - [PipelineCanvas.tsx:50](web/src/editor/PipelineCanvas.tsx#L50)

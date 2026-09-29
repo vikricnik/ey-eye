@@ -158,7 +158,7 @@ export function DisplayMenu(props: { settings: DisplaySettings; onChange: (chang
           </div>
           <p className="field-hint">
             Remembered in this browser. Text also follows your browser&apos;s font size; canvas cards scale with the
-            canvas zoom, which fits to the text size.
+            canvas zoom, which fits to the text size — zoomed out, they show just their id and model at this size.
           </p>
         </div>
       )}

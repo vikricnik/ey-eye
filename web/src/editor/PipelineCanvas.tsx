@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { DragEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { DragEvent, RefObject } from "react";
 import {
   Background,
   Controls,
@@ -9,6 +9,7 @@ import {
   applyEdgeChanges,
   applyNodeChanges,
   useReactFlow,
+  useStore,
 } from "@xyflow/react";
 import type { Edge, EdgeChange, IsValidConnection, NodeChange, NodeTypes } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
@@ -16,6 +17,7 @@ import { LlmNode } from "./LlmNode";
 import { parseDependencyEdgeId } from "./conversion";
 import type { LlmFlowNode } from "./conversion";
 import type { Selection } from "./editorState";
+import { compactTextScale, fitOptions, isCompact } from "./zoomDetail";
 
 /** Drag-and-drop payload type set by the sidebar palette. The value is a
  * preset name, or "" for a plain node. */
@@ -30,7 +32,8 @@ export interface PipelineCanvasProps {
   /** The app's resolved theme. */
   colorMode: "light" | "dark";
   /** The display text size: fitting the view zooms up to it, so cards
-   * grow with the text elsewhere as long as the pipeline still fits. */
+   * grow with the text elsewhere as long as the pipeline still fits, and
+   * zoomed-out cards keep their text at it (see zoomDetail.ts). */
   textScale: number;
   selectedNodeId: string | null;
   /** Bump to re-fit the view (after auto-layout, import, …). */
@@ -45,14 +48,23 @@ export interface PipelineCanvasProps {
 
 const isValidConnection: IsValidConnection = (c) => c.source !== c.target;
 
-// Never zoom past the text size when fitting (100% by default) — a one- or
-// two-node pipeline would otherwise fill the canvas with giant cards.
-const fitOptions = (textScale: number) => ({ padding: 0.2, maxZoom: textScale });
+/** Keeps --node-text-scale on the canvas in step with the zoom, written
+ * straight to the element so zooming doesn't re-render the canvas. */
+function CompactTextScale({ target, textScale }: { target: RefObject<HTMLDivElement | null>; textScale: number }) {
+  const zoom = useStore((s) => s.transform[2]);
+  useLayoutEffect(() => {
+    target.current?.style.setProperty("--node-text-scale", String(compactTextScale(zoom, textScale)));
+  }, [target, zoom, textScale]);
+  return null;
+}
 
 function CanvasInner(props: PipelineCanvasProps) {
   const { editable, selectedNodeId, textScale } = props;
   const flow = useReactFlow();
   const fit = useMemo(() => fitOptions(textScale), [textScale]);
+  const canvas = useRef<HTMLDivElement>(null);
+  // Re-renders only when the zoom crosses the threshold, not on every step.
+  const compact = useStore((s) => isCompact(s.transform[2], textScale));
 
   // React Flow keeps per-node runtime state (measured size, drag state,
   // selection) on the node objects themselves. The pipeline definition is
@@ -117,7 +129,8 @@ function CanvasInner(props: PipelineCanvasProps) {
 
   return (
     <div
-      className="canvas"
+      ref={canvas}
+      className={compact ? "canvas detail-compact" : "canvas"}
       onDragOver={(e) => {
         if (editable && e.dataTransfer.types.includes(NODE_DRAG_TYPE)) {
           e.preventDefault();
@@ -126,6 +139,7 @@ function CanvasInner(props: PipelineCanvasProps) {
       }}
       onDrop={onDrop}
     >
+      <CompactTextScale target={canvas} textScale={textScale} />
       <ReactFlow<LlmFlowNode, Edge>
         nodes={nodes}
         edges={edges}
