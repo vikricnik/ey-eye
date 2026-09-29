@@ -59,7 +59,7 @@ polish.
 | [UX-006](#ux-006-two-run-buttons-with-different-meanings-on-the-tests-tab) | MINOR | Two Run buttons with different meanings on the Tests tab — ✅ fixed |
 | [UX-007](#ux-007-the-toolbar-gives-ten-actions-equal-weight) | MINOR | The toolbar gives ten actions equal weight — ✅ fixed |
 | [UX-008](#ux-008-node-settings-run-three-screens-long-and-repeat-actions) | MINOR | Node settings run three screens long and repeat actions — ✅ fixed |
-| [UX-009](#ux-009-canvas-status-and-roles-are-hard-to-read-and-the-legend-is-on-the-wrong-tab) | MINOR | Canvas status and roles are hard to read, and the legend is on the wrong tab |
+| [UX-009](#ux-009-canvas-status-and-roles-are-hard-to-read-and-the-legend-is-on-the-wrong-tab) | MINOR | Canvas status and roles are hard to read, and the legend is on the wrong tab — ✅ fixed |
 | [UX-010](#ux-010-one-concept-has-several-names-and-one-icon-has-two-meanings) | MINOR | One concept has several names, and one icon has two meanings |
 | [UX-011](#ux-011-some-disabled-controls-give-no-reason) | MINOR | Some disabled controls give no reason |
 | [UX-012](#ux-012-undo-exists-but-is-never-offered-after-a-delete) | MINOR | Undo exists but is never offered after a delete |
@@ -520,6 +520,33 @@ polish.
 ### UX-009: Canvas status and roles are hard to read, and the legend is on the wrong tab
 
 - **Severity**: MINOR
+- **Status**: ✅ Fixed (2026-09-29).
+  - **No status pill before a run**
+    ([LlmNode.tsx](web/src/editor/LlmNode.tsx)): cards show running, done
+    or failed once a run starts, and nothing while idle. The zoomed-out rule
+    that hid "idle" is gone with it.
+  - **An OUTPUT badge** replaces the colored ★. It's a text badge on the
+    card's top edge, right of the connection dot, so it takes no room from
+    the id. The Messages log says "output" instead of ★ too. Zoomed out, it
+    grows with the card's text only up to 1.4×, so it never reaches the top
+    dot (measured at zoom 0.2: 1.3px apart).
+  - **The legend moved from the Add tab to a "?" in the canvas corner**
+    ([CanvasLegend.tsx](web/src/editor/CanvasLegend.tsx)), a disclosure
+    that opens over the canvas. It covers node statuses (with the ✓/✕ marks
+    used when zoomed out), the OUTPUT badge, the dashed invalid and warning
+    outlines, the three edge styles, and how to draw a dependency. Escape
+    and a click elsewhere close it, and focus returns to "?".
+  - **A hint across the top of the canvas**
+    ([canvasHint.ts](web/src/editor/canvasHint.ts)) while there's one node
+    ("Add more nodes from the Add tab…") or nothing connected ("Connect
+    nodes: drag from a node's bottom dot to another node's top dot."). Only
+    when editing is on. The node settings now say "dot" too, not "handle".
+  - **Also fixed**: the canvas's own fit button ignored the zoom limits
+    (React Flow's `Controls` takes its own `fitViewOptions`), so fitting a
+    small graph jumped to 2× with giant cards. It now fits like on load.
+  - **Checked in the app**: no idle pills, the badge and its gap to the
+    dot, the legend open, close and focus, both hints on an unsaved draft
+    (never saved), and the fit button.
 - **Principle**: Signifiers; WCAG 1.4.1 Use of Color; information architecture (content where it's used)
 - **File(s)**:
   - [LlmNode.tsx:10-15](web/src/editor/LlmNode.tsx#L10-L15)

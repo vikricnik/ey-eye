@@ -128,15 +128,6 @@ export function Sidebar(props: {
           ))}
         </>
       )}
-      <h3>Legend</h3>
-      <ul className="legend">
-        <li><span className="swatch status-running" /> running</li>
-        <li><span className="swatch status-complete" /> done</li>
-        <li><span className="swatch status-failed" /> failed</li>
-        <li><span className="line plain" /> depends on</li>
-        <li><span className="line branch" /> branch route</li>
-        <li><span className="line loop" /> loop</li>
-      </ul>
     </nav>
   );
 }

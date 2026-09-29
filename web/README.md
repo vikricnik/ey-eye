@@ -15,27 +15,38 @@ web/
     ├── main.tsx              # React entry point
     ├── App.tsx               # loading, editing, live validation, save/import/export, runs
     ├── config.ts             # server URL / API key from public/runtime-config.js
-    ├── style.css
+    ├── format.ts             # durations, sizes, error text
+    ├── providerStatus.ts     # what an unreachable model provider means for the pipeline
+    ├── style.css             # type scale, colors (both themes) and every component's styles
     ├── editor/
     │   ├── PipelineCanvas.tsx  # React Flow canvas: drag nodes, draw edges, drop from palette
-    │   ├── LlmNode.tsx         # a node card: model, temperature, live status
+    │   ├── LlmNode.tsx         # a node card: model, temperature, live status, output badge
+    │   ├── CanvasLegend.tsx    # the "?" legend in the canvas corner
+    │   ├── canvasHint.ts       # the hint across the top while nothing is connected yet
+    │   ├── zoomDetail.ts       # compact cards and fit limits when zoomed out
     │   ├── Inspector.tsx       # node / pipeline / edge / branch / loop settings
-    │   ├── fields.tsx          # model picker, Ollama options form, inputs
+    │   ├── Section.tsx         # foldable settings sections, remembered open or closed
+    │   ├── fields.tsx          # model picker, Ollama options, inputs
     │   ├── PromptPreview.tsx   # what a node would receive, rendered by the server
-    │   ├── Sidebar.tsx         # the Add tab: blank node, presets, legend
+    │   ├── Sidebar.tsx         # the Add tab: blank node, presets
     │   ├── conversion.ts       # pipeline definition -> React Flow nodes/edges
     │   └── editorState.ts      # the edited document and validation state
     ├── run/
     │   ├── Chat.tsx            # the Chat tab (conversation picker, transcript) and the message box
+    │   ├── RunErrorView.tsx    # a failed run: what happened, what to do, the raw error
+    │   ├── runFailure.ts       # plain-language explanations of run failures
     │   ├── MessagesView.tsx    # every node's received messages and replies, per run
     │   ├── MessageEntry.tsx
     │   └── runHistory.ts       # conversations kept in this browser (IndexedDB)
     ├── tests/TestsView.tsx     # test cases, test runs and model comparison
     └── ui/
         ├── Dialogs.tsx         # in-app confirm / prompt / form dialogs
+        ├── Menu.tsx            # menu button (File ▾, ⋯) with the ARIA keyboard contract
+        ├── ServerStatus.tsx    # API / Ollama health lights and the outage notice
         ├── SidePanel.tsx       # the one panel beside the canvas: tabs + message box
         ├── Splitter.tsx        # resizing the panel
-        └── DisplaySettings.tsx # light/dark theme and text size
+        ├── DisplaySettings.tsx # light/dark theme and text size
+        └── icons.tsx           # the few drawn icons (settings, auto-layout)
 ```
 
 Every edit goes through `draftOps` in `@llm-pipeline/client` — the same
@@ -195,8 +206,10 @@ it everything below is read-only and a banner says so):
   siblings side by side).
 - **Duplicate a node** with **Duplicate** in its settings or ⌘D / Ctrl+D:
   the copy has the same settings and inputs and sits beside the original.
-- **Draw edges** by dragging from a node's bottom handle to another node's
-  top handle (that's `depends_on`). Select an edge or node and press
+- **Draw edges** by dragging from a node's bottom dot to another node's
+  top dot (that's `depends_on`); a hint across the top of the canvas says so
+  while nothing is connected yet. **?** in the canvas corner opens a legend of
+  the statuses, edge styles and marks. Output nodes carry an **OUTPUT** badge. Select an edge or node and press
   Backspace/Delete to remove it.
 - **Configure a node** in **Settings**, in sections that fold — each
   folded one shows a one-line summary, and which are open is remembered in
@@ -259,8 +272,8 @@ it everything below is read-only and a banner says so):
   right away. If every model the pipeline uses is on Ollama, Run is
   disabled until it's back; with other providers in the mix, a run can
   still go ahead (a branch may never reach the Ollama nodes).
-- Runs always stream. Each node shows idle / **running** (pulsing) / done
-  (with duration) / failed, driven by the server's `node_start` and
+- Runs always stream. Each node shows **running** (pulsing) / done (with
+  duration) / failed — nothing before a run — driven by the server's `node_start` and
   `node_complete` events — so parallel nodes visibly run at the same time.
   Edges into a running node animate.
 - **Live text**: a running node's card shows the newest words its model is

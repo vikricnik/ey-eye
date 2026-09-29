@@ -375,6 +375,8 @@ button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-
 
 .legend { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; font-size: var(--fs-sm); color: var(--text-dim); }
 .legend li { display: flex; align-items: center; gap: 8px; }
+/* Legend samples keep their size when the text beside them wraps. */
+.swatch, .line { flex-shrink: 0; }
 .swatch { width: 10px; height: 10px; border-radius: 2px; border: 2px solid var(--border); }
 .swatch.status-running { border-color: var(--running); }
 .swatch.status-complete { border-color: var(--valid); }
@@ -382,6 +384,73 @@ button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-
 .line { width: 18px; height: 0; border-top: 2px solid var(--graph-plain); }
 .line.branch { border-top: 2px dashed var(--graph-branch); }
 .line.loop { border-top: 2px dotted var(--graph-loop); }
+.swatch.problem { border-style: dashed; border-color: var(--invalid); }
+
+/* An output node's badge, sitting on the card's top edge (right of the
+   handle) so it takes no room from the id. Text, not a colored star. */
+.output-badge {
+  position: absolute;
+  top: 0;
+  right: 10px;
+  transform: translateY(-50%);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  line-height: 1.5;
+  padding: 0 6px;
+  border-radius: 10px;
+  border: 1px solid var(--accent);
+  background: var(--panel);
+  color: var(--accent);
+}
+.output-badge.in-legend { position: static; transform: none; font-size: var(--fs-xs); flex-shrink: 0; }
+/* Scaled up with the card's text, but only so far: much wider and it would
+   run into the top handle in the middle of the card's edge. */
+.detail-compact .output-badge { font-size: calc(11px * min(var(--node-text-scale, 1), 1.4)); right: 6px; }
+
+/* "?" in the canvas corner and the legend it opens (editor/CanvasLegend.tsx). */
+.canvas-legend { position: relative; }
+.canvas-legend > button { background: var(--panel); }
+.legend-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  width: 20rem;
+  max-width: calc(100cqi - 30px);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px var(--shadow-strong);
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+}
+.legend-panel h3 {
+  margin: 4px 0 0;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text);
+}
+.legend-panel h3:first-child { margin-top: 0; }
+
+/* A one-line hint across the top of the canvas (editor/canvasHint.ts). */
+.canvas-hint {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 14px;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  box-shadow: 0 2px 10px var(--shadow);
+  /* Centered with left: 50%, which would otherwise cap it at half the
+     canvas — so size it to its text, up to the canvas less the corners. */
+  width: max-content;
+  max-width: calc(100% - 140px);
+  text-align: center;
+}
 
 .canvas-wrap { position: relative; min-width: 0; min-height: 0; container-type: inline-size; }
 .canvas { position: absolute; inset: 0; }
@@ -449,6 +518,7 @@ button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-
 
 /* ---------- Node card ---------- */
 .llm-node {
+  position: relative; /* anchors the output badge */
   width: 200px; /* keep in step with SIBLING_SPACING in editor/conversion.ts */
   background: var(--panel);
   border: 1px solid var(--border);
@@ -484,7 +554,6 @@ button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-
   flex: 1;
   min-width: 0;
 }
-.llm-node-output { color: var(--warn); }
 .llm-node-model {
   color: var(--accent);
   font-size: 12px;
@@ -554,8 +623,7 @@ button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-
 }
 .detail-compact .llm-node-model { font-size: calc(12px * var(--node-text-scale, 1)); }
 .detail-compact .llm-node-live,
-.detail-compact .llm-node-meta,
-.detail-compact .status-pill.status-not-started { display: none; }
+.detail-compact .llm-node-meta { display: none; }
 .detail-compact .llm-node .status-pill { font-size: inherit; padding: 0; background: none; }
 .detail-compact .llm-node .pulse-dot { width: 0.5em; height: 0.5em; }
 /* The status word stays for screen readers; a mark replaces it on screen. */

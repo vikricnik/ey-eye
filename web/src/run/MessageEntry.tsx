@@ -50,7 +50,11 @@ export function MessageEntry(props: {
           ) : (
             <span className="message-node">{entry.nodeId}</span>
           ))}
-        {props.isOutput && <span className="llm-node-output" title="output node">★</span>}
+        {props.isOutput && (
+          <span className="tag-mini" title="An output node: the pipeline's answer comes from the first one that ran">
+            output
+          </span>
+        )}
         <span className="dim">{entry.modelName}</span>
         {entry.iteration > 1 && (
           <span className="tag-mini" title="this node ran again because of a loop">

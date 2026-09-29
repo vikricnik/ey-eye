@@ -5,6 +5,7 @@ import {
   ControlButton,
   Controls,
   MiniMap,
+  Panel,
   ReactFlow,
   ReactFlowProvider,
   applyEdgeChanges,
@@ -20,6 +21,8 @@ import type { LlmFlowNode } from "./conversion";
 import type { Selection } from "./editorState";
 import { compactTextScale, fitOptions, isCompact } from "./zoomDetail";
 import { AutoLayoutIcon } from "../ui/icons";
+import { CanvasLegend } from "./CanvasLegend";
+import { canvasHint } from "./canvasHint";
 
 /** Drag-and-drop payload type set by the sidebar palette. The value is a
  * preset name, or "" for a plain node. */
@@ -70,6 +73,7 @@ function CanvasInner(props: PipelineCanvasProps) {
   const flow = useReactFlow();
   const fit = useMemo(() => fitOptions(textScale), [textScale]);
   const canvas = useRef<HTMLDivElement>(null);
+  const hint = canvasHint({ nodes: props.nodes.length, edges: props.edges.length, editable });
   // Re-renders only when the zoom crosses the threshold, not on every step.
   const compact = useStore((s) => isCompact(s.transform[2], textScale));
 
@@ -191,7 +195,8 @@ function CanvasInner(props: PipelineCanvasProps) {
         onPaneClick={() => props.onSelect(null)}
       >
         <Background gap={24} size={1} />
-        <Controls showInteractive={false}>
+        {/* Its fit button takes its own options — the same limits as fitting on load. */}
+        <Controls showInteractive={false} fitViewOptions={fit}>
           <ControlButton
             onClick={props.onAutoLayout}
             disabled={!editable}
@@ -202,6 +207,14 @@ function CanvasInner(props: PipelineCanvasProps) {
           </ControlButton>
         </Controls>
         <MiniMap pannable zoomable nodeStrokeWidth={3} style={{ width: 140, height: 90 }} />
+        <Panel position="top-right">
+          <CanvasLegend />
+        </Panel>
+        {hint && (
+          <Panel position="top-center" className="canvas-hint">
+            {hint}
+          </Panel>
+        )}
       </ReactFlow>
     </div>
   );

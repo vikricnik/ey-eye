@@ -33,21 +33,25 @@ function LlmNodeView({ data, selected }: NodeProps<LlmFlowNode>) {
   return (
     <div className={classes} data-testid={`node-${data.nodeId}`}>
       <Handle type="target" position={Position.Top} />
+      {/* On the card's top edge, so it takes no room from the id. */}
+      {data.isOutput && (
+        <span className="output-badge" title="An output node: the pipeline's answer comes from the first one that ran">
+          output
+        </span>
+      )}
       <div className="llm-node-head">
         <span className="llm-node-id" title={data.nodeId}>
           {data.nodeId}
         </span>
-        {data.isOutput && (
-          <span className="llm-node-output" title="output node">
-            ★
+        {/* Nothing before a run: "idle" on every card says nothing. */}
+        {data.status !== "not-started" && (
+          <span className={`status-pill status-${data.status}`}>
+            {data.status === "running" && <span className="pulse-dot" aria-hidden="true" />}
+            <span className="status-label">
+              {data.status === "complete" && data.replayed ? "reused" : STATUS_LABEL[data.status]}
+            </span>
           </span>
         )}
-        <span className={`status-pill status-${data.status}`}>
-          {data.status === "running" && <span className="pulse-dot" aria-hidden="true" />}
-          <span className="status-label">
-            {data.status === "complete" && data.replayed ? "reused" : STATUS_LABEL[data.status]}
-          </span>
-        </span>
       </div>
       <div className="llm-node-model" title={data.model}>
         {data.model}

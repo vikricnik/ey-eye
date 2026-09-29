@@ -530,7 +530,7 @@ function NodeInspector(props: InspectorProps & { node: NodeConfig; tab: NodeTab;
 
           <Section id="depends" title="Depends on" defaultOpen={false} summary={deps.length ? deps.join(", ") : "nothing — starts first"}>
             {deps.length === 0 ? (
-              <p className="dim">nothing — starts as soon as the run does. Drag from another node&apos;s bottom handle to this node&apos;s top handle to add one.</p>
+              <p className="dim">nothing — starts as soon as the run does. Drag from another node&apos;s bottom dot to this node&apos;s top dot to add one.</p>
             ) : (
               <ul className="dep-list">
                 {deps.map((dep) => (

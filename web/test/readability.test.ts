@@ -34,8 +34,9 @@ describe("text size", () => {
       for (const [, value] of declarations.matchAll(/font-size\s*:\s*([^;]+);?/g)) {
         const v = value!.trim();
         if (/^var\(--fs-(xs|sm|md|lg|xl)\)$/.test(v) || v === "inherit") continue;
-        // Canvas text is in flow coordinates (px), optionally scaled up by the zoom.
-        const px = /^(?:calc\()?(\d+(?:\.\d+)?)px(?: \* var\(--node-text-scale, 1\)\))?$/.exec(v);
+        // Canvas text is in flow coordinates (px), optionally scaled up by the
+        // zoom — never down: the scale is at least 1, even where it's capped.
+        const px = /^(?:calc\()?(\d+(?:\.\d+)?)px(?: \* (?:var\(--node-text-scale, 1\)|min\(var\(--node-text-scale, 1\), [\d.]+\))\))?$/.exec(v);
         assert.ok(px && Number(px[1]) >= MIN_TEXT_PX, `${selector} { font-size: ${v} }`);
       }
     }
