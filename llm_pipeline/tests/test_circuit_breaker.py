@@ -1,3 +1,4 @@
+import asyncio
 import time
 
 import pytest
@@ -78,7 +79,11 @@ class _FlakyProvider:
 
 
 class _AlwaysFailingProvider:
+    def __init__(self) -> None:
+        self.call_count = 0
+
     async def generate(self, prompt: str, system: str | None = None) -> Generation:
+        self.call_count += 1
         raise RuntimeError("permanent failure")
 
 
@@ -100,3 +105,90 @@ async def test_retry_gives_up_after_max_attempts() -> None:
     with pytest.raises(ProviderError):
         await generate_with_retry(provider, "prompt", spec, _QUICK_RETRY)
     # exactly max_attempts calls were made, not more
+
+
+def test_half_open_circuit_admits_one_trial_call() -> None:
+    cb = CircuitBreaker(failure_threshold=1, cooldown_seconds=0.05)
+    cb.record_failure("model-x")
+    assert cb.allow_call("model-x") is False  # open
+    time.sleep(0.06)
+    assert cb.allow_call("model-x") is True  # the trial call
+    assert cb.allow_call("model-x") is False  # everyone else still fails fast
+    cb.record_success("model-x")
+    assert cb.allow_call("model-x") is True  # recovered: closed again
+    assert cb.allow_call("model-x") is True
+
+
+def test_failed_trial_call_reopens_the_circuit() -> None:
+    cb = CircuitBreaker(failure_threshold=1, cooldown_seconds=0.05)
+    cb.record_failure("model-x")
+    time.sleep(0.06)
+    assert cb.allow_call("model-x") is True
+    cb.record_failure("model-x")
+    assert cb.is_open("model-x") is True
+    assert cb.allow_call("model-x") is False
+
+
+def test_abandoned_trial_call_is_replaced_after_a_cooldown() -> None:
+    """A trial call whose outcome never comes back (its request was
+    cancelled) mustn't hold the circuit shut for good."""
+    cb = CircuitBreaker(failure_threshold=1, cooldown_seconds=0.05)
+    cb.record_failure("model-x")
+    time.sleep(0.06)
+    assert cb.allow_call("model-x") is True  # claimed, then abandoned
+    assert cb.allow_call("model-x") is False
+    time.sleep(0.06)
+    assert cb.allow_call("model-x") is True
+
+
+@pytest.mark.asyncio
+async def test_retries_stop_once_the_circuit_opens() -> None:
+    """Retrying into a model the breaker has given up on is exactly what the
+    breaker is for — the request fails with the error it actually saw."""
+    provider = _AlwaysFailingProvider()
+    spec = ModelSpec(ProviderType.OLLAMA, "retry-test-model-3")
+    breaker = CircuitBreaker(failure_threshold=2, cooldown_seconds=60.0)
+    policy = RetryPolicy(timeout_seconds=5.0, max_attempts=5, backoff_base_seconds=0.01)
+    announced: list[int] = []
+
+    with pytest.raises(ProviderError, match="permanent failure"):
+        await generate_with_retry(
+            provider, "prompt", spec, policy, circuit_breaker=breaker, on_retry=announced.append
+        )
+    assert provider.call_count == 2  # not 5
+    assert announced == [2]  # no retry announced that never ran
+
+
+@pytest.mark.asyncio
+async def test_a_recovering_model_gets_one_trial_call_not_every_waiting_request() -> None:
+    release = asyncio.Event()
+    calls = 0
+
+    class _SlowProvider:
+        async def generate(self, prompt: str, system: str | None = None) -> Generation:
+            nonlocal calls
+            calls += 1
+            await release.wait()
+            return Generation("ok")
+
+    spec = ModelSpec(ProviderType.OLLAMA, "retry-test-model-4")
+    breaker = CircuitBreaker(failure_threshold=1, cooldown_seconds=0.05)
+    breaker.record_failure(spec.identity)
+    await asyncio.sleep(0.06)  # cooldown over: half-open
+    policy = RetryPolicy(timeout_seconds=5.0, max_attempts=1)
+
+    trial = asyncio.ensure_future(
+        generate_with_retry(_SlowProvider(), "p", spec, policy, circuit_breaker=breaker)
+    )
+    await asyncio.sleep(0)  # the trial call is now in flight
+    others = await asyncio.gather(
+        *(
+            generate_with_retry(_SlowProvider(), "p", spec, policy, circuit_breaker=breaker)
+            for _ in range(5)
+        ),
+        return_exceptions=True,
+    )
+    assert all(isinstance(e, ProviderError) and "circuit open" in str(e) for e in others)
+    release.set()
+    assert (await trial).text == "ok"
+    assert calls == 1

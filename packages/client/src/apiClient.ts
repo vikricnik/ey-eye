@@ -160,8 +160,13 @@ interface SendOptions {
   signal?: AbortSignal | undefined;
 }
 
+/** Where every route of the server's API lives, so a breaking change can
+ * arrive as /v2 beside it. Only /health (probed at a fixed path) and the
+ * OpenAI-compatible routes are outside it. */
+const API_V1 = "/v1";
+
 function pipelinePath(name: string): string {
-  return `/pipelines/${encodeURIComponent(name)}`;
+  return `${API_V1}/pipelines/${encodeURIComponent(name)}`;
 }
 
 /** Where a pipeline's runs are started (answered or streamed, by Accept). */
@@ -256,11 +261,11 @@ export class PipelineClient {
   /** What a client needs to start: the default pipeline, and whether this
    * server allows editing (and if not, why). */
   async getServerInfo(): Promise<ServerInfoResponse> {
-    return this.get<ServerInfoResponse>("/server-info");
+    return this.get<ServerInfoResponse>(`${API_V1}/server-info`);
   }
 
   async listPipelines(): Promise<PipelinesListResponse> {
-    return this.get<PipelinesListResponse>("/pipelines");
+    return this.get<PipelinesListResponse>(`${API_V1}/pipelines`);
   }
 
   /** A pipeline as stored: its complete definition (prompts, options,
@@ -268,7 +273,7 @@ export class PipelineClient {
    * representation a save takes. To draw it, derive the structure with
    * detailFromDefinition(). */
   async getPipeline(name: string): Promise<PipelineDefinitionResponse> {
-    return this.get<PipelineDefinitionResponse>(`/pipelines/${encodeURIComponent(name)}`);
+    return this.get<PipelineDefinitionResponse>(pipelinePath(name));
   }
 
   // ---- editing ---------------------------------------------------------
@@ -276,14 +281,14 @@ export class PipelineClient {
   /** Models this server lets an editor select (installed Ollama models +
    * the cloud allowlist). `refresh` bypasses the server's short cache. */
   async listModels(options: { refresh?: boolean } = {}): Promise<ModelsResponse> {
-    return this.get<ModelsResponse>(options.refresh ? "/models?refresh=true" : "/models");
+    return this.get<ModelsResponse>(`${API_V1}/models${options.refresh ? "?refresh=true" : ""}`);
   }
 
   /** Max context, size and quantization of an installed Ollama model.
    * Throws (404) when it isn't installed or Ollama can't be reached. */
   async getModelLimits(ollamaModel: string): Promise<ModelLimitsResponse> {
     const path = ollamaModel.split("/").map(encodeURIComponent).join("/");
-    return this.get<ModelLimitsResponse>(`/models/ollama/${path}`);
+    return this.get<ModelLimitsResponse>(`${API_V1}/models/ollama/${path}`);
   }
 
   /** Validates without saving. Pass a definition (`format: "json"` — live
@@ -293,12 +298,12 @@ export class PipelineClient {
    * PipelineApiError (status 422, `details.node_id` when a node is at
    * fault) if it's invalid. */
   async validatePipeline(req: ValidatePipelineRequest): Promise<ValidatePipelineResponse> {
-    return this.request<ValidatePipelineResponse>("POST", "/drafts/validation", { body: req });
+    return this.request<ValidatePipelineResponse>("POST", `${API_V1}/drafts/validation`, { body: req });
   }
 
   /** What a node would receive — see PreviewPromptRequest. */
   async previewPrompt(req: PreviewPromptRequest): Promise<PreviewPromptResponse> {
-    return this.request<PreviewPromptResponse>("POST", "/drafts/prompt-preview", { body: req });
+    return this.request<PreviewPromptResponse>("POST", `${API_V1}/drafts/prompt-preview`, { body: req });
   }
 
   /** Saves a new pipeline (If-None-Match: *). Throws ALREADY_EXISTS (412)
@@ -326,11 +331,11 @@ export class PipelineClient {
   }
 
   async listPresets(): Promise<PresetsListResponse> {
-    return this.get<PresetsListResponse>("/presets");
+    return this.get<PresetsListResponse>(`${API_V1}/presets`);
   }
 
   async getPreset(name: string): Promise<PresetResponse> {
-    return this.get<PresetResponse>(`/presets/${encodeURIComponent(name)}`);
+    return this.get<PresetResponse>(`${API_V1}/presets/${encodeURIComponent(name)}`);
   }
 
   /** Soft-deletes a pipeline (moved to pipelines/.deleted/). With
@@ -346,7 +351,7 @@ export class PipelineClient {
   /** Soft-deletes a preset (moved to presets/.deleted/). With
    * `baseRevision`, refused (REVISION_CONFLICT) if it changed since. */
   async deletePreset(name: string, baseRevision?: string): Promise<DeletedResponse> {
-    return this.request<DeletedResponse>("DELETE", `/presets/${encodeURIComponent(name)}`, {
+    return this.request<DeletedResponse>("DELETE", `${API_V1}/presets/${encodeURIComponent(name)}`, {
       headers: baseRevision === undefined ? {} : ifMatch(baseRevision),
     });
   }
@@ -355,7 +360,7 @@ export class PipelineClient {
    * `baseRevision` you loaded (REVISION_CONFLICT if it changed since). */
   async savePreset(preset: NodePreset, baseRevision?: string): Promise<PresetResponse> {
     const body: SavePresetRequest = { preset };
-    return this.request<PresetResponse>("PUT", `/presets/${encodeURIComponent(preset.name)}`, {
+    return this.request<PresetResponse>("PUT", `${API_V1}/presets/${encodeURIComponent(preset.name)}`, {
       body,
       headers: baseRevision === undefined ? {} : ifMatch(baseRevision),
     });
@@ -402,7 +407,7 @@ export class PipelineClient {
     req: RunTestsRequest,
     options: RequestOptions = {}
   ): AsyncGenerator<TestRunEvent, void, undefined> {
-    for await (const { event, data } of this.postStream("/drafts/test-runs", req, TEST_EVENTS, options.signal)) {
+    for await (const { event, data } of this.postStream(`${API_V1}/drafts/test-runs`, req, TEST_EVENTS, options.signal)) {
       yield { type: event, data } as TestRunEvent;
     }
   }

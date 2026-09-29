@@ -261,7 +261,7 @@ class EvalJudge(BaseModel):
 
 class TestsConfig(BaseModel):
     """The pipeline's test cases. The engine ignores them; editor clients
-    run them (POST /drafts/test-runs) to check the pipeline and compare
+    run them (POST /v1/drafts/test-runs) to check the pipeline and compare
     models."""
 
     __test__ = False  # not a pytest test class, despite the name

@@ -36,7 +36,7 @@ class PipelineListing:
 
 
 def list_available_pipelines(directory: Path) -> list[PipelineListing]:
-    """Every loadable pipeline in a directory — used by GET /pipelines.
+    """Every loadable pipeline in a directory — used by GET /v1/pipelines.
     Files that fail to load are skipped rather than crashing the whole
     listing; run validation in CI to catch those before deploy."""
     results: list[PipelineListing] = []

@@ -2,8 +2,8 @@
 OpenAI-compatible chat endpoints: every pipeline is a "model", so tools that
 speak the OpenAI API — Open WebUI, Continue, the openai SDKs — can chat with
 pipelines without knowing this API. Clients use `http://<server>/openai/v1`
-as their OpenAI base URL. Mounted there rather than at /v1, which is kept
-for this API's own versioning (spec 003's /v1/workflows).
+as their OpenAI base URL. Mounted there rather than at /v1, which holds
+this API's own routes (so /v1/models is the editor's model list, not this).
 
 - GET  /openai/v1/models lists the pipelines.
 - POST /openai/v1/chat/completions runs the pipeline named by `model`. The last

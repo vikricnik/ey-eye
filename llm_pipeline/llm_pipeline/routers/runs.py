@@ -1,9 +1,10 @@
 """
-Running a pipeline: POST /pipelines/{name}/runs — answered when the run
+Running a pipeline: POST /v1/pipelines/{name}/runs — answered when the run
 finishes, or streamed as Server-Sent Events while it runs when the client
 prefers `text/event-stream` (see wants_event_stream).
 """
 
+import asyncio
 import logging
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import aclosing
@@ -16,6 +17,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel
 
+from llm_pipeline import metrics
 from llm_pipeline.api_error import ApiError
 from llm_pipeline.api_schemas import (
     ErrorCode,
@@ -226,7 +228,9 @@ async def run_pipeline(
 ) -> RunResponse:
     """One whole run, answered when it finishes — a run that isn't
     streamed, here or through the OpenAI-compatible endpoint. Stopped if the
-    client disconnects (see disconnects.py). Raises ApiError."""
+    client disconnects (see disconnects.py). Raises ApiError. Counts the run
+    by how it ended — once it has started: a request refused by
+    prepare_run is no run."""
     run = await prepare_run(name, run_request, cache)
     definition = run.definition
 
@@ -242,24 +246,29 @@ async def run_pipeline(
             ),
         )
     except HTTPException:
+        metrics.count_run(definition.name, "cancelled")
         raise  # the client disconnected
     except PipelineExecutionError as e:
         logger.exception(f"Pipeline '{name}' run failed")
+        metrics.count_run(definition.name, "failed")
         raise ApiError(ErrorCode.PIPELINE_RUN_FAILED, str(e), details=_failure_details(e)) from e
     except Exception as e:
         logger.exception(f"Pipeline '{name}' run failed unexpectedly")
+        metrics.count_run(definition.name, "failed")
         raise ApiError(ErrorCode.INTERNAL_ERROR, UNEXPECTED_RUN_FAILURE) from e
 
     node_outputs = final_state["node_outputs"]
     resolved_output_node = _resolve_output_node(definition, node_outputs)
 
     if resolved_output_node is None:
+        metrics.count_run(definition.name, "failed")
         raise ApiError(
             ErrorCode.PIPELINE_RUN_FAILED,
             f"Pipeline completed but none of its output_nodes "
             f"({', '.join(definition.output_nodes)}) produced a result",
         )
 
+    metrics.count_run(definition.name, "completed")
     return RunResponse(
         pipeline_name=definition.name,
         output_node=resolved_output_node,
@@ -353,6 +362,10 @@ async def pipeline_events(
     as an `error` SSE event carrying the same ErrorResponse shape it would
     have returned as an HTTP error, and the generator then simply stops (ending
     the stream) rather than propagating the exception further.
+
+    Counts the run by how it ended, as run_pipeline does — `cancelled` when
+    the client leaves mid-run (until_disconnected cancels what the stream
+    is waiting on).
     """
     definition = run.definition
     node_outputs: dict[str, NodeResult] = {}
@@ -437,8 +450,12 @@ async def pipeline_events(
                             )
                     # Anything else (e.g. the multi-root fan-out node's empty
                     # `{}` update) carries no client-visible information — skip.
+    except (asyncio.CancelledError, GeneratorExit):
+        metrics.count_run(definition.name, "cancelled")
+        raise
     except PipelineExecutionError as e:
         logger.exception(f"Pipeline '{definition.name}' stream failed")
+        metrics.count_run(definition.name, "failed")
         yield (
             "error",
             build_error_response(
@@ -448,6 +465,7 @@ async def pipeline_events(
         return
     except Exception:
         logger.exception(f"Pipeline '{definition.name}' stream failed unexpectedly")
+        metrics.count_run(definition.name, "failed")
         yield (
             "error",
             build_error_response(request, ErrorCode.INTERNAL_ERROR, UNEXPECTED_RUN_FAILURE),
@@ -456,6 +474,7 @@ async def pipeline_events(
 
     resolved_output_node = _resolve_output_node(definition, node_outputs)
     if resolved_output_node is None:
+        metrics.count_run(definition.name, "failed")
         yield (
             "error",
             build_error_response(
@@ -467,6 +486,7 @@ async def pipeline_events(
         )
         return
 
+    metrics.count_run(definition.name, "completed")
     yield (
         "done",
         StreamDoneEvent(

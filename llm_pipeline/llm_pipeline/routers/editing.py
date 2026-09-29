@@ -1,9 +1,9 @@
 """
 Endpoints for reading and editing pipelines (the web builder and the CLI):
 the models an editor may select, reading and saving a pipeline, node
-presets, and /drafts/… — validation/import/export, prompt previews and
+presets, and /v1/drafts/… — validation/import/export, prompt previews and
 test runs on a definition that needn't be saved (their own path space, so
-no pipeline name can collide with them). GET and PUT /pipelines/{name}
+no pipeline name can collide with them). GET and PUT /v1/pipelines/{name}
 speak the same representation — what you read is what you save back.
 
 Reads are available whenever the client is authenticated. Every write is

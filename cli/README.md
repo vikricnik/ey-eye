@@ -45,7 +45,7 @@ printf '/use consensus-qa\nWhen did the Berlin Wall fall?\n' | npm start
 
 ## Usage
 
-On startup, the CLI shows server info (`GET /server-info`: the default
+On startup, the CLI shows server info (`GET /v1/server-info`: the default
 pipeline and whether editing is on) and the pipelines it can run, and picks
 up the server's configured `default_pipeline_name`. Type a prompt and press Enter to run it through the
 active pipeline. Prior turns in the session are sent as conversation context

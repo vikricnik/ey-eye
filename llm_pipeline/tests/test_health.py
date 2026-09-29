@@ -28,8 +28,8 @@ def test_health_is_open_and_says_only_that_the_server_is_up(client: TestClient) 
 
 
 def test_server_info_needs_the_api_key(client: TestClient) -> None:
-    assert client.get("/server-info").status_code == 401
-    info = client.get("/server-info", headers={"X-API-Key": "secret"}).json()
+    assert client.get("/v1/server-info").status_code == 401
+    info = client.get("/v1/server-info", headers={"X-API-Key": "secret"}).json()
     assert info == {
         "default_pipeline_name": settings.default_pipeline_name,
         "editing_enabled": False,
@@ -40,4 +40,4 @@ def test_server_info_needs_the_api_key(client: TestClient) -> None:
 def test_neither_reveals_the_pipelines_directory(client: TestClient) -> None:
     directory = str(settings.pipelines_path)
     assert directory not in client.get("/health").text
-    assert directory not in client.get("/server-info", headers={"X-API-Key": "secret"}).text
+    assert directory not in client.get("/v1/server-info", headers={"X-API-Key": "secret"}).text

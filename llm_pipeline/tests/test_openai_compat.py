@@ -216,5 +216,6 @@ def test_a_rate_limited_request_keeps_retry_after_in_openais_shape(
 
 
 def test_v1_is_left_to_this_apis_own_versioning(client: TestClient) -> None:
-    assert client.get("/v1/models").status_code == 404
+    """/v1/models is this API's editor model list, not OpenAI's listing."""
+    assert "providers" in client.get("/v1/models").json()
     assert client.post("/v1/chat/completions", json={}).status_code == 404

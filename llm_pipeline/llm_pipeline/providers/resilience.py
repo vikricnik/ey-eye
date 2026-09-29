@@ -8,9 +8,11 @@ variant) against a different kind of backend call.
 """
 
 import asyncio
+import logging
 import time
 from collections.abc import Callable
 
+from llm_pipeline import metrics
 from llm_pipeline.providers.base import (
     Generation,
     LLMProvider,
@@ -19,6 +21,8 @@ from llm_pipeline.providers.base import (
     RetryPolicy,
 )
 from llm_pipeline.settings import settings
+
+logger: logging.Logger = logging.getLogger("llm_pipeline")
 
 
 async def generate_with_timeout(
@@ -51,6 +55,8 @@ class _CircuitBreakerState:
     def __init__(self) -> None:
         self.consecutive_failures = 0
         self.opened_at: float | None = None
+        # When the half-open circuit's one trial call started, if one has.
+        self.trial_started_at: float | None = None
 
 
 class CircuitBreaker:
@@ -58,7 +64,10 @@ class CircuitBreaker:
     consecutive failures, stops attempting calls to that model for
     `cooldown_seconds` — failing fast instead of paying the timeout cost on
     every request for a model that's known to be down — then allows one
-    trial call once the cooldown elapses to check if it's recovered.
+    trial call once the cooldown elapses to check if it's recovered. Every
+    other caller keeps failing fast until that trial's outcome is recorded,
+    so a recovering model isn't hit by every request that queued up while
+    it was down.
 
     Explicitly constructible (not just a bare module global) so callers can
     inject their own instance instead of always sharing the process-wide
@@ -78,14 +87,44 @@ class CircuitBreaker:
         # trial call.
         return time.monotonic() - state.opened_at < self.cooldown_seconds
 
+    def allow_call(self, key: str) -> bool:
+        """Whether a call to `key` may go ahead now — ask right before each
+        attempt. Closed: yes. Open: no. Half-open: yes for exactly one
+        caller, which becomes the trial call. A trial whose outcome is never
+        recorded (its request was cancelled) is replaced after another
+        cooldown, so it can't hold the circuit shut for good."""
+        state = self._states.get(key)
+        if state is None or state.opened_at is None:
+            return True
+        now = time.monotonic()
+        if now - state.opened_at < self.cooldown_seconds:
+            return False
+        trial = state.trial_started_at
+        if trial is not None and now - trial < self.cooldown_seconds:
+            return False
+        state.trial_started_at = now
+        return True
+
     def record_success(self, key: str) -> None:
         self._states[key] = _CircuitBreakerState()
 
     def record_failure(self, key: str) -> None:
+        """Counts a failure. Opening the circuit — from closed, or again
+        when the half-open trial call fails — is logged and counted once;
+        failures of calls that were already in flight when it opened only
+        restart the cooldown."""
         state = self._states.setdefault(key, _CircuitBreakerState())
         state.consecutive_failures += 1
+        state.trial_started_at = None
         if state.consecutive_failures >= self.failure_threshold:
+            was_open = self.is_open(key)
             state.opened_at = time.monotonic()
+            if not was_open:
+                logger.warning(
+                    f"circuit opened for {key} after {state.consecutive_failures} "
+                    f"consecutive failures — calls fail fast for {self.cooldown_seconds}s"
+                )
+                metrics.count_circuit_opened(key)
 
     def reset(self) -> None:
         """Clears all tracked state — a proper public method rather than
@@ -139,28 +178,36 @@ async def generate_with_retry(
     reaches for a hardcoded global by name, it just falls back to one if the
     caller doesn't provide an alternative.
 
-    The circuit breaker check happens BEFORE attempting any call: if this
-    model has failed too many times recently, fail immediately without
-    consuming a retry attempt or paying the timeout cost again.
+    The circuit breaker is asked BEFORE EVERY attempt, retries included: if
+    this model has failed too many times recently, fail immediately without
+    paying the timeout cost again. A circuit that opens partway through
+    (this request's own failures, or concurrent ones, reached the
+    threshold) ends the retrying — with the last error this request
+    actually saw, which says more than "circuit open".
 
     Retries apply only to ProviderError (transient failures) and never
     exceed policy.max_attempts total, including the first try. `on_retry(n)` is
     called just before attempt n (n >= 2) — streaming callers use it to tell
     clients to discard partial output from the failed attempt.
+
+    Every attempt is counted by its result (metrics.count_model_call), and
+    so is every attempt the breaker refuses.
     """
     breaker = circuit_breaker if circuit_breaker is not None else _default_circuit_breaker
 
-    if breaker.is_open(spec.identity):
-        raise ProviderError(
-            spec.identity,
-            RuntimeError(
-                f"circuit open after {breaker.failure_threshold}+ consecutive "
-                f"failures — skipping call (cooldown {breaker.cooldown_seconds}s)"
-            ),
-        )
-
     last_error: ProviderError | None = None
     for attempt in range(policy.max_attempts):
+        if not breaker.allow_call(spec.identity):
+            metrics.count_model_call(spec.identity, "circuit_open")
+            if last_error is not None:
+                raise last_error
+            raise ProviderError(
+                spec.identity,
+                RuntimeError(
+                    f"circuit open after {breaker.failure_threshold}+ consecutive "
+                    f"failures — skipping call (cooldown {breaker.cooldown_seconds}s)"
+                ),
+            )
         if attempt > 0 and on_retry is not None:
             on_retry(attempt + 1)
         try:
@@ -168,9 +215,12 @@ async def generate_with_retry(
                 provider, prompt, spec, policy.timeout_seconds, system=system
             )
             breaker.record_success(spec.identity)
+            metrics.count_model_call(spec.identity, "ok")
             return result
         except ProviderError as e:
             last_error = e
+            timed_out = isinstance(e.original, TimeoutError)
+            metrics.count_model_call(spec.identity, "timeout" if timed_out else "failed")
             breaker.record_failure(spec.identity)
             if attempt < policy.max_attempts - 1:
                 await asyncio.sleep(policy.backoff_base_seconds * (2**attempt))

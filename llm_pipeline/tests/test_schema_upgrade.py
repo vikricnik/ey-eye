@@ -143,7 +143,7 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClie
 
 def test_a_version_1_body_is_accepted_and_answered_in_version_2(client: TestClient) -> None:
     body = client.post(
-        "/drafts/validation", json={"format": "json", "definition": VERSION_1}
+        "/v1/drafts/validation", json={"format": "json", "definition": VERSION_1}
     ).json()
     assert body["definition"]["output_nodes"] == ["b"]
     assert body["definition"]["nodes"][1]["model"]["name"] == "big"
@@ -155,10 +155,10 @@ def test_a_version_1_body_is_accepted_and_answered_in_version_2(client: TestClie
 def test_saving_a_version_1_file_upgrades_it_and_keeps_its_comments(
     client: TestClient, tmp_path: Path
 ) -> None:
-    loaded = client.get("/pipelines/old").json()
+    loaded = client.get("/v1/pipelines/old").json()
     assert loaded["definition"]["output_nodes"] == ["answer"]
     saved = client.put(
-        "/pipelines/old",
+        "/v1/pipelines/old",
         json={"definition": loaded["definition"]},
         headers={"If-Match": f'"{loaded["revision"]}"'},
     ).json()
@@ -193,9 +193,9 @@ def test_saving_a_version_1_preset_upgrades_it_and_keeps_its_comments(
     path = tmp_path / "presets" / "fast.yaml"
     path.parent.mkdir()
     path.write_text("# for quick drafts\nname: fast\nmodel:\n  provider: ollama\n  model: llama3\n")
-    preset = client.get("/presets/fast").json()["preset"]
+    preset = client.get("/v1/presets/fast").json()["preset"]
     preset["model"]["temperature"] = 0.5
-    client.put("/presets/fast", json={"preset": preset})
+    client.put("/v1/presets/fast", json={"preset": preset})
     assert path.read_text() == (
         "# for quick drafts\nname: fast\nmodel:\n  provider: ollama\n  name: llama3\n"
         "  temperature: 0.5\n"

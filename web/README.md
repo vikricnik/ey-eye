@@ -40,7 +40,7 @@ web/
 
 Every edit goes through `draftOps` in `@llm-pipeline/client` — the same
 functions the CLI's edit commands use — and the server is the only
-validator: the editor calls `POST /drafts/validation` (debounced) and
+validator: the editor calls `POST /v1/drafts/validation` (debounced) and
 shows what it says.
 
 Types and the typed fetch client (`PipelineClient`, `RunResponse`, etc.) live in
@@ -190,7 +190,7 @@ it everything below is read-only and a banner says so):
   top handle (that's `depends_on`). Select an edge or node and press
   Backspace/Delete to remove it.
 - **Configure a node** in **Settings**: id (renaming rewrites every
-  reference), model (picked from what `GET /models` says is installed or
+  reference), model (picked from what `GET /v1/models` says is installed or
   allowlisted, with its max context, size and quantization), temperature, system prompt, prompt template (with insert
   buttons for `{{ message }}`, `{{ conversation }}` and each dependency's `{{ node.output }}`), all
   Ollama options (`num_ctx`, `num_predict`, `top_p`, `top_k`,

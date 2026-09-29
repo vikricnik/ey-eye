@@ -4,8 +4,8 @@ app.state.pipeline_cache (dependency-injected into routers via
 pipeline_loader.get_pipeline_cache — see that module's docstring for why
 this replaced a bare module-level global), registers exception handlers,
 and includes the routers. No route logic or business logic lives here
-directly — see routers/health.py, routers/runs.py, error_handling.py,
-pipeline_loader.py.
+directly — see routers/health.py, routers/discovery.py, routers/runs.py,
+error_handling.py, pipeline_loader.py.
 """
 
 import logging
@@ -21,11 +21,18 @@ from llm_pipeline.model_catalog import ModelCatalog
 from llm_pipeline.pipeline_config import load_pipeline_definition
 from llm_pipeline.pipeline_loader import PipelineCache
 from llm_pipeline.pipeline_store import PipelineStore
-from llm_pipeline.routers import editing, health, openai_compat, runs
+from llm_pipeline.routers import discovery, editing, health, metrics, openai_compat, runs
 from llm_pipeline.settings import settings
 
 configure_logging()
 logger: logging.Logger = logging.getLogger("llm_pipeline")
+
+# Every route of this API is under it, so a breaking change can arrive as
+# /v2 beside it instead of breaking every client at once. Outside it: what
+# is called at fixed paths (/health for load balancers, /metrics for
+# Prometheus) and the OpenAI-compatible routes, under OpenAI's own
+# /openai/v1.
+API_V1 = "/v1"
 
 
 def _validate_pipelines_at_startup() -> None:
@@ -126,9 +133,11 @@ def create_app() -> FastAPI:
     register_exception_handlers(app)
 
     app.include_router(health.router)
-    app.include_router(runs.router)
-    app.include_router(editing.router)
+    app.include_router(discovery.router, prefix=API_V1)
+    app.include_router(runs.router, prefix=API_V1)
+    app.include_router(editing.router, prefix=API_V1)
     app.include_router(openai_compat.router)
+    app.include_router(metrics.router)
 
     return app
 

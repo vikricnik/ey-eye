@@ -59,8 +59,8 @@ class Settings(BaseSettings):
     circuit_breaker_cooldown_seconds: float = 30.0
 
     # --- Pipeline editing (web/CLI builder) ---
-    # OFF by default: when false, every write endpoint (PUT /pipelines/{name},
-    # PUT /presets/{name}) returns 403 and clients show pipelines read-only.
+    # OFF by default: when false, every write endpoint (PUT /v1/pipelines/{name},
+    # PUT /v1/presets/{name}) returns 403 and clients show pipelines read-only.
     # Turn on deliberately — with API_KEYS set — for any server reachable
     # beyond localhost, since it lets clients rewrite pipelines_dir files.
     pipeline_editing_enabled: bool = False

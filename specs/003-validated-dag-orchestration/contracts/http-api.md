@@ -181,11 +181,18 @@ A run interrupted by service shutdown fails visibly rather than hanging
 |---|---|
 | `POST /ask` | Replaced by `POST /v1/workflows/{name}/run`. Its prompt-plus-history request shape is superseded by typed `inputs` |
 | `POST /ask/stream` | Node-completion SSE returns at Stage 2 as `GET /v1/runs/{id}/events`, against durable runs. Keeping it now would mean building it twice |
-| `GET /pipelines`, `GET /pipelines/{name}` | Renamed to `/v1/workflows...` with the new detail shape |
+| `GET /v1/pipelines`, `GET /v1/pipelines/{name}` | Renamed to `/v1/workflows...` with the new detail shape |
 
 These are breaking changes with no deprecation window — the schema
 change makes the old request and response bodies unrepresentable, and
 both clients are in this repo and migrate with the server.
+
+The pipeline routes have been served under `/v1` since BE-005
+(`BACKEND_REVIEW.md`), so the rename breaks v1 itself. That is fine only
+while no build serving `/v1/pipelines` has been released: as of
+2026-09-29, `main` serves only `/health` and `/ask`. Once one has been
+released, ship the workflows shape as `/v2`, or keep `/v1/pipelines`
+beside `/v1/workflows` until clients have moved.
 
 ---
 

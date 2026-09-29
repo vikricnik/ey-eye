@@ -80,7 +80,7 @@ def _usage_by_node(node_outputs: dict[str, Any]) -> dict[str, Any]:
 
 
 def test_usage_and_context_window_per_node(client: TestClient) -> None:
-    response = client.post("/pipelines/usage/runs", json={"prompt": "hi"})
+    response = client.post("/v1/pipelines/usage/runs", json={"prompt": "hi"})
     assert response.status_code == 200
     usage = _usage_by_node(response.json()["node_outputs"])
     assert usage["sized"] == {
@@ -96,7 +96,7 @@ def test_usage_and_context_window_per_node(client: TestClient) -> None:
 
 def test_streamed_node_complete_and_done_carry_the_same_usage(client: TestClient) -> None:
     response = client.post(
-        "/pipelines/usage/runs",
+        "/v1/pipelines/usage/runs",
         json={
             "prompt": "hi",
         },

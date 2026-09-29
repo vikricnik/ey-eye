@@ -285,7 +285,7 @@ notes on summarization as a future improvement.
 
 ## Stateless pipeline selection — why there's no "activate" endpoint
 
-Every run names its pipeline in the path (`POST /pipelines/{name}/runs`); the server has no
+Every run names its pipeline in the path (`POST /v1/pipelines/{name}/runs`); the server has no
 server-side "currently active pipeline" to mutate. This was a deliberate
 choice over a stateful `/pipelines/{name}/activate` design: a global "active"
 variable would live independently in each worker process under

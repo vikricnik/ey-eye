@@ -14,7 +14,7 @@ export interface RerunRequest {
   outputs: Record<string, string>;
 }
 
-/** POST /pipelines/{name}/runs — the pipeline is named in the path. */
+/** POST /v1/pipelines/{name}/runs — the pipeline is named in the path. */
 export interface RunRequest {
   prompt: string;
   history: ConversationTurn[];
@@ -77,7 +77,7 @@ export interface RunResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Streaming (POST /pipelines/{name}/runs with Accept: text/event-stream) —
+// Streaming (POST /v1/pipelines/{name}/runs with Accept: text/event-stream) —
 // Server-Sent Events: node_start, node_token as models generate text,
 // node_complete, loop_iteration, then done. See PipelineClient.askStream()
 // for how these are consumed.
@@ -151,7 +151,7 @@ export interface PipelineSummary {
 // ---------------------------------------------------------------------------
 // Pipeline structure — what a client draws, derived from a definition by
 // graphModel.ts's detailFromDefinition(). Not sent by the server: GET
-// /pipelines/{name} returns the definition itself (PipelineDefinitionResponse).
+// /v1/pipelines/{name} returns the definition itself (PipelineDefinitionResponse).
 // ---------------------------------------------------------------------------
 
 export interface PipelineNodeInfo {
@@ -201,8 +201,8 @@ export interface HealthResponse {
   status: "ok";
 }
 
-/** GET /server-info — what a client needs to start. The pipelines
- * themselves are GET /pipelines. */
+/** GET /v1/server-info — what a client needs to start. The pipelines
+ * themselves are GET /v1/pipelines. */
 export interface ServerInfoResponse {
   /** The pipeline to open first; it can't be deleted. */
   default_pipeline_name: string;
@@ -435,7 +435,7 @@ export interface ProviderModels {
   models: ModelInfo[];
 }
 
-/** Limits of one installed Ollama model (GET /models/ollama/{name}). */
+/** Limits of one installed Ollama model (GET /v1/models/ollama/{name}). */
 export interface ModelLimitsResponse {
   name: string;
   context_length?: number | null;
@@ -474,7 +474,7 @@ export interface ValidateYamlRequest {
   text: string;
 }
 
-/** POST /drafts/validation — one or the other, as `format` says. */
+/** POST /v1/drafts/validation — one or the other, as `format` says. */
 export type ValidatePipelineRequest = ValidateDefinitionRequest | ValidateYamlRequest;
 
 export interface ValidatePipelineResponse {
@@ -488,7 +488,7 @@ export interface ValidatePipelineResponse {
   warnings?: DefinitionIssue[];
 }
 
-/** PUT /pipelines/{name}. Whether it creates or updates is said by a
+/** PUT /v1/pipelines/{name}. Whether it creates or updates is said by a
  * header — see createPipeline() and updatePipeline(). */
 export interface SavePipelineRequest {
   definition: PipelineDefinition;
@@ -502,7 +502,7 @@ export interface SavePipelineResponse {
   comments_preserved?: boolean;
 }
 
-/** PUT /presets/{name}. */
+/** PUT /v1/presets/{name}. */
 export interface SavePresetRequest {
   preset: NodePreset;
 }
@@ -672,7 +672,7 @@ export interface GraphViewState {
   serverReportsStarts: boolean;
 }
 
-/** POST /drafts/prompt-preview — what a node of `definition` (saved or not)
+/** POST /v1/drafts/prompt-preview — what a node of `definition` (saved or not)
  * would receive, given a message, the conversation so far and other
  * nodes' outputs (e.g. the last run's). Needs editing enabled. */
 export interface PreviewPromptRequest {
@@ -697,7 +697,7 @@ export interface VariantRequest {
   models: Record<string, NodeModelConfig>;
 }
 
-/** POST /drafts/test-runs. `cases` picks some by name (default: all);
+/** POST /v1/drafts/test-runs. `cases` picks some by name (default: all);
  * `inputs` adds one-off messages; each variant runs every case too, next
  * to the definition as it is ("current"). Needs editing enabled. */
 export interface RunTestsRequest {

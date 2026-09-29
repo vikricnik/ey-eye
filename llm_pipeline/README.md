@@ -51,10 +51,13 @@ pipeline_config/            YAML schema + validation
 │                                @model_validator methods
 └── loader.py                     reads/lists pipeline YAML files from disk
 
-routers/                    FastAPI route handlers
-├── health.py                 GET /health, /pipelines
-├── editing.py                GET/PUT/DELETE /pipelines/{name}, models, presets, …
-└── runs.py                     POST /pipelines/{name}/runs + prompt/history validation
+routers/                    FastAPI route handlers — this API's own under /v1
+├── discovery.py              GET /v1/server-info, /v1/pipelines
+├── editing.py                GET/PUT/DELETE /v1/pipelines/{name}, models, presets, …
+├── runs.py                   POST /v1/pipelines/{name}/runs + prompt/history validation
+├── health.py                 GET /health — unversioned, probed by load balancers
+├── metrics.py                GET /metrics — unversioned, scraped by Prometheus
+└── openai_compat.py          /openai/v1/… — the OpenAI-compatible chat endpoints
 
 safe_eval.py                Sandboxed expression language for `when`/`exit_when` —
                              never eval(), a small whitelisted AST subset
@@ -98,7 +101,7 @@ between test runs (see `tests/test_error_responses.py`, which uses
 
 ### Why stateless per-request pipeline *selection*?
 
-Every run names its pipeline in the path (`/pipelines/{name}/runs`), and the server loads/caches
+Every run names its pipeline in the path (`/v1/pipelines/{name}/runs`), and the server loads/caches
 compiled graphs by name rather than mutating a global "currently active"
 pipeline. This matters once you run more than one worker process
 (`uvicorn --workers N`): a global "active pipeline" would live independently
@@ -249,7 +252,7 @@ node leaves them out. Every `llm_call` node must end up with a model.
 
 A pipeline can carry test cases — messages to run it with, and what each
 answer must satisfy. The engine ignores them; editor clients run them
-(`POST /drafts/test-runs`, the web **Tests** view, the CLI's `/test`) and
+(`POST /v1/drafts/test-runs`, the web **Tests** view, the CLI's `/test`) and
 compare models on them.
 
 ```yaml
@@ -528,7 +531,36 @@ credentials — so it says only that the server is up:
 { "status": "ok" }
 ```
 
-### `GET /server-info`
+### `GET /metrics`
+Counters for Prometheus, in its text format — what to alert on while
+something is going wrong, where the logs explain it afterwards:
+
+| Counter | Labels | Counts |
+|---|---|---|
+| `llm_pipeline_runs_total` | `pipeline`, `outcome` = `completed` / `failed` / `cancelled` | runs, answered or streamed (the OpenAI-compatible endpoint included) — a request refused before its run starts is no run |
+| `llm_pipeline_model_calls_total` | `model`, `outcome` = `ok` / `failed` / `timeout` / `circuit_open` | model call attempts, retries included; `circuit_open` is a call the breaker refused without calling |
+| `llm_pipeline_circuit_opened_total` | `model` | a model's circuit breaker opening — once per opening, not per failure |
+| `llm_pipeline_rate_limited_total` | — | requests refused with 429 |
+
+It needs an API key like every endpoint but `/health`: its labels name
+pipelines and models. It isn't rate limited (a 429 would leave a gap in
+every graph), and isn't in the OpenAPI schema. A scrape config:
+```yaml
+scrape_configs:
+  - job_name: llm-pipeline
+    authorization: { credentials: <an API key> }
+    static_configs: [{ targets: ["pipeline-server:8000"] }]
+```
+Alerts worth having: `rate(llm_pipeline_runs_total{outcome="failed"}[5m])`
+above your normal, any increase in `llm_pipeline_circuit_opened_total`, and
+`llm_pipeline_model_calls_total{outcome=~"failed|timeout"}` by `model`.
+
+With `uvicorn --workers N`, set `PROMETHEUS_MULTIPROC_DIR` to an empty
+directory in the server process's environment (not in `.env`), so a scrape
+— which reaches one worker — reports every worker's counts. Empty it
+before each start.
+
+### `GET /v1/server-info`
 What a client needs to start (requires an API key like every endpoint but
 `/health`): the pipeline to open first, and whether this server allows
 editing — and if it was asked to but refuses, why.
@@ -540,7 +572,7 @@ editing — and if it was asked to but refuses, why.
 }
 ```
 
-### `GET /pipelines`
+### `GET /v1/pipelines`
 The pipelines the server can run (a file that fails validation is left out):
 ```json
 {
@@ -551,11 +583,11 @@ The pipelines the server can run (a file that fails validation is left out):
 }
 ```
 
-### `GET /pipelines/{name}`
+### `GET /v1/pipelines/{name}`
 Returns the pipeline as stored — its complete definition (nodes, prompts,
 models, branches, loops, layout), in exactly the shape of its YAML file,
 plus its `revision` — also the response's `ETag` header — to send back as
-`If-Match` when saving it with `PUT /pipelines/{name}`. What you read is
+`If-Match` when saving it with `PUT /v1/pipelines/{name}`. What you read is
 what you save:
 ```json
 {
@@ -578,13 +610,13 @@ A client that draws the pipeline derives its structure from this definition
 (`detailFromDefinition()` in the shared client package) — the same way it
 draws an unsaved draft.
 
-### `POST /pipelines/{name}/runs`
+### `POST /v1/pipelines/{name}/runs`
 
 Runs a pipeline. Answered when the run finishes — or, sent with
 `Accept: text/event-stream`, streamed while it runs (see *Streaming a run*
 below). Requires an API key if `API_KEYS` is set (see `.env.example`):
 ```bash
-curl -X POST http://localhost:8000/pipelines/consensus-qa/runs \
+curl -X POST http://localhost:8000/v1/pipelines/consensus-qa/runs \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $API_KEY" \
   -d '{"prompt": "What year did the Berlin Wall fall?", "history": []}'
@@ -646,7 +678,7 @@ route as before. See `rerun.py`.
 
 ### Streaming a run
 
-The same `POST /pipelines/{name}/runs`, sent with `Accept: text/event-stream`,
+The same `POST /v1/pipelines/{name}/runs`, sent with `Accept: text/event-stream`,
 streams progress via Server-Sent Events as the pipeline runs, rather than waiting for the whole DAG to finish: when
 each node starts, the **text each node's model is writing, token by
 token**, when it completes, and the final result. Token streaming needs no
@@ -654,7 +686,7 @@ code in the provider adapters — LangChain chat models stream on their own
 when LangGraph's `messages` stream mode is listening.
 
 ```bash
-curl -N -X POST http://localhost:8000/pipelines/consensus-qa/runs \
+curl -N -X POST http://localhost:8000/v1/pipelines/consensus-qa/runs \
   -H "Content-Type: application/json" \
   -H "Accept: text/event-stream" \
   -H "Authorization: Bearer $API_KEY" \
@@ -757,7 +789,7 @@ default**: set `PIPELINE_EDITING_ENABLED=true` to allow it, and set
 `API_KEYS` too on anything reachable beyond localhost — saving rewrites
 files in `PIPELINES_DIR`.
 
-Editing is **refused** (writes return 403, `/server-info` reports
+Editing is **refused** (writes return 403, `/v1/server-info` reports
 `editing_enabled: false` with an `editing_disabled_reason`) when
 `CORS_ALLOWED_ORIGINS` is `*` and no `API_KEYS` are set: in that setup any
 website open in your browser could send write requests to the server.
@@ -766,15 +798,15 @@ Set `API_KEYS`, or list the actual client origins (e.g.
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /models` | Models an editor may pick: every model installed on `OLLAMA_BASE_URL`, plus the cloud models listed in `EDITOR_CLOUD_MODELS` (`provider:model`, comma-separated). `?refresh=true` skips the short cache. |
-| `GET /models/ollama/{name}` | An installed Ollama model's limits — max context length, parameter size, quantization, family — for editor hints. 404 when it isn't installed or Ollama can't be reached. |
-| `GET /pipelines/{name}` | The full definition (prompts, options, layout) plus its `revision` and whether the file has YAML comments (`has_comments`) — what `PUT` takes back. |
-| `POST /drafts/validation` | Body `{"format": "json", "definition": {...}}` or `{"format": "yaml", "text": "..."}` — one or the other, as `format` says. Validates without saving and returns `{definition, yaml, model_issues, warnings}` — the same call serves live validation, import (YAML in) and export (canonical YAML out). `warnings` flags settings beyond what a model supports (e.g. `num_ctx` above its maximum context) but never blocks a save. A 422 names the offending node in `details.node_id`. |
-| `PUT /pipelines/{name}` | Body `{"definition": {...}}`, and a header saying whether this creates or updates: `If-None-Match: *` creates (412 `ALREADY_EXISTS` if the name is taken); `If-Match: "<revision>"` updates only the version you loaded (412 `REVISION_CONFLICT` if someone saved in between; `If-Match: *` updates whatever is there). Neither is `428 PRECONDITION_REQUIRED` — a blind overwrite could undo someone else's save. Writes `pipelines/<name>.yaml` atomically; the response's `ETag` is the new revision, and the next run uses it. |
-| `DELETE /pipelines/{name}` | Moves the file to `pipelines/.deleted/<name>.<timestamp>.yaml` — recoverable by moving it back. `If-Match: "<revision>"` (optional) refuses the delete if the file changed since loaded (412); the server's `DEFAULT_PIPELINE_NAME` can't be deleted (409). The old `?revision=` query is refused (422) rather than ignored. |
-| `POST /drafts/prompt-preview` | Body `{"definition": {...}, "node_id": "...", "prompt": "...", "history": [...], "outputs": {<node>: <text>}}`. What that node would receive — `{prompt, system, missing}` — rendered by the same code a run uses, from a definition that needn't be saved. Inputs with no output given appear as `<node's output>` placeholders (listed in `missing`); older turns a run would summarize are left out (previews never call a model). Needs editing enabled — it renders client-supplied templates. |
-| `POST /drafts/test-runs` | Body `{"definition": {...}, "cases": [names], "inputs": [messages], "variants": [{"label", "models": {<node>: <model block>}}]}`. Runs the definition's test cases (see "Test cases") — all, or the named ones, plus one-off `inputs` — and again for each variant (the same pipeline with other models for some nodes; at most 3), streaming `case_start` / `case_result` per case and variant, then `tests_done` with per-variant totals. Every variant passes validation and the model allowlist. Needs editing enabled — it runs client-chosen models. |
-| `GET /presets`, `GET /presets/{name}`, `PUT /presets/{name}`, `DELETE /presets/{name}` | Presets: a node's whole configuration — `model` (with options), `system_prompt`, `prompt_template`, `include_history`, `strip_reasoning`, plus a `description` — stored as `presets/<name>.yaml` (`PRESETS_DIR`). The model passes the allowlist and the prompt must parse; which node outputs it references is checked when it lands in a pipeline. Adding or applying one copies its values into a node; pipelines never reference presets by name. Deleting moves the file to `presets/.deleted/`. Writes are last-write-wins unless you send `If-Match` (the `ETag` from reading it) or `If-None-Match: *`, as for pipelines. |
+| `GET /v1/models` | Models an editor may pick: every model installed on `OLLAMA_BASE_URL`, plus the cloud models listed in `EDITOR_CLOUD_MODELS` (`provider:model`, comma-separated). `?refresh=true` skips the short cache. |
+| `GET /v1/models/ollama/{name}` | An installed Ollama model's limits — max context length, parameter size, quantization, family — for editor hints. 404 when it isn't installed or Ollama can't be reached. |
+| `GET /v1/pipelines/{name}` | The full definition (prompts, options, layout) plus its `revision` and whether the file has YAML comments (`has_comments`) — what `PUT` takes back. |
+| `POST /v1/drafts/validation` | Body `{"format": "json", "definition": {...}}` or `{"format": "yaml", "text": "..."}` — one or the other, as `format` says. Validates without saving and returns `{definition, yaml, model_issues, warnings}` — the same call serves live validation, import (YAML in) and export (canonical YAML out). `warnings` flags settings beyond what a model supports (e.g. `num_ctx` above its maximum context) but never blocks a save. A 422 names the offending node in `details.node_id`. |
+| `PUT /v1/pipelines/{name}` | Body `{"definition": {...}}`, and a header saying whether this creates or updates: `If-None-Match: *` creates (412 `ALREADY_EXISTS` if the name is taken); `If-Match: "<revision>"` updates only the version you loaded (412 `REVISION_CONFLICT` if someone saved in between; `If-Match: *` updates whatever is there). Neither is `428 PRECONDITION_REQUIRED` — a blind overwrite could undo someone else's save. Writes `pipelines/<name>.yaml` atomically; the response's `ETag` is the new revision, and the next run uses it. |
+| `DELETE /v1/pipelines/{name}` | Moves the file to `pipelines/.deleted/<name>.<timestamp>.yaml` — recoverable by moving it back. `If-Match: "<revision>"` (optional) refuses the delete if the file changed since loaded (412); the server's `DEFAULT_PIPELINE_NAME` can't be deleted (409). The old `?revision=` query is refused (422) rather than ignored. |
+| `POST /v1/drafts/prompt-preview` | Body `{"definition": {...}, "node_id": "...", "prompt": "...", "history": [...], "outputs": {<node>: <text>}}`. What that node would receive — `{prompt, system, missing}` — rendered by the same code a run uses, from a definition that needn't be saved. Inputs with no output given appear as `<node's output>` placeholders (listed in `missing`); older turns a run would summarize are left out (previews never call a model). Needs editing enabled — it renders client-supplied templates. |
+| `POST /v1/drafts/test-runs` | Body `{"definition": {...}, "cases": [names], "inputs": [messages], "variants": [{"label", "models": {<node>: <model block>}}]}`. Runs the definition's test cases (see "Test cases") — all, or the named ones, plus one-off `inputs` — and again for each variant (the same pipeline with other models for some nodes; at most 3), streaming `case_start` / `case_result` per case and variant, then `tests_done` with per-variant totals. Every variant passes validation and the model allowlist. Needs editing enabled — it runs client-chosen models. |
+| `GET /v1/presets`, `GET /v1/presets/{name}`, `PUT /v1/presets/{name}`, `DELETE /v1/presets/{name}` | Presets: a node's whole configuration — `model` (with options), `system_prompt`, `prompt_template`, `include_history`, `strip_reasoning`, plus a `description` — stored as `presets/<name>.yaml` (`PRESETS_DIR`). The model passes the allowlist and the prompt must parse; which node outputs it references is checked when it lands in a pipeline. Adding or applying one copies its values into a node; pipelines never reference presets by name. Deleting moves the file to `presets/.deleted/`. Writes are last-write-wins unless you send `If-Match` (the `ETag` from reading it) or `If-None-Match: *`, as for pipelines. |
 
 What a save goes through, in order — and nothing is written unless all of
 it passes:
@@ -829,7 +861,7 @@ helper:
   "error": "Not Found",
   "code": "PIPELINE_NOT_FOUND",
   "message": "No pipeline named 'does-not-exist'",
-  "request": "POST /pipelines/does-not-exist/runs",
+  "request": "POST /v1/pipelines/does-not-exist/runs",
   "request_id": "a1b2c3d4e5f6",
   "details": {},
   "validations": []
@@ -955,9 +987,12 @@ there.
 - **Circuit breaker** (`providers/resilience.py::CircuitBreaker`) — after N consecutive
   failures for a given model (`CIRCUIT_BREAKER_FAILURE_THRESHOLD`), that model
   is skipped entirely (fails fast, no network call) for a cooldown period
-  (`CIRCUIT_BREAKER_COOLDOWN_SECONDS`) before a trial call is allowed again.
-  Composes with retries — the breaker can short-circuit before a retry loop
-  even starts.
+  (`CIRCUIT_BREAKER_COOLDOWN_SECONDS`) before one trial call is allowed
+  again — every other request keeps failing fast until that trial's outcome
+  is known. Composes with retries — the breaker is asked before every
+  attempt, so a circuit that opens mid-request ends its retrying.
+- **Metrics** (`metrics.py`, `GET /metrics`) — Prometheus counters for runs,
+  model calls, circuit openings and 429s; see [`GET /metrics`](#get-metrics).
 - **Request correlation IDs** (`logging_context.py`) — every request gets an
   id (reused from an incoming `X-Request-ID` header, or generated), injected
   into every log line automatically via a logging filter, and echoed back as
@@ -973,7 +1008,7 @@ there.
   `^[a-zA-Z0-9_-]+$` before being used to build a filesystem path.
 - **Read-only unless editing is enabled** — out of the box nothing writes a
   file: saving and deleting pipelines and presets (`PUT`/`DELETE` on
-  `/pipelines/{name}` and `/presets/{name}`), and the `/drafts/…` previews
+  `/v1/pipelines/{name}` and `/v1/presets/{name}`), and the `/v1/drafts/…` previews
   and test runs that render or run client-supplied templates, answer 403
   `EDITING_DISABLED` until `PIPELINE_EDITING_ENABLED=true` — and stay
   refused while CORS allows every origin without `API_KEYS`. There is no
@@ -993,8 +1028,8 @@ there.
   variables matching `.env.example`.
 
 Tested in `tests/test_auth.py`, `tests/test_rate_limit.py`,
-`tests/test_circuit_breaker.py` (all using dependency injection / mocked
-providers — no live network needed).
+`tests/test_circuit_breaker.py`, `tests/test_metrics.py` (all using
+dependency injection / mocked providers — no live network needed).
 
 ### Still not implemented
 

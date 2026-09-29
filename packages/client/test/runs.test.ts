@@ -57,8 +57,8 @@ describe("runs", () => {
     await client.ask({ pipeline: "my-pipe", prompt: "q" });
     for await (const _event of client.askStream({ pipeline: "my-pipe", prompt: "q" })) void _event;
     assert.deepEqual(seen, [
-      { request: "POST /pipelines/my-pipe/runs", accept: "application/json", body: { prompt: "q", history: [] } },
-      { request: "POST /pipelines/my-pipe/runs", accept: "text/event-stream", body: { prompt: "q", history: [] } },
+      { request: "POST /v1/pipelines/my-pipe/runs", accept: "application/json", body: { prompt: "q", history: [] } },
+      { request: "POST /v1/pipelines/my-pipe/runs", accept: "text/event-stream", body: { prompt: "q", history: [] } },
     ]);
   });
 
@@ -78,7 +78,7 @@ describe("runs", () => {
     for await (const _event of client.runTests({ definition })) void _event;
     assert.deepEqual(
       seen.map((s) => s.request),
-      ["POST /drafts/validation", "POST /drafts/prompt-preview", "POST /drafts/test-runs"]
+      ["POST /v1/drafts/validation", "POST /v1/drafts/prompt-preview", "POST /v1/drafts/test-runs"]
     );
     assert.deepEqual(seen[0]!.body, { format: "json", definition });
   });

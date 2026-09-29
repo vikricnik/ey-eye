@@ -29,8 +29,8 @@ def _warn_once_if_auth_disabled() -> None:
     global _warned_no_auth
     if not settings.api_keys_list and not _warned_no_auth:
         logger.warning(
-            "API_KEYS is not set — /pipelines/*, /drafts/* and /presets/* are running with NO "
-            "authentication. Anyone who can reach this server can run any "
+            "API_KEYS is not set — every endpoint but /health (/v1/*, /openai/v1/*, /metrics) "
+            "is running with NO authentication. Anyone who can reach this server can run any "
             "pipeline. Set API_KEYS (comma-separated) to enable auth."
         )
         _warned_no_auth = True

@@ -25,7 +25,7 @@ class _Client:
     method = "POST"
 
     class url:
-        path = "/pipelines/slow/runs"
+        path = "/v1/pipelines/slow/runs"
 
     def __init__(self) -> None:
         self.gone = False

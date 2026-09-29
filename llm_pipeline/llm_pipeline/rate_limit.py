@@ -16,6 +16,7 @@ from collections import defaultdict, deque
 
 from fastapi import Header, Request
 
+from llm_pipeline import metrics
 from llm_pipeline.api_error import ApiError
 from llm_pipeline.api_schemas import ErrorCode
 from llm_pipeline.settings import settings
@@ -31,17 +32,28 @@ class RateLimiter:
         self.window_seconds = window_seconds
         # client_id -> deque of request timestamps within the current window
         self._requests: dict[str, deque[float]] = defaultdict(deque)
+        # When clients with no request inside the window are next forgotten.
+        self._next_sweep_at = time.monotonic() + window_seconds
+
+    @property
+    def tracked_clients(self) -> int:
+        """How many clients request history is held for — at most those
+        seen within the last two windows (see _forget_idle_clients)."""
+        return len(self._requests)
 
     def check(self, client_id: str) -> None:
         """Raises ApiError(RATE_LIMITED) if client_id is over the limit;
         otherwise records this request and returns."""
         now = time.monotonic()
+        if now >= self._next_sweep_at:
+            self._forget_idle_clients(now)
         history = self._requests[client_id]
 
         while history and now - history[0] > self.window_seconds:
             history.popleft()
 
         if len(history) >= self.requests_per_window:
+            metrics.count_rate_limited()
             retry_after = self.window_seconds - (now - history[0])
             raise ApiError(
                 ErrorCode.RATE_LIMITED,
@@ -53,6 +65,22 @@ class RateLimiter:
             )
 
         history.append(now)
+
+    def _forget_idle_clients(self, now: float) -> None:
+        """Drops every client with no request inside the window. Its history
+        would be pruned to nothing on its next request anyway — but a client
+        that never comes back (with auth off, every IP that ever connected)
+        would otherwise be kept for the life of the process. Pruning only in
+        check() can't catch those: it only ever visits the client asking.
+        Runs at most once per window, so a request pays O(1) on average."""
+        idle = [
+            client_id
+            for client_id, history in self._requests.items()
+            if not history or now - history[-1] > self.window_seconds
+        ]
+        for client_id in idle:
+            del self._requests[client_id]
+        self._next_sweep_at = now + self.window_seconds
 
 
 # Module-level singleton — shared across requests within one process, which

@@ -124,7 +124,7 @@ def test_saving_is_forbidden_when_editing_is_disabled(
     client: TestClient, dirs: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(settings, "pipeline_editing_enabled", False)
-    response = client.put("/pipelines/fresh", json={"definition": _pipeline()}, headers=CREATE)
+    response = client.put("/v1/pipelines/fresh", json={"definition": _pipeline()}, headers=CREATE)
     assert response.status_code == 403
     assert response.json()["code"] == "EDITING_DISABLED"
     assert "PIPELINE_EDITING_ENABLED" in response.json()["message"]
@@ -132,11 +132,11 @@ def test_saving_is_forbidden_when_editing_is_disabled(
     # Reads and validation stay available.
     assert (
         client.post(
-            "/drafts/validation", json={"format": "json", "definition": _pipeline()}
+            "/v1/drafts/validation", json={"format": "json", "definition": _pipeline()}
         ).status_code
         == 200
     )
-    assert client.get("/server-info").json()["editing_enabled"] is False
+    assert client.get("/v1/server-info").json()["editing_enabled"] is False
 
 
 def test_editing_endpoints_require_an_api_key_when_auth_is_on(
@@ -144,13 +144,15 @@ def test_editing_endpoints_require_an_api_key_when_auth_is_on(
 ) -> None:
     monkeypatch.setattr(settings, "api_keys", "secret")
     assert (
-        client.put("/pipelines/fresh", json={"definition": _pipeline()}, headers=CREATE).status_code
+        client.put(
+            "/v1/pipelines/fresh", json={"definition": _pipeline()}, headers=CREATE
+        ).status_code
         == 401
     )
-    assert client.get("/models").status_code == 401
-    assert client.get("/presets").status_code == 401
+    assert client.get("/v1/models").status_code == 401
+    assert client.get("/v1/presets").status_code == 401
     ok = client.put(
-        "/pipelines/fresh",
+        "/v1/pipelines/fresh",
         json={"definition": _pipeline()},
         headers={**CREATE, "X-API-Key": "secret"},
     )
@@ -163,13 +165,13 @@ def test_wildcard_cors_without_api_key_blocks_editing(
     """Any web page the user visits could otherwise send writes to a local
     server from their browser — so this combination fails closed."""
     monkeypatch.setattr(settings, "cors_allowed_origins", "*")
-    response = client.put("/pipelines/fresh", json={"definition": _pipeline()}, headers=CREATE)
+    response = client.put("/v1/pipelines/fresh", json={"definition": _pipeline()}, headers=CREATE)
     assert response.status_code == 403
     assert response.json()["code"] == "EDITING_DISABLED"
     assert "CORS_ALLOWED_ORIGINS" in response.json()["message"]
     assert not (dirs[0] / "fresh.yaml").exists()
 
-    info = client.get("/server-info").json()
+    info = client.get("/v1/server-info").json()
     assert info["editing_enabled"] is False
     assert "API_KEYS" in info["editing_disabled_reason"]
 
@@ -180,29 +182,31 @@ def test_wildcard_cors_is_fine_once_an_api_key_is_required(
     monkeypatch.setattr(settings, "cors_allowed_origins", "*")
     monkeypatch.setattr(settings, "api_keys", "secret")
     response = client.put(
-        "/pipelines/fresh",
+        "/v1/pipelines/fresh",
         json={"definition": _pipeline()},
         headers={**CREATE, "X-API-Key": "secret"},
     )
     assert response.status_code == 200
-    info = client.get("/server-info", headers={"X-API-Key": "secret"}).json()
+    info = client.get("/v1/server-info", headers={"X-API-Key": "secret"}).json()
     assert info["editing_enabled"] is True
     assert info["editing_disabled_reason"] is None
 
 
 def test_explicit_origins_allow_editing_without_a_key(client: TestClient) -> None:
     assert (
-        client.put("/pipelines/fresh", json={"definition": _pipeline()}, headers=CREATE).status_code
+        client.put(
+            "/v1/pipelines/fresh", json={"definition": _pipeline()}, headers=CREATE
+        ).status_code
         == 200
     )
-    assert client.get("/server-info").json()["editing_enabled"] is True
+    assert client.get("/v1/server-info").json()["editing_enabled"] is True
 
 
 # -- reading ---------------------------------------------------------------
 
 
 def test_full_definition_includes_prompts_revision_and_comment_flag(client: TestClient) -> None:
-    response = client.get("/pipelines/consensus-qa")
+    response = client.get("/v1/pipelines/consensus-qa")
     assert response.status_code == 200
     body = response.json()
     assert body["has_comments"] is True  # the shipped file is heavily commented
@@ -217,7 +221,7 @@ def test_full_definition_includes_prompts_revision_and_comment_flag(client: Test
 
 
 def test_full_definition_uses_the_from_alias_for_branches(client: TestClient) -> None:
-    body = client.get("/pipelines/support-router").json()
+    body = client.get("/v1/pipelines/support-router").json()
     branch = body["definition"]["branches"][0]
     assert branch["from"] == "classify"
     routes = {r["to"]: r for r in branch["routes"]}
@@ -226,16 +230,16 @@ def test_full_definition_uses_the_from_alias_for_branches(client: TestClient) ->
 
 
 def test_full_definition_carries_loops(client: TestClient) -> None:
-    loop = client.get("/pipelines/iterative-refinement").json()["definition"]["loops"][0]
+    loop = client.get("/v1/pipelines/iterative-refinement").json()["definition"]["loops"][0]
     assert (loop["from"], loop["back_to"], loop["exit_to"]) == ("critique", "generate", "END")
 
 
 def test_a_pipeline_reads_as_what_a_save_accepts(client: TestClient) -> None:
     """GET and PUT /pipelines/{name} speak the same representation: what you
     read is what you send back, with its revision."""
-    loaded = client.get("/pipelines/consensus-qa").json()
+    loaded = client.get("/v1/pipelines/consensus-qa").json()
     saved = client.put(
-        "/pipelines/consensus-qa",
+        "/v1/pipelines/consensus-qa",
         json={"definition": loaded["definition"]},
         headers=_if_match(loaded["revision"]),
     )
@@ -250,20 +254,22 @@ def test_draft_operations_no_longer_share_the_pipeline_name_space(
 ) -> None:
     """They moved to /drafts/…, so /pipelines/<action> is just a pipeline
     name again — POSTing to it is no longer an operation."""
-    assert client.post(f"/pipelines/{action}", json={"definition": _pipeline()}).status_code == 405
+    assert (
+        client.post(f"/v1/pipelines/{action}", json={"definition": _pipeline()}).status_code == 405
+    )
 
 
 def test_the_separate_definition_path_is_gone(client: TestClient) -> None:
-    assert client.get("/pipelines/consensus-qa/definition").status_code == 404
+    assert client.get("/v1/pipelines/consensus-qa/definition").status_code == 404
 
 
 @pytest.mark.parametrize("name", ["missing", "..%2F..%2Fetc%2Fpasswd", "a.b"])
 def test_unknown_or_unsafe_names_are_404(client: TestClient, name: str) -> None:
-    assert client.get(f"/pipelines/{name}").status_code == 404
+    assert client.get(f"/v1/pipelines/{name}").status_code == 404
 
 
 def test_models_lists_installed_ollama_models_and_cloud_allowlist(client: TestClient) -> None:
-    providers = {p["provider"]: p for p in client.get("/models").json()["providers"]}
+    providers = {p["provider"]: p for p in client.get("/v1/models").json()["providers"]}
     assert providers["ollama"]["reachable"] is True
     assert [m["name"] for m in providers["ollama"]["models"]] == INSTALLED
     assert [m["name"] for m in providers["openai"]["models"]] == ["gpt-4o"]
@@ -271,7 +277,7 @@ def test_models_lists_installed_ollama_models_and_cloud_allowlist(client: TestCl
 
 def test_models_reports_unreachable_ollama_without_failing(client: TestClient) -> None:
     _use_catalog(client, _ollama_down)
-    body = client.get("/models").json()
+    body = client.get("/v1/models").json()
     ollama = body["providers"][0]
     assert ollama["reachable"] is False and ollama["models"] == []
     assert "unreachable" in ollama["error"]
@@ -281,12 +287,14 @@ def test_models_reports_unreachable_ollama_without_failing(client: TestClient) -
 
 
 def test_validate_returns_canonical_yaml_that_round_trips(client: TestClient) -> None:
-    response = client.post("/drafts/validation", json={"format": "json", "definition": _pipeline()})
+    response = client.post(
+        "/v1/drafts/validation", json={"format": "json", "definition": _pipeline()}
+    )
     assert response.status_code == 200
     body = response.json()
     assert body["model_issues"] == []
     reloaded = client.post(
-        "/drafts/validation", json={"format": "yaml", "text": body["yaml"]}
+        "/v1/drafts/validation", json={"format": "yaml", "text": body["yaml"]}
     ).json()
     assert reloaded["definition"] == body["definition"]
     # Multi-line prompts are written as literal blocks.
@@ -296,7 +304,7 @@ def test_validate_returns_canonical_yaml_that_round_trips(client: TestClient) ->
 def test_validate_names_the_offending_node(client: TestClient) -> None:
     broken = _pipeline()
     broken["nodes"][1]["prompt_template"] = "{{ nowhere.output }}"
-    response = client.post("/drafts/validation", json={"format": "json", "definition": broken})
+    response = client.post("/v1/drafts/validation", json={"format": "json", "definition": broken})
     assert response.status_code == 422
     body = response.json()
     assert body["details"] == {"node_id": "polish"}
@@ -306,14 +314,17 @@ def test_validate_names_the_offending_node(client: TestClient) -> None:
 def test_validate_maps_field_errors_to_their_node(client: TestClient) -> None:
     broken = _pipeline()
     broken["nodes"][1]["model"]["temperature"] = 9
-    body = client.post("/drafts/validation", json={"format": "json", "definition": broken}).json()
+    body = client.post(
+        "/v1/drafts/validation", json={"format": "json", "definition": broken}
+    ).json()
     assert body["details"] == {"node_id": "polish"}
     assert body["validations"][0]["field"] == "nodes.1.model.temperature"
 
 
 def test_validate_reports_model_issues_as_warnings(client: TestClient) -> None:
     body = client.post(
-        "/drafts/validation", json={"format": "json", "definition": _pipeline(model="not-pulled")}
+        "/v1/drafts/validation",
+        json={"format": "json", "definition": _pipeline(model="not-pulled")},
     ).json()
     assert body["model_issues"] == [
         {
@@ -328,7 +339,7 @@ def test_validate_reports_model_issues_as_warnings(client: TestClient) -> None:
 
 def test_validate_takes_a_definition_or_a_file_text_never_both(client: TestClient) -> None:
     def status(body: dict[str, Any]) -> int:
-        return client.post("/drafts/validation", json=body).status_code
+        return client.post("/v1/drafts/validation", json=body).status_code
 
     assert status({"format": "yaml", "text": "nodes: [unclosed"}) == 422
     assert status({}) == 422
@@ -338,7 +349,7 @@ def test_validate_takes_a_definition_or_a_file_text_never_both(client: TestClien
 
 
 def test_openapi_says_the_validation_body_is_one_or_the_other(client: TestClient) -> None:
-    operation = client.get("/openapi.json").json()["paths"]["/drafts/validation"]["post"]
+    operation = client.get("/openapi.json").json()["paths"]["/v1/drafts/validation"]["post"]
     schema = operation["requestBody"]["content"]["application/json"]["schema"]
     assert schema["discriminator"]["propertyName"] == "format"
     assert sorted(schema["discriminator"]["mapping"]) == ["json", "yaml"]
@@ -350,7 +361,7 @@ def test_openapi_says_the_validation_body_is_one_or_the_other(client: TestClient
 def test_create_writes_the_file_and_runs_use_it_immediately(
     client: TestClient, dirs: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    response = client.put("/pipelines/fresh", json={"definition": _pipeline()}, headers=CREATE)
+    response = client.put("/v1/pipelines/fresh", json={"definition": _pipeline()}, headers=CREATE)
     assert response.status_code == 200
     path = dirs[0] / "fresh.yaml"
     on_disk = yaml.safe_load(path.read_text())
@@ -358,14 +369,14 @@ def test_create_writes_the_file_and_runs_use_it_immediately(
     assert on_disk["nodes"][1]["system_prompt"] == "You are an editor."
     assert on_disk["nodes"][1]["layout"] == {"x": 300.0, "y": 40.0}
     assert "type" not in on_disk["nodes"][0]  # defaults stay out of the file
-    assert response.json()["revision"] == client.get("/pipelines/fresh").json()["revision"]
+    assert response.json()["revision"] == client.get("/v1/pipelines/fresh").json()["revision"]
 
     class _Echo:
         async def generate(self, prompt: str, system: str | None = None) -> Generation:
             return Generation(f"<{system}>{prompt}")
 
     monkeypatch.setattr(node_types_module, "get_provider", lambda spec: _Echo())
-    answer = client.post("/pipelines/fresh/runs", json={"prompt": "hi"}).json()
+    answer = client.post("/v1/pipelines/fresh/runs", json={"prompt": "hi"}).json()
     assert answer["final_answer"].startswith("<You are an editor.>Polish this:")
 
 
@@ -374,7 +385,7 @@ def test_invalid_definition_is_rejected_and_nothing_is_written(
 ) -> None:
     cyclic = _pipeline()
     cyclic["nodes"][0]["depends_on"] = ["polish"]
-    response = client.put("/pipelines/fresh", json={"definition": cyclic}, headers=CREATE)
+    response = client.put("/v1/pipelines/fresh", json={"definition": cyclic}, headers=CREATE)
     assert response.status_code == 422
     assert response.json()["code"] == "DEFINITION_INVALID"
     assert "cycle" in response.json()["message"]
@@ -386,7 +397,7 @@ def test_disallowed_models_are_rejected_and_nothing_is_written(
     client: TestClient, dirs: tuple[Path, Path]
 ) -> None:
     response = client.put(
-        "/pipelines/fresh", json={"definition": _pipeline(model="evil:latest")}, headers=CREATE
+        "/v1/pipelines/fresh", json={"definition": _pipeline(model="evil:latest")}, headers=CREATE
     )
     assert response.status_code == 422
     assert response.json()["code"] == "MODEL_NOT_ALLOWED"
@@ -394,7 +405,7 @@ def test_disallowed_models_are_rejected_and_nothing_is_written(
 
     cloud = _pipeline()
     cloud["nodes"][0]["model"] = {"provider": "anthropic", "name": "claude-x"}
-    response = client.put("/pipelines/fresh", json={"definition": cloud}, headers=CREATE)
+    response = client.put("/v1/pipelines/fresh", json={"definition": cloud}, headers=CREATE)
     assert response.status_code == 422
     assert "EDITOR_CLOUD_MODELS" in response.json()["message"]
 
@@ -402,7 +413,7 @@ def test_disallowed_models_are_rejected_and_nothing_is_written(
     allowed_cloud["nodes"][0]["model"] = {"provider": "openai", "name": "gpt-4o"}
     assert (
         client.put(
-            "/pipelines/fresh", json={"definition": allowed_cloud}, headers=CREATE
+            "/v1/pipelines/fresh", json={"definition": allowed_cloud}, headers=CREATE
         ).status_code
         == 200
     )
@@ -410,7 +421,7 @@ def test_disallowed_models_are_rejected_and_nothing_is_written(
 
 def test_unreachable_ollama_fails_closed(client: TestClient, dirs: tuple[Path, Path]) -> None:
     _use_catalog(client, _ollama_down)
-    response = client.put("/pipelines/fresh", json={"definition": _pipeline()}, headers=CREATE)
+    response = client.put("/v1/pipelines/fresh", json={"definition": _pipeline()}, headers=CREATE)
     assert response.status_code == 422
     assert "can't verify" in response.json()["message"]
     assert not (dirs[0] / "fresh.yaml").exists()
@@ -420,12 +431,12 @@ def test_models_already_in_the_stored_pipeline_can_be_resaved(client: TestClient
     """consensus-qa uses llama3/gemma3/qwen3-coder. Even with Ollama down,
     editing only a prompt re-saves identities that were already on the
     server — that's not new client input."""
-    loaded = client.get("/pipelines/consensus-qa").json()
+    loaded = client.get("/v1/pipelines/consensus-qa").json()
     _use_catalog(client, _ollama_down)
     definition = loaded["definition"]
     definition["nodes"][0]["prompt_template"] = "Answer briefly: {{ input }}"
     response = client.put(
-        "/pipelines/consensus-qa",
+        "/v1/pipelines/consensus-qa",
         json={"definition": definition},
         headers=_if_match(loaded["revision"]),
     )
@@ -434,9 +445,9 @@ def test_models_already_in_the_stored_pipeline_can_be_resaved(client: TestClient
 
 def test_create_refuses_to_overwrite_and_stale_revisions_conflict(client: TestClient) -> None:
     created = client.put(
-        "/pipelines/fresh", json={"definition": _pipeline()}, headers=CREATE
+        "/v1/pipelines/fresh", json={"definition": _pipeline()}, headers=CREATE
     ).json()
-    again = client.put("/pipelines/fresh", json={"definition": _pipeline()}, headers=CREATE)
+    again = client.put("/v1/pipelines/fresh", json={"definition": _pipeline()}, headers=CREATE)
     assert again.status_code == 412
     assert again.json()["code"] == "ALREADY_EXISTS"
     assert "already exists" in again.json()["message"]
@@ -444,11 +455,11 @@ def test_create_refuses_to_overwrite_and_stale_revisions_conflict(client: TestCl
     edited = _pipeline()
     edited["nodes"][0]["model"]["temperature"] = 0.9
     first = client.put(
-        "/pipelines/fresh", json={"definition": edited}, headers=_if_match(created["revision"])
+        "/v1/pipelines/fresh", json={"definition": edited}, headers=_if_match(created["revision"])
     )
     assert first.status_code == 200
     stale = client.put(
-        "/pipelines/fresh", json={"definition": edited}, headers=_if_match(created["revision"])
+        "/v1/pipelines/fresh", json={"definition": edited}, headers=_if_match(created["revision"])
     )
     assert stale.status_code == 412
     assert stale.json()["code"] == "REVISION_CONFLICT"
@@ -460,43 +471,45 @@ def test_a_save_must_say_whether_it_creates_or_updates(
 ) -> None:
     """No If-Match / If-None-Match: a blind overwrite could silently undo
     someone else's save, so it is refused (428) rather than guessed at."""
-    response = client.put("/pipelines/fresh", json={"definition": _pipeline()})
+    response = client.put("/v1/pipelines/fresh", json={"definition": _pipeline()})
     assert response.status_code == 428
     assert response.json()["code"] == "PRECONDITION_REQUIRED"
     assert not (dirs[0] / "fresh.yaml").exists()
 
 
 def test_reads_and_saves_carry_the_revision_as_an_etag(client: TestClient) -> None:
-    created = client.put("/pipelines/fresh", json={"definition": _pipeline()}, headers=CREATE)
+    created = client.put("/v1/pipelines/fresh", json={"definition": _pipeline()}, headers=CREATE)
     assert created.headers["ETag"] == f'"{created.json()["revision"]}"'
-    loaded = client.get("/pipelines/fresh")
+    loaded = client.get("/v1/pipelines/fresh")
     assert loaded.headers["ETag"] == created.headers["ETag"]
     assert loaded.json()["revision"] == created.json()["revision"]
 
 
 def test_if_match_any_updates_an_existing_pipeline_only(client: TestClient) -> None:
     missing = client.put(
-        "/pipelines/fresh", json={"definition": _pipeline()}, headers={"If-Match": "*"}
+        "/v1/pipelines/fresh", json={"definition": _pipeline()}, headers={"If-Match": "*"}
     )
     assert missing.status_code == 412
     assert missing.json()["code"] == "REVISION_CONFLICT"
 
-    client.put("/pipelines/fresh", json={"definition": _pipeline()}, headers=CREATE)
+    client.put("/v1/pipelines/fresh", json={"definition": _pipeline()}, headers=CREATE)
     edited = _pipeline()
     edited["nodes"][0]["model"]["temperature"] = 0.9
-    updated = client.put("/pipelines/fresh", json={"definition": edited}, headers={"If-Match": "*"})
+    updated = client.put(
+        "/v1/pipelines/fresh", json={"definition": edited}, headers={"If-Match": "*"}
+    )
     assert updated.status_code == 200
 
 
 def test_browsers_may_read_the_etag(client: TestClient) -> None:
-    response = client.get("/pipelines/consensus-qa", headers={"Origin": "http://localhost:5173"})
+    response = client.get("/v1/pipelines/consensus-qa", headers={"Origin": "http://localhost:5173"})
     assert "etag" in response.headers["access-control-expose-headers"].lower()
 
 
 @pytest.mark.parametrize("name", ["..", "bad name", "a.b"])
 def test_unsafe_names_are_rejected_on_save(client: TestClient, name: str) -> None:
     response = client.put(
-        f"/pipelines/{name}", json={"definition": _pipeline(name=name)}, headers=CREATE
+        f"/v1/pipelines/{name}", json={"definition": _pipeline(name=name)}, headers=CREATE
     )
     assert response.status_code in (400, 404, 405)
 
@@ -505,7 +518,7 @@ def test_path_traversal_name_is_rejected_on_save(
     client: TestClient, dirs: tuple[Path, Path]
 ) -> None:
     response = client.put(
-        "/pipelines/..%2Fescape", json={"definition": _pipeline(name="x")}, headers=CREATE
+        "/v1/pipelines/..%2Fescape", json={"definition": _pipeline(name="x")}, headers=CREATE
     )
     assert response.status_code in (400, 404)
     assert not (dirs[0].parent / "escape.yaml").exists()
@@ -515,7 +528,7 @@ def test_a_name_with_a_trailing_newline_is_not_saved(
     client: TestClient, dirs: tuple[Path, Path]
 ) -> None:
     response = client.put(
-        "/pipelines/demo%0A", json={"definition": _pipeline(name="demo\n")}, headers=CREATE
+        "/v1/pipelines/demo%0A", json={"definition": _pipeline(name="demo\n")}, headers=CREATE
     )
     assert 400 <= response.status_code < 500
     assert list(dirs[0].glob("demo*")) == []
@@ -523,7 +536,7 @@ def test_a_name_with_a_trailing_newline_is_not_saved(
 
 def test_name_in_url_must_match_the_definition(client: TestClient) -> None:
     response = client.put(
-        "/pipelines/other", json={"definition": _pipeline(name="fresh")}, headers=CREATE
+        "/v1/pipelines/other", json={"definition": _pipeline(name="fresh")}, headers=CREATE
     )
     assert response.status_code == 422
     assert "must match" in response.json()["message"]
@@ -573,34 +586,34 @@ def _preset(name: str = "terse-llama", model: str = "llama3") -> dict[str, Any]:
 
 
 def test_presets_can_be_saved_listed_and_read(client: TestClient, dirs: tuple[Path, Path]) -> None:
-    assert client.get("/presets").json() == {"presets": []}
-    saved = client.put("/presets/terse-llama", json={"preset": _preset()})
+    assert client.get("/v1/presets").json() == {"presets": []}
+    saved = client.put("/v1/presets/terse-llama", json={"preset": _preset()})
     assert saved.status_code == 200
     assert (dirs[1] / "terse-llama.yaml").is_file()
 
-    listed = client.get("/presets").json()["presets"]
+    listed = client.get("/v1/presets").json()["presets"]
     assert [p["name"] for p in listed] == ["terse-llama"]
-    one = client.get("/presets/terse-llama").json()
+    one = client.get("/v1/presets/terse-llama").json()
     assert one["preset"]["model"]["options"] == {"num_ctx": 4096, "top_p": 0.8}
 
     updated = _preset()
     updated["model"]["temperature"] = 0.3
-    assert client.put("/presets/terse-llama", json={"preset": updated}).status_code == 200
-    assert client.get("/presets/terse-llama").json()["preset"]["model"]["temperature"] == 0.3
+    assert client.put("/v1/presets/terse-llama", json={"preset": updated}).status_code == 200
+    assert client.get("/v1/presets/terse-llama").json()["preset"]["model"]["temperature"] == 0.3
 
 
 def test_presets_validate_and_allowlist_their_model(
     client: TestClient, dirs: tuple[Path, Path]
 ) -> None:
-    missing = client.get("/presets/missing")
+    missing = client.get("/v1/presets/missing")
     assert missing.status_code == 404
     assert missing.json()["code"] == "PRESET_NOT_FOUND"
     evil = _preset(name="p", model="evil")
-    assert client.put("/presets/p", json={"preset": evil}).status_code == 422
+    assert client.put("/v1/presets/p", json={"preset": evil}).status_code == 422
     bad = _preset(name="p")
     bad["model"]["options"]["bogus"] = 1
-    assert client.put("/presets/p", json={"preset": bad}).status_code == 422
-    assert client.put("/presets/q", json={"preset": _preset(name="p")}).status_code == 422
+    assert client.put("/v1/presets/p", json={"preset": bad}).status_code == 422
+    assert client.put("/v1/presets/q", json={"preset": _preset(name="p")}).status_code == 422
     assert not (dirs[1] / "p.yaml").exists()
 
 
@@ -615,19 +628,19 @@ def test_a_preset_keeps_a_whole_node_configuration(
         "include_history": False,
         "strip_reasoning": True,
     }
-    assert client.put("/presets/terse-llama", json={"preset": whole}).status_code == 200
-    back = client.get("/presets/terse-llama").json()["preset"]
+    assert client.put("/v1/presets/terse-llama", json={"preset": whole}).status_code == 200
+    back = client.get("/v1/presets/terse-llama").json()["preset"]
     assert back["include_history"] is False and back["strip_reasoning"] is True
     assert back["prompt_template"] == whole["prompt_template"]
 
     sees_history = {**_preset(), "include_history": True}
-    assert client.put("/presets/terse-llama", json={"preset": sees_history}).status_code == 200
+    assert client.put("/v1/presets/terse-llama", json={"preset": sees_history}).status_code == 200
     assert "include_history" not in (dirs[1] / "terse-llama.yaml").read_text()
 
 
 def test_a_preset_prompt_must_parse(client: TestClient, dirs: tuple[Path, Path]) -> None:
     broken = {**_preset(name="p"), "prompt_template": "{{ input "}
-    response = client.put("/presets/p", json={"preset": broken})
+    response = client.put("/v1/presets/p", json={"preset": broken})
     assert response.status_code == 422
     assert "invalid template syntax" in response.text
     assert not (dirs[1] / "p.yaml").exists()
@@ -640,9 +653,9 @@ def test_delete_moves_the_file_aside_and_drops_it_from_listings(
     client: TestClient, dirs: tuple[Path, Path]
 ) -> None:
     created = client.put(
-        "/pipelines/fresh", json={"definition": _pipeline()}, headers=CREATE
+        "/v1/pipelines/fresh", json={"definition": _pipeline()}, headers=CREATE
     ).json()
-    response = client.delete("/pipelines/fresh", headers=_if_match(created["revision"]))
+    response = client.delete("/v1/pipelines/fresh", headers=_if_match(created["revision"]))
     assert response.status_code == 200
     body = response.json()
     assert body["name"] == "fresh"
@@ -650,32 +663,32 @@ def test_delete_moves_the_file_aside_and_drops_it_from_listings(
 
     assert not (dirs[0] / "fresh.yaml").exists()
     assert (dirs[0] / body["recoverable_as"]).is_file()  # recoverable
-    names = [p["name"] for p in client.get("/pipelines").json()["pipelines"]]
+    names = [p["name"] for p in client.get("/v1/pipelines").json()["pipelines"]]
     assert "fresh" not in names
-    assert client.get("/pipelines/fresh").status_code == 404
-    assert client.post("/pipelines/fresh/runs", json={"prompt": "x"}).status_code == 404
+    assert client.get("/v1/pipelines/fresh").status_code == 404
+    assert client.post("/v1/pipelines/fresh/runs", json={"prompt": "x"}).status_code == 404
 
 
 def test_delete_refuses_the_default_pipeline_stale_revisions_and_unknown_names(
     client: TestClient, dirs: tuple[Path, Path]
 ) -> None:
     default = settings.default_pipeline_name
-    refused = client.delete(f"/pipelines/{default}")
+    refused = client.delete(f"/v1/pipelines/{default}")
     assert refused.status_code == 409
     assert refused.json()["code"] == "PIPELINE_PROTECTED"
     assert "default pipeline" in refused.json()["message"]
     assert (dirs[0] / f"{default}.yaml").is_file()
 
-    client.put("/pipelines/fresh", json={"definition": _pipeline()}, headers=CREATE)
-    stale = client.delete("/pipelines/fresh", headers=_if_match("0000000000000000"))
+    client.put("/v1/pipelines/fresh", json={"definition": _pipeline()}, headers=CREATE)
+    stale = client.delete("/v1/pipelines/fresh", headers=_if_match("0000000000000000"))
     assert stale.status_code == 412
     assert stale.json()["code"] == "REVISION_CONFLICT"
     assert (dirs[0] / "fresh.yaml").is_file()
 
-    missing = client.delete("/pipelines/missing")
+    missing = client.delete("/v1/pipelines/missing")
     assert missing.status_code == 404
     assert missing.json()["code"] == "PIPELINE_NOT_FOUND"
-    bad_name = client.delete("/pipelines/bad%20name")
+    bad_name = client.delete("/v1/pipelines/bad%20name")
     assert bad_name.status_code == 400
     assert bad_name.json()["code"] == "NAME_INVALID"
 
@@ -685,8 +698,8 @@ def test_the_old_revision_query_is_refused_not_ignored(
 ) -> None:
     """Dropping it silently would turn a client's conditional delete into an
     unconditional one."""
-    client.put("/pipelines/fresh", json={"definition": _pipeline()}, headers=CREATE)
-    response = client.delete("/pipelines/fresh?revision=0000000000000000")
+    client.put("/v1/pipelines/fresh", json={"definition": _pipeline()}, headers=CREATE)
+    response = client.delete("/v1/pipelines/fresh?revision=0000000000000000")
     assert response.status_code == 422
     assert response.json()["code"] == "REQUEST_INVALID"
     assert "If-Match" in response.json()["message"]
@@ -696,21 +709,21 @@ def test_the_old_revision_query_is_refused_not_ignored(
 def test_delete_needs_editing_enabled(
     client: TestClient, dirs: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    client.put("/pipelines/fresh", json={"definition": _pipeline()}, headers=CREATE)
+    client.put("/v1/pipelines/fresh", json={"definition": _pipeline()}, headers=CREATE)
     monkeypatch.setattr(settings, "pipeline_editing_enabled", False)
-    assert client.delete("/pipelines/fresh").status_code == 403
-    assert client.delete("/presets/anything").status_code == 403
+    assert client.delete("/v1/pipelines/fresh").status_code == 403
+    assert client.delete("/v1/presets/anything").status_code == 403
     assert (dirs[0] / "fresh.yaml").is_file()
 
 
 def test_presets_can_be_deleted(client: TestClient, dirs: tuple[Path, Path]) -> None:
-    client.put("/presets/terse-llama", json={"preset": _preset()})
-    response = client.delete("/presets/terse-llama")
+    client.put("/v1/presets/terse-llama", json={"preset": _preset()})
+    response = client.delete("/v1/presets/terse-llama")
     assert response.status_code == 200
     assert not (dirs[1] / "terse-llama.yaml").exists()
     assert (dirs[1] / response.json()["recoverable_as"]).is_file()
-    assert client.get("/presets").json() == {"presets": []}
-    gone = client.delete("/presets/terse-llama")
+    assert client.get("/v1/presets").json() == {"presets": []}
+    gone = client.delete("/v1/presets/terse-llama")
     assert gone.status_code == 404 and gone.json()["code"] == "PRESET_NOT_FOUND"
 
 
@@ -736,25 +749,25 @@ def test_the_allowlist_can_list_every_problem_or_stop_at_the_first(client: TestC
 def test_preset_writes_honour_preconditions_when_sent(client: TestClient) -> None:
     """Presets stay last-write-wins by default, but their revision is real:
     send it as If-Match to refuse overwriting someone else's change."""
-    first = client.put("/presets/terse-llama", json={"preset": _preset()})
+    first = client.put("/v1/presets/terse-llama", json={"preset": _preset()})
     assert first.status_code == 200  # no precondition needed
     etag = first.headers["ETag"]
     assert etag == f'"{first.json()["revision"]}"'
-    assert client.get("/presets/terse-llama").headers["ETag"] == etag
+    assert client.get("/v1/presets/terse-llama").headers["ETag"] == etag
 
     changed = {**_preset(), "description": "Changed elsewhere"}
-    assert client.put("/presets/terse-llama", json={"preset": changed}).status_code == 200
+    assert client.put("/v1/presets/terse-llama", json={"preset": changed}).status_code == 200
     stale = client.put(
-        "/presets/terse-llama", json={"preset": _preset()}, headers={"If-Match": etag}
+        "/v1/presets/terse-llama", json={"preset": _preset()}, headers={"If-Match": etag}
     )
     assert stale.status_code == 412
     assert stale.json()["code"] == "REVISION_CONFLICT"
 
-    taken = client.put("/presets/terse-llama", json={"preset": _preset()}, headers=CREATE)
+    taken = client.put("/v1/presets/terse-llama", json={"preset": _preset()}, headers=CREATE)
     assert taken.status_code == 412
     assert taken.json()["code"] == "ALREADY_EXISTS"
 
-    stale_delete = client.delete("/presets/terse-llama", headers={"If-Match": etag})
+    stale_delete = client.delete("/v1/presets/terse-llama", headers={"If-Match": etag})
     assert stale_delete.status_code == 412
 
 
@@ -781,9 +794,9 @@ def test_saving_unchanged_keeps_the_file_byte_identical(
 ) -> None:
     path = dirs[0] / f"{name}.yaml"
     before = path.read_text()
-    loaded = client.get(f"/pipelines/{name}").json()
+    loaded = client.get(f"/v1/pipelines/{name}").json()
     saved = client.put(
-        f"/pipelines/{name}",
+        f"/v1/pipelines/{name}",
         json={"definition": loaded["definition"]},
         headers=_if_match(loaded["revision"]),
     ).json()
@@ -796,11 +809,11 @@ def test_editing_one_prompt_changes_only_that_line(
 ) -> None:
     path = dirs[0] / "consensus-qa.yaml"
     before = path.read_text()
-    loaded = client.get("/pipelines/consensus-qa").json()
+    loaded = client.get("/v1/pipelines/consensus-qa").json()
     definition = loaded["definition"]
     definition["nodes"][0]["prompt_template"] = "Answer briefly: {{ input }}"
     saved = client.put(
-        "/pipelines/consensus-qa",
+        "/v1/pipelines/consensus-qa",
         json={"definition": definition},
         headers=_if_match(loaded["revision"]),
     ).json()
@@ -819,7 +832,7 @@ def test_structural_edits_keep_every_other_comment(
 ) -> None:
     path = dirs[0] / "consensus-qa.yaml"
     before = path.read_text()
-    loaded = client.get("/pipelines/consensus-qa").json()
+    loaded = client.get("/v1/pipelines/consensus-qa").json()
     definition = loaded["definition"]
     # Change a setting the file leaves implicit, add a node, add Ollama options.
     definition["execution"]["max_retries"] = 3
@@ -833,7 +846,7 @@ def test_structural_edits_keep_every_other_comment(
         }
     )
     saved = client.put(
-        "/pipelines/consensus-qa",
+        "/v1/pipelines/consensus-qa",
         json={"definition": definition},
         headers=_if_match(loaded["revision"]),
     ).json()
@@ -851,11 +864,11 @@ def test_structural_edits_keep_every_other_comment(
     assert "prompt_template: |" in after  # new multi-line prompt as a literal block
 
     # Removing a node keeps the comments of the nodes that remain.
-    loaded = client.get("/pipelines/consensus-qa").json()
+    loaded = client.get("/v1/pipelines/consensus-qa").json()
     definition = loaded["definition"]
     definition["nodes"] = [n for n in definition["nodes"] if n["id"] != "audit"]
     client.put(
-        "/pipelines/consensus-qa",
+        "/v1/pipelines/consensus-qa",
         json={"definition": definition},
         headers=_if_match(loaded["revision"]),
     )
@@ -872,11 +885,13 @@ def test_a_comment_after_braces_keeps_its_place(
         + model_line
         + '    prompt_template: "{{ input }}"\noutput_nodes: [a]\n'
     )
-    loaded = client.get("/pipelines/braces").json()
+    loaded = client.get("/v1/pipelines/braces").json()
     definition = loaded["definition"]
     definition["nodes"][0]["prompt_template"] = "Hi {{ input }}"
     client.put(
-        "/pipelines/braces", json={"definition": definition}, headers=_if_match(loaded["revision"])
+        "/v1/pipelines/braces",
+        json={"definition": definition},
+        headers=_if_match(loaded["revision"]),
     )
     assert model_line in path.read_text()
 
@@ -890,11 +905,11 @@ def test_falls_back_to_canonical_when_the_merge_would_change_meaning(
         store_module, "_preserving_yaml", lambda original, upgrade, old_full, full, canon: original
     )
     path = dirs[0] / "consensus-qa.yaml"
-    loaded = client.get("/pipelines/consensus-qa").json()
+    loaded = client.get("/v1/pipelines/consensus-qa").json()
     definition = loaded["definition"]
     definition["nodes"][0]["prompt_template"] = "Changed: {{ input }}"
     saved = client.put(
-        "/pipelines/consensus-qa",
+        "/v1/pipelines/consensus-qa",
         json={"definition": definition},
         headers=_if_match(loaded["revision"]),
     ).json()
@@ -905,12 +920,12 @@ def test_falls_back_to_canonical_when_the_merge_would_change_meaning(
 
 
 def test_preset_comments_survive_a_save(client: TestClient, dirs: tuple[Path, Path]) -> None:
-    client.put("/presets/terse-llama", json={"preset": _preset()})
+    client.put("/v1/presets/terse-llama", json={"preset": _preset()})
     path = dirs[1] / "terse-llama.yaml"
     path.write_text("# my favourite settings\n" + path.read_text())
     updated = _preset()
     updated["model"]["temperature"] = 0.5
-    client.put("/presets/terse-llama", json={"preset": updated})
+    client.put("/v1/presets/terse-llama", json={"preset": updated})
     text = path.read_text()
     assert text.startswith("# my favourite settings\n")
     assert "temperature: 0.5" in text
@@ -920,7 +935,7 @@ def test_preset_comments_survive_a_save(client: TestClient, dirs: tuple[Path, Pa
 
 
 def test_model_limits_endpoint(client: TestClient) -> None:
-    body = client.get("/models/ollama/llama3:latest").json()
+    body = client.get("/v1/models/ollama/llama3:latest").json()
     assert body == {
         "name": "llama3:latest",
         "context_length": 8192,
@@ -929,7 +944,7 @@ def test_model_limits_endpoint(client: TestClient) -> None:
         "family": "llama",
     }
     # Names with a namespace contain '/', which the route accepts.
-    unknown = client.get("/models/ollama/someone/unknown:7b")
+    unknown = client.get("/v1/models/ollama/someone/unknown:7b")
     assert unknown.status_code == 404
     assert unknown.json()["code"] == "MODEL_NOT_FOUND"
 
@@ -937,7 +952,9 @@ def test_model_limits_endpoint(client: TestClient) -> None:
 def test_validate_warns_when_num_ctx_exceeds_the_model_maximum(client: TestClient) -> None:
     too_big = _pipeline()
     too_big["nodes"][0]["model"]["options"] = {"num_ctx": 32768}
-    body = client.post("/drafts/validation", json={"format": "json", "definition": too_big}).json()
+    body = client.post(
+        "/v1/drafts/validation", json={"format": "json", "definition": too_big}
+    ).json()
     assert body["warnings"] == [
         {
             "node_id": "draft",
@@ -949,14 +966,14 @@ def test_validate_warns_when_num_ctx_exceeds_the_model_maximum(client: TestClien
     fits = _pipeline()
     fits["nodes"][0]["model"]["options"] = {"num_ctx": 4096}
     assert (
-        client.post("/drafts/validation", json={"format": "json", "definition": fits}).json()[
+        client.post("/v1/drafts/validation", json={"format": "json", "definition": fits}).json()[
             "warnings"
         ]
         == []
     )
     # A warning never blocks saving.
     assert (
-        client.put("/pipelines/fresh", json={"definition": too_big}, headers=CREATE).status_code
+        client.put("/v1/pipelines/fresh", json={"definition": too_big}, headers=CREATE).status_code
         == 200
     )
 
@@ -968,10 +985,10 @@ def test_limits_are_best_effort_when_ollama_is_down(client: TestClient) -> None:
     _use_catalog(client, shower=down)
     too_big = _pipeline()
     too_big["nodes"][0]["model"]["options"] = {"num_ctx": 32768}
-    response = client.post("/drafts/validation", json={"format": "json", "definition": too_big})
+    response = client.post("/v1/drafts/validation", json={"format": "json", "definition": too_big})
     assert response.status_code == 200
     assert response.json()["warnings"] == []
-    assert client.get("/models/ollama/llama3").status_code == 404
+    assert client.get("/v1/models/ollama/llama3").status_code == 404
 
 
 @pytest.mark.asyncio
@@ -982,7 +999,7 @@ async def test_real_show_response_is_parsed(monkeypatch: pytest.MonkeyPatch) -> 
     from ollama import ShowResponse
 
     class _FakeClient:
-        def __init__(self, host: str) -> None:
+        def __init__(self, host: str, timeout: float) -> None:
             pass
 
         async def show(self, model: str) -> ShowResponse:
@@ -998,3 +1015,30 @@ async def test_real_show_response_is_parsed(monkeypatch: pytest.MonkeyPatch) -> 
     assert limits == ModelLimits(
         name="llama3.2:3b", context_length=131072, parameter_size="3.2B", quantization="Q4_K_M"
     )
+
+
+@pytest.mark.asyncio
+async def test_a_hung_ollama_costs_the_deadline_not_the_request() -> None:
+    """An Ollama that accepts connections but never answers (stuck loading a
+    model, say) is reported unreachable once the deadline passes — the
+    catalog is asked after every Ollama node's call, so an unbounded wait
+    here would hang a run whose model already answered."""
+    release = asyncio.Event()
+
+    async def never_answer(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        await release.wait()
+        writer.close()
+
+    server = await asyncio.start_server(never_answer, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    try:
+        catalog = ModelCatalog(f"http://127.0.0.1:{port}", [], ollama_timeout_seconds=0.2)
+        started = asyncio.get_running_loop().time()
+        assert (await catalog.list_ollama_models()).reachable is False
+        assert await catalog.running_context("llama3") is None
+        assert await catalog.limits("llama3") is None
+        assert asyncio.get_running_loop().time() - started < 2
+    finally:
+        release.set()
+        server.close()
+        await server.wait_closed()

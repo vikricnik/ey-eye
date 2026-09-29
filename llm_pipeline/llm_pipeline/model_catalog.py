@@ -24,12 +24,15 @@ import logging
 import time
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 from fastapi import Request
 
 from llm_pipeline.pipeline_config import NodeModelConfig
 from llm_pipeline.providers import ProviderType
+
+if TYPE_CHECKING:
+    from ollama import AsyncClient
 
 logger: logging.Logger = logging.getLogger("llm_pipeline")
 
@@ -96,6 +99,11 @@ OllamaRunningModelsFetcher = Callable[[], Awaitable[dict[str, int]]]
 # Loaded models barely change between calls in one run; a snapshot this
 # fresh is reused, and a model missing from it triggers a refetch anyway.
 _RUNNING_TTL_SECONDS = 5.0
+# How long one metadata request to Ollama (/api/tags, /api/show, /api/ps)
+# may take. They answer from memory, so a slow one means Ollama is stuck —
+# and running_context is asked after every Ollama node's call, on the run's
+# own latency. The ollama client's own default is no deadline at all.
+_OLLAMA_TIMEOUT_SECONDS = 5.0
 
 
 def _normalize_ollama_name(name: str) -> str:
@@ -114,6 +122,7 @@ class ModelCatalog:
         ollama_base_url: str,
         cloud_models: Iterable[str],
         ttl_seconds: float = 30.0,
+        ollama_timeout_seconds: float = _OLLAMA_TIMEOUT_SECONDS,
         fetch_ollama_models: OllamaModelsFetcher | None = None,
         fetch_ollama_model_details: OllamaModelDetailsFetcher | None = None,
         fetch_running_ollama_models: OllamaRunningModelsFetcher | None = None,
@@ -121,6 +130,7 @@ class ModelCatalog:
         self.ollama_base_url = ollama_base_url
         self.cloud_models = sorted(set(cloud_models))
         self.ttl_seconds = ttl_seconds
+        self.ollama_timeout_seconds = ollama_timeout_seconds
         self._fetch_ollama_models = fetch_ollama_models or self._ollama_api_tags
         self._fetch_ollama_model_details = fetch_ollama_model_details or self._ollama_api_show
         self._fetch_running_ollama_models = fetch_running_ollama_models or self._ollama_api_ps
@@ -128,10 +138,13 @@ class ModelCatalog:
         self._cached: tuple[float, ProviderCatalog] | None = None
         self._limits: dict[str, tuple[float, ModelLimits]] = {}
 
-    async def _ollama_api_tags(self) -> list[CatalogModel]:
+    def _ollama_client(self) -> "AsyncClient":
         from ollama import AsyncClient
 
-        response = await AsyncClient(host=self.ollama_base_url).list()
+        return AsyncClient(host=self.ollama_base_url, timeout=self.ollama_timeout_seconds)
+
+    async def _ollama_api_tags(self) -> list[CatalogModel]:
+        response = await self._ollama_client().list()
         models: list[CatalogModel] = []
         for m in response.models:
             if not m.model:
@@ -149,9 +162,7 @@ class ModelCatalog:
         return sorted(models, key=lambda model: model.name)
 
     async def _ollama_api_show(self, name: str) -> ModelLimits:
-        from ollama import AsyncClient
-
-        shown = await AsyncClient(host=self.ollama_base_url).show(name)
+        shown = await self._ollama_client().show(name)
         info = dict(shown.modelinfo or {})
         architecture = info.get("general.architecture")
         context = info.get(f"{architecture}.context_length") if architecture else None
@@ -165,9 +176,7 @@ class ModelCatalog:
         )
 
     async def _ollama_api_ps(self) -> dict[str, int]:
-        from ollama import AsyncClient
-
-        response = await AsyncClient(host=self.ollama_base_url).ps()
+        response = await self._ollama_client().ps()
         running: dict[str, int] = {}
         for m in response.models:
             # Newer Ollama versions report it; older ones don't.

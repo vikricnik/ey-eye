@@ -25,13 +25,13 @@ before(async () => {
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(data));
       };
-      if (req.url === "/server-info") {
+      if (req.url === "/v1/server-info") {
         return json({ default_pipeline_name: "p", editing_enabled: false, editing_disabled_reason: null });
       }
-      if (req.url === "/pipelines") {
+      if (req.url === "/v1/pipelines") {
         return json({ pipelines: [{ name: "p", description: "", filename: "p.yaml" }] });
       }
-      if (req.url === "/pipelines/p") {
+      if (req.url === "/v1/pipelines/p") {
         return json({
           definition: {
             name: "p",
@@ -42,7 +42,7 @@ before(async () => {
           has_comments: false,
         });
       }
-      if (req.url === "/pipelines/p/runs") {
+      if (req.url === "/v1/pipelines/p/runs") {
         const { prompt } = JSON.parse(body) as { prompt: string };
         // Slow enough that the next piped line arrives mid-run.
         setTimeout(

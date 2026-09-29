@@ -18,7 +18,7 @@ before(async () => {
     req.resume();
     if (req.headers.accept === "text/event-stream") {
       res.writeHead(200, { "Content-Type": "text/event-stream" });
-      const event = req.url === "/drafts/test-runs" ? "case_start" : "node_start";
+      const event = req.url === "/v1/drafts/test-runs" ? "case_start" : "node_start";
       res.write(`event: ${event}\ndata: {"node_id": "a", "model_name": "m", "case": "c", "variant": "current"}\n\n`);
       return; // …and never another byte
     }

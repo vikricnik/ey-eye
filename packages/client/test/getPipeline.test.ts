@@ -39,7 +39,15 @@ describe("listModels", () => {
     const client = new PipelineClient(base);
     await client.listModels();
     await client.listModels({ refresh: true });
-    assert.deepEqual(requested, ["GET /models", "GET /models?refresh=true"]);
+    assert.deepEqual(requested, ["GET /v1/models", "GET /v1/models?refresh=true"]);
+  });
+});
+
+describe("checkHealth", () => {
+  it("probes /health, which stays outside the API's version", async () => {
+    requested.length = 0;
+    await new PipelineClient(base).checkHealth();
+    assert.deepEqual(requested, ["GET /health"]);
   });
 });
 
@@ -47,7 +55,7 @@ describe("getPipeline", () => {
   it("reads the pipeline itself — the definition and revision a save takes back", async () => {
     requested.length = 0;
     const loaded = await new PipelineClient(base).getPipeline("my-pipe");
-    assert.deepEqual(requested, ["GET /pipelines/my-pipe"]);
+    assert.deepEqual(requested, ["GET /v1/pipelines/my-pipe"]);
     assert.deepEqual(loaded, stored);
   });
 });

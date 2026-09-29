@@ -115,7 +115,7 @@ def test_nodes_inherit_the_pipeline_defaults(
     )
     recorder = _Recorder()
     monkeypatch.setattr(node_types_module, "get_provider", recorder.provider_for)
-    assert client.post("/pipelines/defaults/runs", json={"prompt": "hi"}).status_code == 200
+    assert client.post("/v1/pipelines/defaults/runs", json={"prompt": "hi"}).status_code == 200
 
     (spec_a, _, system_a), (spec_b, _, system_b) = recorder.calls
     assert (spec_a.model, spec_a.temperature, system_a) == ("base", 0.6, "Be kind.")
@@ -193,7 +193,7 @@ def test_history_reaches_only_the_nodes_that_include_it(
     monkeypatch.setattr(node_types_module, "get_provider", recorder.provider_for)
     history = [{"prompt": "earlier", "final_answer": "ok", "outputs": {"classify": "OTHER"}}]
     body = client.post(
-        "/pipelines/chat/runs", json={"prompt": "tell one", "history": history}
+        "/v1/pipelines/chat/runs", json={"prompt": "tell one", "history": history}
     ).json()
 
     classify_prompt, answer_prompt = recorder.calls[0][1], recorder.calls[1][1]
@@ -220,7 +220,7 @@ def test_message_and_conversation_say_what_they_hold(
     recorder = _Recorder({"m": "JOKE"})
     monkeypatch.setattr(node_types_module, "get_provider", recorder.provider_for)
     history = [{"prompt": "earlier", "final_answer": "ok"}]
-    client.post("/pipelines/chat/runs", json={"prompt": "tell one", "history": history})
+    client.post("/v1/pipelines/chat/runs", json={"prompt": "tell one", "history": history})
 
     classify_prompt, answer_prompt = recorder.calls[0][1], recorder.calls[1][1]
     assert classify_prompt == "Classify: tell one"
@@ -237,7 +237,7 @@ def test_streamed_runs_also_report_remembered_outputs(
     _write(pipelines, _classifier_pipeline())
     monkeypatch.setattr(node_types_module, "get_provider", _Recorder({"m": "STORY"}).provider_for)
     response = client.post(
-        "/pipelines/chat/runs",
+        "/v1/pipelines/chat/runs",
         json={
             "prompt": "x",
         },
@@ -260,7 +260,7 @@ def test_older_turns_are_summarized_with_the_chosen_model(
     monkeypatch.setattr(node_types_module, "get_provider", nodes.provider_for)
 
     history = [{"prompt": f"q{i}", "final_answer": f"a{i}"} for i in range(1, 4)]
-    client.post("/pipelines/chat/runs", json={"prompt": "now", "history": history})
+    client.post("/v1/pipelines/chat/runs", json={"prompt": "now", "history": history})
 
     ((spec, summary_prompt, _),) = summarizer.calls
     assert spec.model == "small"
@@ -305,7 +305,7 @@ def test_reasoning_is_stripped_per_pipeline_default_and_node_override(
     monkeypatch.setattr(
         node_types_module, "get_provider", _Recorder({"m": "<think>x</think>Done"}).provider_for
     )
-    outputs = client.post("/pipelines/think/runs", json={"prompt": "q"}).json()["node_outputs"]
+    outputs = client.post("/v1/pipelines/think/runs", json={"prompt": "q"}).json()["node_outputs"]
     assert outputs["a"]["output"] == "Done"
     assert outputs["b"]["output"] == "<think>x</think>Done"
 
@@ -337,7 +337,7 @@ def test_max_concurrency_limits_parallel_model_calls(
                 return Generation("ok")
 
         monkeypatch.setattr(node_types_module, "get_provider", lambda spec: _Slow())
-        assert client.post(f"/pipelines/{name}/runs", json={"prompt": "q"}).status_code == 200
+        assert client.post(f"/v1/pipelines/{name}/runs", json={"prompt": "q"}).status_code == 200
         return state["peak"]
 
     assert measure("limited") == 1
@@ -359,13 +359,13 @@ def _use_catalog(client: TestClient) -> None:
 def test_default_and_summarizer_models_must_be_allowed(client: TestClient) -> None:
     _use_catalog(client)
     definition = _classifier_pipeline(summarize={"model": {"provider": "ollama", "name": "big"}})
-    response = client.put("/pipelines/chat", json={"definition": definition}, headers=CREATE)
+    response = client.put("/v1/pipelines/chat", json={"definition": definition}, headers=CREATE)
     assert response.status_code == 422
     assert "history summarizer" in response.json()["message"]
 
     definition = _classifier_pipeline()
     definition["defaults"]["model"]["name"] = "unknown"
-    response = client.put("/pipelines/chat", json={"definition": definition}, headers=CREATE)
+    response = client.put("/v1/pipelines/chat", json={"definition": definition}, headers=CREATE)
     assert response.status_code == 422
     assert "pipeline default model" in response.json()["message"]
 
@@ -397,7 +397,7 @@ def test_an_injected_node_template_fails_the_node_instead_of_running(
     )
     recorder = _Recorder()
     monkeypatch.setattr(node_types_module, "get_provider", recorder.provider_for)
-    response = client.post("/pipelines/evil/runs", json={"prompt": "x"})
+    response = client.post("/v1/pipelines/evil/runs", json={"prompt": "x"})
     assert response.status_code == 502
     # A template the sandbox refuses fails its node, like any node failure —
     # not an internal error, and named so an editor can point at it.

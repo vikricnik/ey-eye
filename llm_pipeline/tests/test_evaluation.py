@@ -146,11 +146,11 @@ def test_the_tests_block_is_validated() -> None:
 
 def test_tests_are_saved_only_when_there_are_some(client: TestClient) -> None:
     empty = client.post(
-        "/drafts/validation", json={"format": "json", "definition": _definition()}
+        "/v1/drafts/validation", json={"format": "json", "definition": _definition()}
     ).json()
     assert "tests" not in yaml.safe_load(empty["yaml"])
     full = client.post(
-        "/drafts/validation", json={"format": "json", "definition": _definition(TESTS)}
+        "/v1/drafts/validation", json={"format": "json", "definition": _definition(TESTS)}
     ).json()
     saved = yaml.safe_load(full["yaml"])
     assert list(saved)[-1] == "tests"  # written last, after the pipeline itself
@@ -161,7 +161,7 @@ def test_tests_are_saved_only_when_there_are_some(client: TestClient) -> None:
 
 
 def test_cases_run_and_every_expectation_is_checked(client: TestClient) -> None:
-    response = client.post("/drafts/test-runs", json={"definition": _definition(TESTS)})
+    response = client.post("/v1/drafts/test-runs", json={"definition": _definition(TESTS)})
     assert response.status_code == 200
     events = _events(response.text)
     assert [kind for kind, _ in events] == [
@@ -184,7 +184,7 @@ def test_cases_run_and_every_expectation_is_checked(client: TestClient) -> None:
 
 def test_variants_compare_models_on_the_same_cases(client: TestClient) -> None:
     response = client.post(
-        "/drafts/test-runs",
+        "/v1/drafts/test-runs",
         json={
             "definition": _definition(TESTS),
             "cases": ["capital"],
@@ -211,7 +211,7 @@ def test_variants_compare_models_on_the_same_cases(client: TestClient) -> None:
 
 def test_a_variant_may_only_use_allowed_models(client: TestClient) -> None:
     response = client.post(
-        "/drafts/test-runs",
+        "/v1/drafts/test-runs",
         json={
             "definition": _definition(TESTS),
             "variants": [
@@ -228,16 +228,16 @@ def test_a_variant_may_only_use_allowed_models(client: TestClient) -> None:
 
 
 def test_test_run_problems(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    nothing = client.post("/drafts/test-runs", json={"definition": _definition()})
+    nothing = client.post("/v1/drafts/test-runs", json={"definition": _definition()})
     assert nothing.status_code == 422
     assert nothing.json()["code"] == "REQUEST_INVALID"
     unknown = client.post(
-        "/drafts/test-runs", json={"definition": _definition(TESTS), "cases": ["nope"]}
+        "/v1/drafts/test-runs", json={"definition": _definition(TESTS), "cases": ["nope"]}
     )
     assert unknown.status_code == 404
     assert unknown.json()["code"] == "TEST_CASE_NOT_FOUND"
     same_label = client.post(
-        "/drafts/test-runs",
+        "/v1/drafts/test-runs",
         json={
             "definition": _definition(TESTS),
             "variants": [
@@ -248,7 +248,7 @@ def test_test_run_problems(client: TestClient, monkeypatch: pytest.MonkeyPatch) 
     assert same_label.status_code == 422
     assert same_label.json()["code"] == "REQUEST_INVALID"
     no_node = client.post(
-        "/drafts/test-runs",
+        "/v1/drafts/test-runs",
         json={
             "definition": _definition(TESTS),
             "variants": [
@@ -260,7 +260,8 @@ def test_test_run_problems(client: TestClient, monkeypatch: pytest.MonkeyPatch) 
     assert no_node.json()["code"] == "NODE_NOT_FOUND"
     monkeypatch.setattr(settings, "pipeline_editing_enabled", False)
     assert (
-        client.post("/drafts/test-runs", json={"definition": _definition(TESTS)}).status_code == 403
+        client.post("/v1/drafts/test-runs", json={"definition": _definition(TESTS)}).status_code
+        == 403
     )
 
 
@@ -274,7 +275,7 @@ def test_a_failing_run_is_reported_per_case(
     monkeypatch.setattr(node_types_module, "get_provider", lambda spec: _Down())
     definition = _definition({"cases": [{"name": "a", "input": "x"}]})
     definition["execution"] = {"max_retries": 0}
-    events = _events(client.post("/drafts/test-runs", json={"definition": definition}).text)
+    events = _events(client.post("/v1/drafts/test-runs", json={"definition": definition}).text)
     result = next(d for kind, d in events if kind == "case_result")
     assert result["passed"] is False and "ollama down" in result["error"]
     assert events[-1][1]["summaries"][0]["errors"] == 1
