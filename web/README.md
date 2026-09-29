@@ -26,6 +26,8 @@ web/
     │   ├── zoomDetail.ts       # compact cards and fit limits when zoomed out
     │   ├── Inspector.tsx       # node / pipeline / edge / branch / loop settings
     │   ├── Section.tsx         # foldable settings sections, remembered open or closed
+    │   ├── NodeTrace.tsx       # a node's own trace, in its settings
+    │   ├── traceSummary.ts     # the folded Trace section's one-line summary
     │   ├── fields.tsx          # model picker, Ollama options, inputs
     │   ├── PromptPreview.tsx   # what a node would receive, rendered by the server
     │   ├── Sidebar.tsx         # the Add tab: blank node, presets
@@ -294,16 +296,17 @@ it everything below is read-only and a banner says so):
   received** (its dependencies' outputs filled in) and the **reply** it
   produced, streaming live. Loop passes appear as separate entries
   ("iteration 2", …). Click a node's name to open its Settings.
-- In a node's Settings, its own **Trace** sub-tab shows just that node's
-  received messages and replies, newest run first. The sub-tab stays
-  selected as you click from node to node.
+- In a node's settings, its own **Trace** section (the first one) shows
+  just that node's received messages and replies, newest run first —
+  folded, it says when the node last ran ("run 3 · 1.8s", "live"). It
+  stays open or folded as you click from node to node.
 - **Send** (or Enter) in the message box starts a run.
 - **Stop** (the Send button while a run is going, or Esc) ends it: the
   server stops the model calls, nodes that finished keep their output, and
   nothing is added to the conversation. Test runs have their own Stop.
 - With unsaved changes, the button says **Save & send**: runs execute what's
   saved on the server, never an unsaved draft.
-- Selecting a node after a run shows its last output in its Settings.
+- Selecting a node after a run shows its last output in its Trace section.
 - **Tokens and context**: after a run, each node card shows how much of the
   model's context window its prompt used ("3.9k/4.1k ctx" — amber from 80%,
   red with ⚠ from 95%; hover for tokens in/out and tokens per second), and

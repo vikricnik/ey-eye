@@ -53,7 +53,8 @@ import { MenuButton } from "../ui/Menu";
 import { PromptPreview } from "./PromptPreview";
 import { parseList } from "../format";
 import type { PreviewContext } from "./PromptPreview";
-import { MessageEntry } from "../run/MessageEntry";
+import { NodeTrace } from "./NodeTrace";
+import { nodeTraceSummary } from "./traceSummary";
 import type { Turn } from "../run/Chat";
 
 // The server's built-in history defaults (pipeline_config/schema.py), shown
@@ -74,7 +75,7 @@ export interface InspectorProps {
   editable: boolean;
   models: ModelsResponse | null;
   presets: NodePreset[];
-  /** This session's runs — the node's Trace tab shows its part of them. */
+  /** This session's runs — a node's Trace section shows its part of them. */
   turns: Turn[];
   validation: ValidationState;
   onEdit: Edit;
@@ -90,12 +91,8 @@ export interface InspectorProps {
   previewContext: PreviewContext | null;
 }
 
-type NodeTab = "config" | "trace";
-
 export function Inspector(props: InspectorProps) {
   const { doc, selection } = props;
-  // Kept while moving between nodes, so you can step through each node's messages.
-  const [tab, setTab] = useState<NodeTab>("config");
   const node =
     selection?.kind === "node" ? doc.definition.nodes.find((n) => n.id === selection.id) : undefined;
 
@@ -110,7 +107,7 @@ export function Inspector(props: InspectorProps) {
   return (
     <div className="inspector" ref={panel}>
       {node ? (
-        <NodeInspector key={node.id} node={node} tab={tab} onTab={setTab} {...props} />
+        <NodeInspector key={node.id} node={node} {...props} />
       ) : selection?.kind === "edge" ? (
         <EdgeInspector from={selection.from} to={selection.to} {...props} />
       ) : (
@@ -239,8 +236,8 @@ function excerpt(text: string, max = 40): string {
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 }
 
-function NodeInspector(props: InspectorProps & { node: NodeConfig; tab: NodeTab; onTab: (tab: NodeTab) => void }) {
-  const { node, doc, editable, onEdit, onSelect, presets, validation, tab, onTab } = props;
+function NodeInspector(props: InspectorProps & { node: NodeConfig }) {
+  const { node, doc, editable, onEdit, onSelect, presets, validation } = props;
   const dialogs = useDialogs();
   const def = doc.definition;
   const id = node.id;
@@ -375,285 +372,243 @@ function NodeInspector(props: InspectorProps & { node: NodeConfig; tab: NodeTab;
       </header>
       {problem && <p className={validation.status === "invalid" ? "problem error" : "problem warn"}>{problem}</p>}
 
-      <div className="tabs" role="tablist" aria-label="Node view">
-        <button type="button" role="tab" aria-selected={tab === "config"} className={tab === "config" ? "tab active" : "tab"} onClick={() => onTab("config")}>
-          Configuration
-        </button>
-        <button type="button" role="tab" aria-selected={tab === "trace"} className={tab === "trace" ? "tab active" : "tab"} onClick={() => onTab("trace")}>
-          Trace
-        </button>
-      </div>
-
-      {tab === "trace" ? (
-        <NodeMessages nodeId={id} turns={props.turns} isOutput={isOutput} />
-      ) : (
-        <>
-          <Section
-            id="model"
-            title="Model"
-            defaultOpen
-            summary={`${node.model ? modelIdentity(node.model) : "pipeline default"} · T ${effective?.temperature ?? 0.2}`}
+      {/* First, so a node's latest input and reply can be read while the
+          settings below it are changed; capped in height (.node-trace). */}
+      <Section id="trace" title="Trace" defaultOpen={false} summary={nodeTraceSummary(id, props.turns)}>
+        <div className="node-trace">
+          <NodeTrace nodeId={id} turns={props.turns} isOutput={isOutput} />
+        </div>
+      </Section>
+      <Section
+        id="model"
+        title="Model"
+        defaultOpen
+        summary={`${node.model ? modelIdentity(node.model) : "pipeline default"} · T ${effective?.temperature ?? 0.2}`}
+      >
+        <ModelPicker
+          model={node.model}
+          models={props.models}
+          limits={limits}
+          {...(defaults.model ? { emptyOption: `pipeline default (${modelIdentity(defaults.model)})` } : {})}
+          disabled={!editable}
+          onRefresh={props.onRefreshModels}
+          onChange={(identity) =>
+            onEdit((d) => setNodeModel(d, id, identity ? modelWithIdentity(findNode(d, id).model, identity) : undefined))
+          }
+        />
+        {node.model ? (
+          <Field
+            label={`Temperature · ${effective?.temperature ?? 0.2}${node.model.temperature === undefined ? " (inherited)" : ""}`}
+            hint="0 = deterministic, higher = more varied"
           >
-            <ModelPicker
-              model={node.model}
-              models={props.models}
-              limits={limits}
-              {...(defaults.model ? { emptyOption: `pipeline default (${modelIdentity(defaults.model)})` } : {})}
-              disabled={!editable}
-              onRefresh={props.onRefreshModels}
-              onChange={(identity) =>
-                onEdit((d) => setNodeModel(d, id, identity ? modelWithIdentity(findNode(d, id).model, identity) : undefined))
-              }
-            />
-            {node.model ? (
-              <Field
-                label={`Temperature · ${effective?.temperature ?? 0.2}${node.model.temperature === undefined ? " (inherited)" : ""}`}
-                hint="0 = deterministic, higher = more varied"
-              >
-                <div className="row">
-                  <input
-                    type="range"
-                    min={0}
-                    max={2}
-                    step={0.05}
-                    value={effective?.temperature ?? 0.2}
-                    disabled={!editable}
-                    aria-label="Temperature"
-                    onChange={(e) => {
-                      const temperature = Number(e.target.value);
-                      tuneModel((m) => withTemperature(m, temperature), "temperature");
-                    }}
-                  />
-                  <NumberField
-                    value={node.model.temperature}
-                    placeholder={`${effective?.temperature ?? 0.2}`}
-                    disabled={!editable}
-                    ariaLabel="Temperature value"
-                    onChange={(v) => tuneModel((m) => withTemperature(m, v), "temperature")}
-                  />
-                </div>
-              </Field>
-            ) : (
-              <p className="dim">
-                Runs with the pipeline default model — temperature {effective?.temperature ?? 0.2}
-                {Object.keys(effective?.options ?? {}).length > 0 ? " and its Ollama options" : ""}. Pick a model above
-                to customize this node.
-              </p>
-            )}
-          </Section>
-
-          <Section id="prompts" title="Prompts" defaultOpen summary={excerpt(node.prompt_template)}>
-            <PromptEditor
-              label="System prompt"
-              hint="sent as the model's system message; plain text"
-              value={node.system_prompt ?? ""}
-              {...(defaults.system_prompt ? { placeholder: `pipeline default: ${defaults.system_prompt}` } : {})}
-              variables={[]}
-              rows={3}
-              disabled={!editable}
-              onChange={(v) => set("system_prompt", v === "" ? undefined : v)}
-            />
-            <PromptEditor
-              label="Prompt template"
-              {...(editable ? { hint: "Click a variable to insert it — hover for what it holds." } : {})}
-              value={node.prompt_template}
-              variables={variables}
-              rows={7}
-              disabled={!editable}
-              onChange={(v) => set("prompt_template", v)}
-            >
-              <TemplateSyntax variables={variables} />
-            </PromptEditor>
-            {editable && <PromptPreview definition={def} nodeId={id} context={props.previewContext} />}
-          </Section>
-
-          <Section id="io" title="Input & output" defaultOpen={false} summary={inputOutput.join(" · ") || "defaults"}>
-            <label className="check">
+            <div className="row">
               <input
-                type="checkbox"
-                checked={isOutput}
-                disabled={!editable || onlyOutput}
-                aria-describedby={onlyOutput ? onlyOutputHint : undefined}
+                type="range"
+                min={0}
+                max={2}
+                step={0.05}
+                value={effective?.temperature ?? 0.2}
+                disabled={!editable}
+                aria-label="Temperature"
                 onChange={(e) => {
-                  const current = def.output_nodes;
-                  onEdit((d) => setOutput(d, e.target.checked ? [...current, id] : current.filter((o) => o !== id)));
+                  const temperature = Number(e.target.value);
+                  tuneModel((m) => withTemperature(m, temperature), "temperature");
                 }}
               />
-              output node — its answer is the pipeline&apos;s answer
-            </label>
-            {onlyOutput && editable && (
-              <p className="field-hint" id={onlyOutputHint}>
-                The pipeline&apos;s only output node — it needs at least one, so mark another before unmarking this.
-              </p>
-            )}
-            <label className="check">
-              <input
-                type="checkbox"
-                checked={node.include_history ?? true}
+              <NumberField
+                value={node.model.temperature}
+                placeholder={`${effective?.temperature ?? 0.2}`}
                 disabled={!editable}
-                onChange={(e) => set("include_history", e.target.checked ? undefined : false, false)}
+                ariaLabel="Temperature value"
+                onChange={(v) => tuneModel((m) => withTemperature(m, v), "temperature")}
               />
-              sees the conversation history — off: {"{{ conversation }}"} is just the new message
-            </label>
-            <Field label="Strip <think> reasoning">
-              <select
-                value={node.strip_reasoning === undefined ? "" : node.strip_reasoning ? "on" : "off"}
-                disabled={!editable}
-                onChange={(e) =>
-                  set("strip_reasoning", e.target.value === "" ? undefined : e.target.value === "on", false)
-                }
-              >
-                <option value="">pipeline default ({defaults.strip_reasoning ? "on" : "off"})</option>
-                <option value="on">on — remove reasoning from this node&apos;s output</option>
-                <option value="off">off — keep it</option>
-              </select>
-            </Field>
-            <Field label="Classifier labels" hint="comma-separated — the output becomes exactly one of them, for branches to route on">
-              <CommitInput
-                value={(node.labels ?? []).join(", ")}
-                disabled={!editable}
-                ariaLabel="Classifier labels"
-                onCommit={(v) => set("labels", parseList(v), false)}
-              />
-            </Field>
-          </Section>
+            </div>
+          </Field>
+        ) : (
+          <p className="dim">
+            Runs with the pipeline default model — temperature {effective?.temperature ?? 0.2}
+            {Object.keys(effective?.options ?? {}).length > 0 ? " and its Ollama options" : ""}. Pick a model above
+            to customize this node.
+          </p>
+        )}
+      </Section>
 
-          {node.model?.provider === "ollama" && (
-            <Section
-              id="ollama"
-              title="Ollama options"
-              defaultOpen={Object.keys(node.model.options ?? {}).length > 0}
-              summary={ollamaOptionsSummary(node.model.options)}
-            >
-              {defaults.model?.provider === "ollama" && Object.keys(defaults.model.options ?? {}).length > 0 && (
-                <p className="dim">Options left empty use the pipeline default&apos;s.</p>
-              )}
-              <OllamaOptionFields
-                options={node.model.options}
-                maxContext={limits?.context_length}
-                disabled={!editable}
-                onChange={(key, value) => tuneModel((m) => modelWithOption(m, key, value), `options.${key}`)}
-              />
-            </Section>
-          )}
+      <Section id="prompts" title="Prompts" defaultOpen summary={excerpt(node.prompt_template)}>
+        <PromptEditor
+          label="System prompt"
+          hint="sent as the model's system message; plain text"
+          value={node.system_prompt ?? ""}
+          {...(defaults.system_prompt ? { placeholder: `pipeline default: ${defaults.system_prompt}` } : {})}
+          variables={[]}
+          rows={3}
+          disabled={!editable}
+          onChange={(v) => set("system_prompt", v === "" ? undefined : v)}
+        />
+        <PromptEditor
+          label="Prompt template"
+          {...(editable ? { hint: "Click a variable to insert it — hover for what it holds." } : {})}
+          value={node.prompt_template}
+          variables={variables}
+          rows={7}
+          disabled={!editable}
+          onChange={(v) => set("prompt_template", v)}
+        >
+          <TemplateSyntax variables={variables} />
+        </PromptEditor>
+        {editable && <PromptPreview definition={def} nodeId={id} context={props.previewContext} />}
+      </Section>
 
-          <Section id="depends" title="Depends on" defaultOpen={false} summary={deps.length ? deps.join(", ") : "nothing — starts first"}>
-            {deps.length === 0 ? (
-              <p className="dim">nothing — starts as soon as the run does. Drag from another node&apos;s bottom dot to this node&apos;s top dot to add one.</p>
-            ) : (
-              <ul className="dep-list">
-                {deps.map((dep) => (
-                  <li key={dep}>
-                    <button type="button" className="link" onClick={() => onSelect({ kind: "node", id: dep })}>
-                      {dep}
-                    </button>
-                    {editable && (
-                      <button type="button" className="ghost small" onClick={() => onEdit((d) => disconnect(d, dep, id), undefined, `Removed the dependency ${dep} → ${id}`)}>
-                        remove
-                      </button>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Section>
-
-          <Section
-            id="routing"
-            title="Routing"
-            defaultOpen={Boolean(branch || loop)}
-            summary={branch ? `branch · ${branch.routes.length} routes` : loop ? `loop back to ${loop.back_to}` : "plain edges"}
+      <Section id="io" title="Input & output" defaultOpen={false} summary={inputOutput.join(" · ") || "defaults"}>
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={isOutput}
+            disabled={!editable || onlyOutput}
+            aria-describedby={onlyOutput ? onlyOutputHint : undefined}
+            onChange={(e) => {
+              const current = def.output_nodes;
+              onEdit((d) => setOutput(d, e.target.checked ? [...current, id] : current.filter((o) => o !== id)));
+            }}
+          />
+          output node — its answer is the pipeline&apos;s answer
+        </label>
+        {onlyOutput && editable && (
+          <p className="field-hint" id={onlyOutputHint}>
+            The pipeline&apos;s only output node — it needs at least one, so mark another before unmarking this.
+          </p>
+        )}
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={node.include_history ?? true}
+            disabled={!editable}
+            onChange={(e) => set("include_history", e.target.checked ? undefined : false, false)}
+          />
+          sees the conversation history — off: {"{{ conversation }}"} is just the new message
+        </label>
+        <Field label="Strip <think> reasoning">
+          <select
+            value={node.strip_reasoning === undefined ? "" : node.strip_reasoning ? "on" : "off"}
+            disabled={!editable}
+            onChange={(e) =>
+              set("strip_reasoning", e.target.value === "" ? undefined : e.target.value === "on", false)
+            }
           >
-            {branch ? (
-              <BranchForm branch={branch} def={def} editable={editable} onEdit={onEdit} />
-            ) : loop ? (
-              <LoopForm loop={loop} def={def} editable={editable} onEdit={onEdit} />
-            ) : (
-              <>
-                <p className="dim">Plain edges. Add a branch to pick ONE next node by its output, or a loop to repeat an earlier step.</p>
-                {editable && (
-                  <div className="row">
-                    <button type="button" className="ghost" onClick={() => onEdit((d) => upsertBranch(d, newBranch(d, id)))}>
-                      + branch
-                    </button>
-                    <button type="button" className="ghost" onClick={() => onEdit((d) => upsertLoop(d, newLoop(d, id)))}>
-                      + loop
-                    </button>
-                  </div>
-                )}
-              </>
-            )}
-          </Section>
+            <option value="">pipeline default ({defaults.strip_reasoning ? "on" : "off"})</option>
+            <option value="on">on — remove reasoning from this node&apos;s output</option>
+            <option value="off">off — keep it</option>
+          </select>
+        </Field>
+        <Field label="Classifier labels" hint="comma-separated — the output becomes exactly one of them, for branches to route on">
+          <CommitInput
+            value={(node.labels ?? []).join(", ")}
+            disabled={!editable}
+            ariaLabel="Classifier labels"
+            onCommit={(v) => set("labels", parseList(v), false)}
+          />
+        </Field>
+      </Section>
 
-          <Section id="presets" title="Presets" defaultOpen={false} summary={presets.length ? `${presets.length} saved` : "none saved"}>
-            {!editable ? (
-              <p className="dim">Editing is disabled on this server.</p>
-            ) : presets.length === 0 ? (
-              <p className="dim">None yet — Save as preset (above) keeps this node&apos;s configuration to reuse anywhere.</p>
-            ) : (
-              <>
-                <p className="field-hint">Give this node a preset&apos;s configuration — its id and connections stay.</p>
-                <div className="row">
-                  <select value={presetChoice} onChange={(e) => setPresetChoice(e.target.value)} aria-label="Preset">
-                    <option value="">choose a preset…</option>
-                    {presets.map((p) => (
-                      <option key={p.name} value={p.name}>
-                        {p.name} — {p.model.provider}:{p.model.name}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    disabled={!presetChoice}
-                    title={presetChoice ? "Give this node the preset's configuration" : "Choose a preset first"}
-                    onClick={() => {
-                      const preset = presets.find((p) => p.name === presetChoice);
-                      if (preset) onEdit((d) => applyPreset(d, id, preset));
-                      setPresetChoice("");
-                    }}
-                  >
-                    Apply
-                  </button>
-                </div>
-              </>
-            )}
-          </Section>
-        </>
+      {node.model?.provider === "ollama" && (
+        <Section
+          id="ollama"
+          title="Ollama options"
+          defaultOpen={Object.keys(node.model.options ?? {}).length > 0}
+          summary={ollamaOptionsSummary(node.model.options)}
+        >
+          {defaults.model?.provider === "ollama" && Object.keys(defaults.model.options ?? {}).length > 0 && (
+            <p className="dim">Options left empty use the pipeline default&apos;s.</p>
+          )}
+          <OllamaOptionFields
+            options={node.model.options}
+            maxContext={limits?.context_length}
+            disabled={!editable}
+            onChange={(key, value) => tuneModel((m) => modelWithOption(m, key, value), `options.${key}`)}
+          />
+        </Section>
       )}
-    </div>
-  );
-}
 
-/** What this node received and replied in each run of the session, newest
- * first — including loop re-runs, and live while it runs. */
-function NodeMessages({ nodeId, turns, isOutput }: { nodeId: string; turns: Turn[]; isOutput: boolean }) {
-  const runs = turns
-    .map((turn, index) => ({ turn, index, entries: turn.log.filter((e) => e.nodeId === nodeId) }))
-    .filter((r) => r.entries.length > 0)
-    .reverse();
-  if (runs.length === 0) {
-    return (
-      <p className="dim tip">
-        <b>{nodeId}</b> hasn&apos;t run in this session yet. Send a message below — what it receives and replies shows up
-        here, live.
-      </p>
-    );
-  }
-  return (
-    <div className="node-messages">
-      {runs.map(({ turn, index, entries }) => (
-        <section key={turn.id} className="node-messages-run">
-          <h3>
-            run {index + 1} <span className="dim">› {turn.prompt}</span>
-          </h3>
-          {entries
-            .slice()
-            .reverse()
-            .map((entry) => (
-              <MessageEntry key={entry.key} entry={entry} isOutput={isOutput} showNodeId={false} />
+      <Section id="depends" title="Depends on" defaultOpen={false} summary={deps.length ? deps.join(", ") : "nothing — starts first"}>
+        {deps.length === 0 ? (
+          <p className="dim">nothing — starts as soon as the run does. Drag from another node&apos;s bottom dot to this node&apos;s top dot to add one.</p>
+        ) : (
+          <ul className="dep-list">
+            {deps.map((dep) => (
+              <li key={dep}>
+                <button type="button" className="link" onClick={() => onSelect({ kind: "node", id: dep })}>
+                  {dep}
+                </button>
+                {editable && (
+                  <button type="button" className="ghost small" onClick={() => onEdit((d) => disconnect(d, dep, id), undefined, `Removed the dependency ${dep} → ${id}`)}>
+                    remove
+                  </button>
+                )}
+              </li>
             ))}
-        </section>
-      ))}
+          </ul>
+        )}
+      </Section>
+
+      <Section
+        id="routing"
+        title="Routing"
+        defaultOpen={Boolean(branch || loop)}
+        summary={branch ? `branch · ${branch.routes.length} routes` : loop ? `loop back to ${loop.back_to}` : "plain edges"}
+      >
+        {branch ? (
+          <BranchForm branch={branch} def={def} editable={editable} onEdit={onEdit} />
+        ) : loop ? (
+          <LoopForm loop={loop} def={def} editable={editable} onEdit={onEdit} />
+        ) : (
+          <>
+            <p className="dim">Plain edges. Add a branch to pick ONE next node by its output, or a loop to repeat an earlier step.</p>
+            {editable && (
+              <div className="row">
+                <button type="button" className="ghost" onClick={() => onEdit((d) => upsertBranch(d, newBranch(d, id)))}>
+                  + branch
+                </button>
+                <button type="button" className="ghost" onClick={() => onEdit((d) => upsertLoop(d, newLoop(d, id)))}>
+                  + loop
+                </button>
+              </div>
+            )}
+          </>
+        )}
+      </Section>
+
+      <Section id="presets" title="Presets" defaultOpen={false} summary={presets.length ? `${presets.length} saved` : "none saved"}>
+        {!editable ? (
+          <p className="dim">Editing is disabled on this server.</p>
+        ) : presets.length === 0 ? (
+          <p className="dim">None yet — Save as preset (above) keeps this node&apos;s configuration to reuse anywhere.</p>
+        ) : (
+          <>
+            <p className="field-hint">Give this node a preset&apos;s configuration — its id and connections stay.</p>
+            <div className="row">
+              <select value={presetChoice} onChange={(e) => setPresetChoice(e.target.value)} aria-label="Preset">
+                <option value="">choose a preset…</option>
+                {presets.map((p) => (
+                  <option key={p.name} value={p.name}>
+                    {p.name} — {p.model.provider}:{p.model.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                disabled={!presetChoice}
+                title={presetChoice ? "Give this node the preset's configuration" : "Choose a preset first"}
+                onClick={() => {
+                  const preset = presets.find((p) => p.name === presetChoice);
+                  if (preset) onEdit((d) => applyPreset(d, id, preset));
+                  setPresetChoice("");
+                }}
+              >
+                Apply
+              </button>
+            </div>
+          </>
+        )}
+      </Section>
     </div>
   );
 }

@@ -1009,7 +1009,6 @@ body.resizing-y, body.resizing-y * { cursor: row-resize !important; user-select:
 .view-switch button.active { background: var(--panel-raised); color: var(--accent); }
 .view-switch .pulse-dot { margin-left: 6px; }
 
-.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin: 4px 0 6px; }
 .tab {
   background: transparent;
   color: var(--text-dim);
@@ -1114,6 +1113,9 @@ button.message-node { color: var(--accent); }
 .node-messages-run { display: grid; gap: 8px; }
 .node-messages-run h3 { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .inspector .message-text { max-height: 12.5rem; }
+/* A node's Trace section scrolls on its own, so the settings below it stay
+   in view while its latest input and reply are read. */
+.node-trace { max-height: 40vh; overflow-y: auto; }
 
 /* ---------- Dialogs ---------- */
 .app-dialog {
