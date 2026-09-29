@@ -512,6 +512,11 @@ button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-
 }
 
 .canvas-wrap { position: relative; min-width: 0; min-height: 0; container-type: inline-size; }
+/* While the floating settings column covers the canvas's right edge, the
+   canvas's right-hand controls (legend, minimap) and its centered hint sit
+   in the part that can still be seen (editor/PipelineCanvas.tsx). */
+.canvas .react-flow__panel.right { right: var(--covered-right, 0px); }
+.canvas .react-flow__panel.top.center { left: calc(50% - var(--covered-right, 0px) / 2); }
 .canvas { position: absolute; inset: 0; }
 .canvas-empty {
   height: 100%;

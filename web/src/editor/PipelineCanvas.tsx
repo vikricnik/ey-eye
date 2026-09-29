@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { DragEvent, ReactNode, RefObject } from "react";
+import type { CSSProperties, DragEvent, ReactNode, RefObject } from "react";
 import {
   Background,
   ControlButton,
@@ -192,6 +192,9 @@ function CanvasInner(props: PipelineCanvasProps) {
     <div
       ref={canvas}
       className={compact ? "canvas detail-compact" : "canvas"}
+      // The canvas's own right-hand controls (legend, minimap) move clear of
+      // the floating settings column (style.css, --covered-right).
+      style={{ "--covered-right": `${coveredRight}px` } as CSSProperties}
       onDragOver={(e) => {
         if (editable && e.dataTransfer.types.includes(NODE_DRAG_TYPE)) {
           e.preventDefault();
