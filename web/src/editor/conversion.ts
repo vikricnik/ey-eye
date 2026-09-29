@@ -123,7 +123,7 @@ export function definitionToFlow(inputs: FlowInputs): { nodes: LlmFlowNode[]; ed
     const running = status[e.to] === "running";
     if (e.kind === "plain") {
       edges.push({
-        id: `dep:${e.from}->${e.to}`,
+        id: dependencyEdgeId(e.from, e.to),
         source: e.from,
         target: e.to,
         className: "edge-plain",
@@ -165,6 +165,11 @@ export function definitionToFlow(inputs: FlowInputs): { nodes: LlmFlowNode[]; ed
   }
 
   return { nodes, edges };
+}
+
+/** The id of the plain dependency edge from one node to another. */
+export function dependencyEdgeId(from: string, to: string): string {
+  return `dep:${from}->${to}`;
 }
 
 /** Plain dependency edges carry "dep:<from>-><to>" ids; returns null for

@@ -60,7 +60,7 @@ export function explainRunFailure(error: RunError): FailureExplanation | null {
     if (cause.trim() === "") {
       return {
         summary: `Node "${nodeId}" got no answer from ${provider}:${model} in time.`,
-        hint: "Raise the per-call timeout under Execution in the pipeline's settings (click empty canvas), or retry.",
+        hint: "Raise the per-call timeout under Execution in the pipeline's settings (⚙ beside the pipeline picker), or retry.",
       };
     }
     const circuit = CIRCUIT_OPEN.exec(cause);
@@ -85,7 +85,7 @@ export function explainRunFailure(error: RunError): FailureExplanation | null {
       const limit = RUN_LIMIT.exec(message);
       return {
         summary: limit ? `The run took longer than its ${seconds(limit[1]!)} limit.` : "The run took longer than its time limit.",
-        hint: "Raise the run time limit under Execution in the pipeline's settings (click empty canvas), or retry.",
+        hint: "Raise the run time limit under Execution in the pipeline's settings (⚙ beside the pipeline picker), or retry.",
       };
     }
     case "RATE_LIMITED":

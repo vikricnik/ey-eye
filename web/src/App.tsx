@@ -39,12 +39,13 @@ import { BASE_URL, client } from "./config";
 import { Inspector } from "./editor/Inspector";
 import { PipelineCanvas } from "./editor/PipelineCanvas";
 import { Sidebar } from "./editor/Sidebar";
-import { LEVEL_SPACING, SIBLING_SPACING, autoLayout, definitionToFlow, graphOf } from "./editor/conversion";
+import { LEVEL_SPACING, SIBLING_SPACING, autoLayout, definitionToFlow, dependencyEdgeId, graphOf } from "./editor/conversion";
 import { docReducer } from "./editor/editorState";
 import type { DocAction, EditorDoc, Selection, ValidationState } from "./editor/editorState";
 import { useDialogs } from "./ui/Dialogs";
 import { DisplayMenu, useDisplaySettings } from "./ui/DisplaySettings";
 import { OutageNotice, ServerStatus } from "./ui/ServerStatus";
+import { GearIcon } from "./ui/icons";
 import { outageMessage, runBlockedReason, runOutage } from "./providerStatus";
 import { Splitter, usePanelSizes } from "./ui/Splitter";
 import { errorText } from "./format";
@@ -885,6 +886,14 @@ export function App() {
     if (selectionKey) setPanelTab("settings");
   }, [selectionKey]);
 
+  // The pipeline's own settings are Settings with nothing selected — opened
+  // from the button beside the pipeline picker, or a node's breadcrumb.
+  const pipelineSettingsOpen = panelTab === "settings" && selection === null;
+  const openPipelineSettings = () => {
+    setSelection(null);
+    setPanelTab("settings");
+  };
+
   const lastTurn = turns.at(-1);
   // What a re-run of the latest message starts from — and what previews show.
   const previewContext = useMemo<PreviewContext | null>(
@@ -1022,6 +1031,17 @@ export function App() {
               </option>
             ))}
           </select>
+          <button
+            type="button"
+            className="ghost icon"
+            aria-label="Pipeline settings"
+            aria-pressed={pipelineSettingsOpen}
+            title="Pipeline settings: output, execution, conversation history, defaults for all nodes"
+            disabled={!doc}
+            onClick={openPipelineSettings}
+          >
+            <GearIcon />
+          </button>
           {doc?.dirty && <span className="dirty-dot" title="unsaved changes">●</span>}
           {validationChip}
           <span className="sep" />
@@ -1139,6 +1159,7 @@ export function App() {
               colorMode={display.theme}
               textScale={display.settings.textScale}
               selectedNodeId={selection?.kind === "node" ? selection.id : null}
+              selectedEdgeId={selection?.kind === "edge" ? dependencyEdgeId(selection.from, selection.to) : null}
               fitSignal={fitSignal}
               onConnect={(from, to) => edit((d) => connect(d, from, to))}
               onDisconnect={(from, to) =>

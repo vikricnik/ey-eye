@@ -36,6 +36,8 @@ export interface PipelineCanvasProps {
    * zoomed-out cards keep their text at it (see zoomDetail.ts). */
   textScale: number;
   selectedNodeId: string | null;
+  /** The selected dependency edge's id (see dependencyEdgeId), if any. */
+  selectedEdgeId: string | null;
   /** Bump to re-fit the view (after auto-layout, import, …). */
   fitSignal: number;
   onConnect: (from: string, to: string) => void;
@@ -59,7 +61,7 @@ function CompactTextScale({ target, textScale }: { target: RefObject<HTMLDivElem
 }
 
 function CanvasInner(props: PipelineCanvasProps) {
-  const { editable, selectedNodeId, textScale } = props;
+  const { editable, selectedNodeId, selectedEdgeId, textScale } = props;
   const flow = useReactFlow();
   const fit = useMemo(() => fitOptions(textScale), [textScale]);
   const canvas = useRef<HTMLDivElement>(null);
@@ -95,6 +97,16 @@ function CanvasInner(props: PipelineCanvasProps) {
       return props.edges.map((e) => ({ ...e, selected: selected.has(e.id) }));
     });
   }, [props.edges]);
+
+  // With no edge selected in the app (the pipeline settings were opened, or
+  // the breadcrumb clicked), none stays selected here either — or Backspace
+  // would delete an edge the panel no longer shows.
+  useEffect(() => {
+    if (selectedEdgeId !== null) return;
+    setEdges((current) =>
+      current.some((e) => e.selected) ? current.map((e) => (e.selected ? { ...e, selected: false } : e)) : current
+    );
+  }, [selectedEdgeId]);
 
   const latestFit = useRef(fit);
   latestFit.current = fit;

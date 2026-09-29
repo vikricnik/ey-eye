@@ -153,7 +153,8 @@ already configured server-side via `CORS_ALLOWED_ORIGINS` in `.env`.
 
 **Layout**: the canvas fills the window, and **one panel** beside it holds
 everything else as tabs — **Chat** (the conversation), **Settings** (the
-selected node, or the pipeline when nothing is selected), **Add** (a blank
+selected node, or the pipeline when nothing is selected — **⚙** beside the
+pipeline picker opens the pipeline's), **Add** (a blank
 node or one from a preset), **Messages** (what every node received and
 replied) and **Tests**. The message box sits at the bottom of the panel on
 every tab, so you can send a message while editing. Selecting a node opens
@@ -220,7 +221,9 @@ it everything below is read-only and a banner says so):
   server's message. Save and Run are disabled while it's invalid. Warnings
   (a model a save would reject, or e.g. `num_ctx` above the model's maximum
   context) outline the node in amber but don't block anything.
-- **Pipeline settings** (click empty canvas): description, output node(s),
+- **Pipeline settings** (**⚙** beside the pipeline picker, the pipeline's
+  name at the top of a node's settings, or click empty canvas while on
+  Settings): description, output node(s),
   execution (timeout, retries, **parallel model calls**, **run time
   limit**), **conversation
   history** (turns kept, character budget, intro line, turn format, which
@@ -352,6 +355,6 @@ disabled for the same reasons as Run (e.g. Ollama unreachable).
 
 The client sends the earlier turns (with any remembered node outputs) on
 every request; how many are kept, the character budget and whether older
-turns are summarized are per-pipeline settings (click empty canvas →
-Conversation history). "+ new" in Chat starts a new conversation;
+turns are summarized are per-pipeline settings (⚙ beside the pipeline
+picker → Conversation history). "+ new" in Chat starts a new conversation;
 switching pipelines continues that pipeline's latest one.

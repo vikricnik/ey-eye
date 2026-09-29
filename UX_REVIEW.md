@@ -55,7 +55,7 @@ polish.
 | [UX-002](#ux-002-most-text-is-small-and-fails-contrast-minimums) | MAJOR | Most text is small and fails contrast minimums — ✅ fixed |
 | [UX-003](#ux-003-an-unreachable-ollama-is-only-discovered-when-a-run-fails) | MAJOR | An unreachable Ollama is only discovered when a run fails — ✅ fixed |
 | [UX-004](#ux-004-a-failed-run-discards-the-message-and-offers-no-retry) | MAJOR | A failed run discards the message and offers no retry — ✅ fixed |
-| [UX-005](#ux-005-pipeline-settings-are-hard-to-find) | MAJOR | Pipeline settings are hard to find |
+| [UX-005](#ux-005-pipeline-settings-are-hard-to-find) | MAJOR | Pipeline settings are hard to find — ✅ fixed |
 | [UX-006](#ux-006-two-run-buttons-with-different-meanings-on-the-tests-tab) | MINOR | Two Run buttons with different meanings on the Tests tab |
 | [UX-007](#ux-007-the-toolbar-gives-ten-actions-equal-weight) | MINOR | The toolbar gives ten actions equal weight |
 | [UX-008](#ux-008-node-settings-run-three-screens-long-and-repeat-actions) | MINOR | Node settings run three screens long and repeat actions |
@@ -320,6 +320,36 @@ polish.
 ### UX-005: Pipeline settings are hard to find
 
 - **Severity**: MAJOR
+- **Status**: ✅ Fixed (2026-09-29).
+  - **A gear button beside the pipeline picker** ("Pipeline settings",
+    with a tooltip listing what's there) opens them from any tab in one
+    click. It looks pressed while they're shown (`aria-pressed`), so it also
+    tells you where you are. The icon is a small inline SVG
+    ([icons.tsx](web/src/ui/icons.tsx)), because some systems draw the ⚙
+    character as a color emoji.
+  - **A breadcrumb** at the top of node and dependency settings:
+    `simple-local › node`. The pipeline's name is a link back to its
+    settings.
+  - **Canvas selection follows the app's**: opening the pipeline settings
+    (gear or breadcrumb) now also deselects a selected dependency edge on
+    the canvas. Before, React Flow kept it selected, and Backspace would
+    have deleted an edge the panel no longer showed. `dependencyEdgeId()`
+    in [conversion.ts](web/src/editor/conversion.ts) now builds those ids
+    in one place.
+  - **Not done**, on purpose: switching to Settings on an empty-canvas
+    click while on the Add tab. Clicking empty canvas there is how you
+    deselect before adding a node at the bottom, so switching tabs would
+    break that. On the Settings tab, an empty-canvas click already shows the
+    pipeline settings.
+  - The hints that said "click empty canvas" (README, the UX-004 error
+    hints, the Settings tab's tooltip) now point at the gear.
+  - The toolbar's gap went from 8px to 6px so the extra button still fits
+    on one row at 1024px when the pipeline is saved. With unsaved changes
+    it wrapped before this change too; UX-007 is the lasting fix for toolbar
+    space.
+  - **Checked in the app**: gear from the Chat tab, the pressed state, a
+    node's breadcrumb and back, and a dependency edge deselected by the
+    gear so Backspace leaves it alone (normal edge deletion still works).
 - **Principle**: H6 Recognition rather than recall; navigation ("where am I, how do I get back")
 - **File(s)**:
   - [App.tsx:875-879](web/src/App.tsx#L875-L879)

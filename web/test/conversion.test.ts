@@ -7,6 +7,7 @@ import {
   SIBLING_SPACING,
   autoLayout,
   definitionToFlow,
+  dependencyEdgeId,
   graphOf,
   parseDependencyEdgeId,
 } from "../src/editor/conversion";
@@ -69,6 +70,8 @@ describe("definitionToFlow", () => {
     const deps = flow.edges.filter((e) => e.className === "edge-plain").map((e) => e.id);
     assert.deepEqual(deps.sort(), ["dep:a->b", "dep:a->c", "dep:b->d", "dep:c->d"]);
     assert.deepEqual(parseDependencyEdgeId("dep:a->b"), { from: "a", to: "b" });
+    assert.equal(dependencyEdgeId("a", "b"), "dep:a->b");
+    assert.deepEqual(parseDependencyEdgeId(dependencyEdgeId("x_1", "y-2")), { from: "x_1", to: "y-2" });
     assert.equal(parseDependencyEdgeId("loop:again:back"), null);
     const loop = flow.edges.find((e) => e.className === "edge-loop")!;
     assert.equal(loop.id, "loop:again:back");
