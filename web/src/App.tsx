@@ -12,7 +12,6 @@ import {
   applyStreamStopped,
   connect,
   createGraphViewState,
-  disconnect,
   duplicateNode,
   endRunLog,
   liveTextOf,
@@ -20,7 +19,6 @@ import {
   newDefinition,
   testCases,
   presetFromNode,
-  removeNode,
 } from "@llm-pipeline/client";
 import type {
   ConversationTurn,
@@ -40,6 +38,7 @@ import { Inspector } from "./editor/Inspector";
 import { PipelineCanvas } from "./editor/PipelineCanvas";
 import { Sidebar } from "./editor/Sidebar";
 import { LEVEL_SPACING, SIBLING_SPACING, autoLayout, definitionToFlow, dependencyEdgeId, graphOf } from "./editor/conversion";
+import { applyCanvasDeletion, deletionSummary } from "./editor/canvasDeletion";
 import { docReducer } from "./editor/editorState";
 import type { DocAction, EditorDoc, Selection, ValidationState } from "./editor/editorState";
 import { useDialogs } from "./ui/Dialogs";
@@ -74,6 +73,9 @@ interface Notice {
   kind: "info" | "error";
   text: string;
   action?: { label: string; run: () => void };
+  /** Shown only while this is the document — an "Undo" offer: after any
+   * other change, its Undo would undo that instead, so it goes away. */
+  onlyWhile?: EditorDoc | undefined;
 }
 
 
@@ -157,9 +159,14 @@ export function App() {
 
   useEffect(() => {
     if (notice?.kind !== "info") return;
-    const timer = window.setTimeout(() => setNotice(null), 5000);
+    // Longer when it offers something to click (Undo).
+    const timer = window.setTimeout(() => setNotice(null), notice.action ? 10000 : 5000);
     return () => window.clearTimeout(timer);
   }, [notice]);
+
+  useEffect(() => {
+    if (notice?.onlyWhile && notice.onlyWhile !== doc) setNotice(null);
+  }, [doc, notice]);
 
   // ---------- loading ----------
 
@@ -323,9 +330,11 @@ export function App() {
   // ---------- editing ----------
 
   /** Applies one draft edit. `coalesce` groups rapid edits of the same
-   * field (typing a prompt) into a single undo step. */
+   * field (typing a prompt) into a single undo step. `removed` says what a
+   * deletion removed — "Deleted node "b"" — and offers to undo it: deletes
+   * happen at once, without asking, because they can be undone. */
   const edit = useCallback(
-    (op: (d: PipelineDefinition) => PipelineDefinition, coalesce?: string) => {
+    (op: (d: PipelineDefinition) => PipelineDefinition, coalesce?: string, removed?: string) => {
       const current = docRef.current;
       if (!current) return;
       try {
@@ -333,6 +342,15 @@ export function App() {
       } catch (err) {
         if (err instanceof DraftError) notify("error", err.message);
         else throw err;
+      }
+      const after = docRef.current;
+      if (removed && after && after !== current) {
+        setNotice({
+          kind: "info",
+          text: removed,
+          action: { label: "Undo", run: () => applyDoc({ type: "undo" }) },
+          onlyWhile: after,
+        });
       }
     },
     [applyDoc, notify]
@@ -1198,12 +1216,9 @@ export function App() {
               selectedEdgeId={selection?.kind === "edge" ? dependencyEdgeId(selection.from, selection.to) : null}
               fitSignal={fitSignal}
               onConnect={(from, to) => edit((d) => connect(d, from, to))}
-              onDisconnect={(from, to) =>
-                edit((d) => (d.nodes.some((n) => n.id === from) && d.nodes.some((n) => n.id === to) ? disconnect(d, from, to) : d))
-              }
-              onDeleteNodes={(ids) => {
-                edit((d) => ids.reduce((acc, id) => (acc.nodes.some((n) => n.id === id) ? removeNode(acc, id) : acc), d));
-                setSelection(null);
+              onDelete={(deletion) => {
+                edit((d) => applyCanvasDeletion(d, deletion), undefined, deletionSummary(deletion));
+                if (deletion.nodeIds.length > 0) setSelection(null);
               }}
               onMoveNodes={(moves) =>
                 edit((d) =>

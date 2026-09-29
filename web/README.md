@@ -198,6 +198,11 @@ it everything below is read-only and a banner says so):
 - **Undo / redo** (↶ ↷, ⌘Z / ⇧⌘Z / Ctrl+Y): up to 100 steps; typing into
   one field is a single step. Undoing back to the saved state clears
   "unsaved". Inside a text field, ⌘Z undoes that field's typing instead.
+- **Deleting doesn't ask first — it offers Undo.** Deleting a node (with
+  its connections, as one undo step), a dependency, a route, a branch or
+  loop, a test case or an expectation shows "Deleted … · Undo" for 10 s; the
+  offer goes away as soon as anything else changes, so its Undo always
+  undoes that delete.
 - Names, confirmations and deletes use in-app dialogs with inline
   validation (no browser popups).
 - **Add nodes** by dragging "LLM node" (or a preset)

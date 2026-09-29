@@ -18,6 +18,7 @@ import "@xyflow/react/dist/style.css";
 import { LlmNode } from "./LlmNode";
 import { parseDependencyEdgeId } from "./conversion";
 import type { LlmFlowNode } from "./conversion";
+import type { CanvasDeletion } from "./canvasDeletion";
 import type { Selection } from "./editorState";
 import { compactTextScale, fitOptions, isCompact } from "./zoomDetail";
 import { AutoLayoutIcon } from "../ui/icons";
@@ -46,8 +47,9 @@ export interface PipelineCanvasProps {
   /** Bump to re-fit the view (after auto-layout, import, …). */
   fitSignal: number;
   onConnect: (from: string, to: string) => void;
-  onDisconnect: (from: string, to: string) => void;
-  onDeleteNodes: (ids: string[]) => void;
+  /** Backspace/Delete: the selected nodes and dependency edges, with the
+   * edges of deleted nodes — all at once (see canvasDeletion.ts). */
+  onDelete: (deletion: CanvasDeletion) => void;
   onMoveNodes: (moves: { id: string; x: number; y: number }[]) => void;
   onSelect: (selection: Selection | null) => void;
   onDropNode: (position: { x: number; y: number }, presetName: string | undefined) => void;
@@ -177,13 +179,15 @@ function CanvasInner(props: PipelineCanvasProps) {
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={(c) => props.onConnect(c.source, c.target)}
-        onNodesDelete={(deleted) => props.onDeleteNodes(deleted.map((n) => n.id))}
-        onEdgesDelete={(deleted) => {
-          for (const e of deleted) {
-            const dep = parseDependencyEdgeId(e.id);
-            if (dep) props.onDisconnect(dep.from, dep.to);
-          }
-        }}
+        // One callback for everything a delete removes — React Flow's
+        // onEdgesDelete and onNodesDelete would make it two edits, and two
+        // undo steps.
+        onDelete={({ nodes: deletedNodes, edges: deletedEdges }) =>
+          props.onDelete({
+            nodeIds: deletedNodes.map((n) => n.id),
+            dependencies: deletedEdges.flatMap((e) => parseDependencyEdgeId(e.id) ?? []),
+          })
+        }
         onNodeDragStop={(_event, _node, dragged) =>
           props.onMoveNodes(dragged.map((n) => ({ id: n.id, x: n.position.x, y: n.position.y })))
         }

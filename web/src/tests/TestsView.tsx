@@ -24,7 +24,8 @@ import type {
 import { CommitInput, Field, ModelPicker } from "../editor/fields";
 import { formatDuration } from "../format";
 
-type Edit = (op: (d: PipelineDefinition) => PipelineDefinition, coalesce?: string) => void;
+/** `removed` says what a deletion removed; the app then offers to undo it. */
+type Edit = (op: (d: PipelineDefinition) => PipelineDefinition, coalesce?: string, removed?: string) => void;
 
 /** A test run in progress or finished: results by case and variant. */
 export interface TestRunState {
@@ -55,8 +56,8 @@ const KIND_PLACEHOLDER: Record<ExpectationKind, string> = {
 function CaseEditor(props: { definition: PipelineDefinition; testCase: EvalCase; editable: boolean; onEdit: Edit; onRenamed: (name: string) => void }) {
   const { testCase, editable, onEdit } = props;
   const expect = testCase.expect ?? [];
-  const save = (next: EvalCase, coalesce?: string) =>
-    onEdit((d) => upsertTestCase(d, next, testCase.name), coalesce ? `test:${testCase.name}:${coalesce}` : undefined);
+  const save = (next: EvalCase, coalesce?: string, removed?: string) =>
+    onEdit((d) => upsertTestCase(d, next, testCase.name), coalesce ? `test:${testCase.name}:${coalesce}` : undefined, removed);
   const setExpectation = (index: number, kind: ExpectationKind, value: string) =>
     save({ ...testCase, expect: expect.map((e, i) => (i === index ? makeExpectation(kind, value) : e)) }, `expect:${index}`);
 
@@ -120,7 +121,9 @@ function CaseEditor(props: { definition: PipelineDefinition; testCase: EvalCase;
                   type="button"
                   className="ghost icon"
                   aria-label="Remove expectation"
-                  onClick={() => save({ ...testCase, expect: expect.filter((_, j) => j !== i) })}
+                  onClick={() =>
+                    save({ ...testCase, expect: expect.filter((_, j) => j !== i) }, undefined, `Removed an expectation from "${testCase.name}"`)
+                  }
                 >
                   ✕
                 </button>
@@ -273,7 +276,7 @@ export function TestsView(props: {
                     type="button"
                     className="ghost icon palette-remove"
                     aria-label={`Delete test case ${c.name}`}
-                    onClick={() => onEdit((d) => removeTestCase(d, c.name))}
+                    onClick={() => onEdit((d) => removeTestCase(d, c.name), undefined, `Deleted the test case "${c.name}"`)}
                   >
                     ✕
                   </button>

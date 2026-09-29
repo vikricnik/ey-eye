@@ -64,8 +64,9 @@ const DEFAULT_SUMMARY_PROMPT =
   "Summarize this conversation briefly. Keep names, facts, decisions and open questions; drop small talk.\n\n{{ history }}";
 
 /** `coalesce` names the field being edited, so continuous edits to it
- * (typing, dragging a slider) form one undo step. */
-type Edit = (op: (d: PipelineDefinition) => PipelineDefinition, coalesce?: string) => void;
+ * (typing, dragging a slider) form one undo step. `removed` says what a
+ * deletion removed; the app then offers to undo it. */
+type Edit = (op: (d: PipelineDefinition) => PipelineDefinition, coalesce?: string, removed?: string) => void;
 
 export interface InspectorProps {
   doc: EditorDoc;
@@ -359,7 +360,7 @@ function NodeInspector(props: InspectorProps & { node: NodeConfig; tab: NodeTab;
                   {
                     label: "Delete node",
                     onSelect: () => {
-                      onEdit((d) => removeNode(d, id));
+                      onEdit((d) => removeNode(d, id), undefined, `Deleted node "${id}"`);
                       onSelect(null);
                     },
                     detail: "undo with ⌘Z / Ctrl+Z",
@@ -547,7 +548,7 @@ function NodeInspector(props: InspectorProps & { node: NodeConfig; tab: NodeTab;
                       {dep}
                     </button>
                     {editable && (
-                      <button type="button" className="ghost small" onClick={() => onEdit((d) => disconnect(d, dep, id))}>
+                      <button type="button" className="ghost small" onClick={() => onEdit((d) => disconnect(d, dep, id), undefined, `Removed the dependency ${dep} → ${id}`)}>
                         remove
                       </button>
                     )}
@@ -691,11 +692,12 @@ function RouteTargets(props: {
   index: number;
   candidates: string[];
   editable: boolean;
-  onChange: (to: string | string[]) => void;
+  /** `removed`: what a ✕ took out, to offer undoing it. */
+  onChange: (to: string | string[], removed?: string) => void;
 }) {
   const { route, index, candidates, editable, onChange } = props;
   const chosen = routeTargets(route);
-  const commit = (next: string[]) => onChange(next.length === 1 ? next[0]! : next);
+  const commit = (next: string[], removed?: string) => onChange(next.length === 1 ? next[0]! : next, removed);
   const addable = candidates.filter((t) => !chosen.includes(t));
 
   return (
@@ -722,7 +724,7 @@ function RouteTargets(props: {
               type="button"
               className="ghost small"
               aria-label={`Remove ${target} from route ${index + 1}`}
-              onClick={() => commit(chosen.filter((t) => t !== target))}
+              onClick={() => commit(chosen.filter((t) => t !== target), `Removed ${target} from route ${index + 1}`)}
             >
               ✕
             </button>
@@ -751,8 +753,8 @@ function RouteTargets(props: {
 function BranchForm(props: { branch: BranchConfig; def: PipelineDefinition; editable: boolean; onEdit: Edit }) {
   const { branch, def, editable, onEdit } = props;
   const targets = nodeIds(def).filter((n) => n !== branch.from);
-  const save = (next: BranchConfig, field?: string) =>
-    onEdit((d) => upsertBranch(d, next, branch.id), field ? `branch:${branch.id}:${field}` : undefined);
+  const save = (next: BranchConfig, field?: string, removed?: string) =>
+    onEdit((d) => upsertBranch(d, next, branch.id), field ? `branch:${branch.id}:${field}` : undefined, removed);
 
   return (
     <div className="routing-form">
@@ -789,13 +791,17 @@ function BranchForm(props: { branch: BranchConfig; def: PipelineDefinition; edit
             index={i}
             candidates={targets}
             editable={editable}
-            onChange={(to) => save({ ...branch, routes: branch.routes.map((r, j) => (j === i ? { ...r, to } : r)) })}
+            onChange={(to, removed) =>
+              save({ ...branch, routes: branch.routes.map((r, j) => (j === i ? { ...r, to } : r)) }, undefined, removed)
+            }
           />
           {editable && !route.default && (
             <button
               type="button"
               className="ghost small"
-              onClick={() => save({ ...branch, routes: branch.routes.filter((_, j) => j !== i) })}
+              onClick={() =>
+                save({ ...branch, routes: branch.routes.filter((_, j) => j !== i) }, undefined, `Removed route ${i + 1} of ${branch.id}`)
+              }
             >
               ✕
             </button>
@@ -819,7 +825,7 @@ function BranchForm(props: { branch: BranchConfig; def: PipelineDefinition; edit
           >
             + route
           </button>
-          <button type="button" className="ghost danger-text" onClick={() => onEdit((d) => removeBranch(d, branch.id))}>
+          <button type="button" className="ghost danger-text" onClick={() => onEdit((d) => removeBranch(d, branch.id), undefined, `Removed the branch ${branch.id}`)}>
             remove branch
           </button>
         </div>
@@ -890,7 +896,7 @@ function LoopForm(props: { loop: LoopConfig; def: PipelineDefinition; editable: 
         </select>
       </Field>
       {editable && (
-        <button type="button" className="ghost danger-text" onClick={() => onEdit((d) => removeLoop(d, loop.id))}>
+        <button type="button" className="ghost danger-text" onClick={() => onEdit((d) => removeLoop(d, loop.id), undefined, `Removed the loop ${loop.id}`)}>
           remove loop
         </button>
       )}
@@ -918,7 +924,7 @@ function EdgeInspector(props: InspectorProps & { from: string; to: string }) {
           type="button"
           className="danger"
           onClick={() => {
-            onEdit((d) => disconnect(d, from, to));
+            onEdit((d) => disconnect(d, from, to), undefined, `Removed the dependency ${from} → ${to}`);
             onSelect(null);
           }}
         >

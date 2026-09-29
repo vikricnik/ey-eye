@@ -62,7 +62,7 @@ polish.
 | [UX-009](#ux-009-canvas-status-and-roles-are-hard-to-read-and-the-legend-is-on-the-wrong-tab) | MINOR | Canvas status and roles are hard to read, and the legend is on the wrong tab — ✅ fixed |
 | [UX-010](#ux-010-one-concept-has-several-names-and-one-icon-has-two-meanings) | MINOR | One concept has several names, and one icon has two meanings — ✅ fixed |
 | [UX-011](#ux-011-some-disabled-controls-give-no-reason) | MINOR | Some disabled controls give no reason — ✅ fixed |
-| [UX-012](#ux-012-undo-exists-but-is-never-offered-after-a-delete) | MINOR | Undo exists but is never offered after a delete |
+| [UX-012](#ux-012-undo-exists-but-is-never-offered-after-a-delete) | MINOR | Undo exists but is never offered after a delete — ✅ fixed |
 | [UX-013](#ux-013-on-narrow-screens-the-message-box-is-below-the-fold) | MINOR | On narrow screens the message box is below the fold |
 | [UX-014](#ux-014-smaller-items) | SUGGESTION | Smaller items |
 
@@ -672,6 +672,29 @@ polish.
 ### UX-012: Undo exists but is never offered after a delete
 
 - **Severity**: MINOR
+- **Status**: ✅ Fixed (2026-09-29).
+  - **"Deleted … · Undo"** after every delete: a node (Backspace, or ⋯ →
+    Delete node), a dependency (Backspace, "remove" in Depends on, "Remove
+    dependency"), a route, a route target, a branch, a loop, a test case
+    or an expectation. `edit()` takes an optional third argument, what was
+    removed, and turns that into the offer. It stays 10 s (other info
+    notices stay 5 s).
+  - **Its Undo always undoes that delete.** The notice is tied to the
+    document the delete produced (`onlyWhile`), and any later change
+    (another edit, an undo or redo, loading) removes it. Otherwise its Undo
+    would silently undo whatever happened last.
+  - **Bug fixed along the way**: deleting a connected node with Backspace
+    took several undo steps. React Flow calls `onEdgesDelete` (one
+    `disconnect` edit per edge) before `onNodesDelete`, so one ⌘Z brought
+    the node back without its connections; confirmed in the app. The
+    canvas now uses React Flow's single `onDelete({ nodes, edges })`, and
+    [canvasDeletion.ts](web/src/editor/canvasDeletion.ts) applies it as one
+    edit.
+  - **Checked in the app**: Backspace on a connected node, then one Undo
+    (the node, its dependency and its branch route all came back); ⋯ →
+    Delete node, then another edit (the offer disappeared); deleting a test
+    case, then Undo. Unit tests:
+    [canvasDeletion.test.ts](web/test/canvasDeletion.test.ts).
 - **Principle**: H3 User control and freedom (undo instead of confirm); modeless feedback
 - **File(s)**:
   - [App.tsx:68-72](web/src/App.tsx#L68-L72)
