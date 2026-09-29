@@ -26,6 +26,7 @@ web/
     │   ├── zoomDetail.ts       # compact cards and fit limits when zoomed out
     │   ├── Inspector.tsx       # node / pipeline / edge / branch / loop settings
     │   ├── Section.tsx         # foldable settings sections, remembered open or closed
+    │   ├── SettingsColumn.tsx  # the settings column: header (path, ✕) around the Inspector
     │   ├── NodeTrace.tsx       # a node's own trace, in its settings
     │   ├── traceSummary.ts     # the folded Trace section's one-line summary
     │   ├── fields.tsx          # model picker, Ollama options, inputs
@@ -48,7 +49,7 @@ web/
         ├── Dialogs.tsx         # in-app confirm / prompt / form dialogs
         ├── Menu.tsx            # menu button (File ▾, ⋯) with the ARIA keyboard contract
         ├── ServerStatus.tsx    # API / Ollama health lights and the outage notice
-        ├── SidePanel.tsx       # the one panel beside the canvas: tabs + message box
+        ├── RunPanel.tsx        # Chat and Tests tabs + the message box
         ├── Splitter.tsx        # resizing the columns
         ├── panelSizes.ts       # column widths, and where the settings column goes
         ├── DisplaySettings.tsx # light/dark theme and text size
@@ -168,18 +169,19 @@ already configured server-side via `CORS_ALLOWED_ORIGINS` in `.env`.
 
 ## Features
 
-**Layout**: the canvas fills the window, and **one panel** beside it holds
-everything else as tabs — **Chat** (the conversation), **Settings** (the
-selected node, or the pipeline when nothing is selected — **⚙** beside the
-pipeline picker opens the pipeline's), **Add** (a blank
-node or one from a preset), **Trace** (what every node received and
-replied) and **Tests**. The message box sits at the bottom of the panel on
-every tab but Tests (whose Run buttons run test cases), so you can send a
-message while editing; what you've typed is kept while you're on Tests. Selecting a node opens
-its Settings. Drag the panel's edge to resize it (double-click resets; the
-width you choose is remembered — a narrower window only shows it narrower
-for as long as it's narrow); on a narrow screen the panel sits under the
-canvas and the message box stays at the bottom of the screen as you scroll.
+**Layout**: the canvas, then the **settings column**, then the **run
+panel**. Selecting a node or dependency opens its settings in the column;
+**⚙** beside the pipeline picker opens (and closes) the pipeline's, and ✕
+closes the column to give the canvas its width back. The run panel has
+**Chat** (the conversation, with each run's trace) and **Tests**; the
+message box sits under Chat, so you can edit a node and send a message
+without anything switching views. Drag a column's edge to resize it
+(double-click resets; the widths you choose are remembered — a narrower
+window only shows them narrower for as long as it's narrow). When docking
+the settings column would leave the canvas under 480px, it floats over the
+canvas's right edge instead; on a narrow screen (960px or less) everything
+stacks — canvas, settings, run panel — and the message box stays at the
+bottom of the screen as you scroll.
 
 **Display** ("Aa" in the header): **light or dark theme** — "System"
 (the default) follows the operating system and switches with it — and
@@ -224,7 +226,7 @@ it everything below is read-only and a banner says so):
   while nothing is connected yet. **?** in the canvas corner opens a legend of
   the statuses, edge styles and marks. Output nodes carry an **OUTPUT** badge. Select an edge or node and press
   Backspace/Delete to remove it.
-- **Configure a node** in **Settings**, in sections that fold — each
+- **Configure a node** in the **settings column**, in sections that fold — each
   folded one shows a one-line summary, and which are open is remembered in
   this browser (the same for every node):
   **Model** (picked from what `GET /v1/models` says is installed or
@@ -254,13 +256,13 @@ it everything below is read-only and a banner says so):
   input (e.g. added below a selected node), the reference points at that
   input. ✕ removes a preset (recoverable on the server).
 - **Live validation**: the header shows valid / invalid / warnings; an
-  invalid node is outlined on the canvas and its Settings show the
+  invalid node is outlined on the canvas and its settings show the
   server's message. Save and Run are disabled while it's invalid. Warnings
   (a model a save would reject, or e.g. `num_ctx` above the model's maximum
   context) outline the node in amber but don't block anything.
 - **Pipeline settings** (**⚙** beside the pipeline picker, the pipeline's
-  name at the top of a node's settings, or click empty canvas while on
-  Settings): description, output node(s),
+  name at the top of the settings column, or click empty canvas while the
+  column is open): description, output node(s),
   execution (timeout, retries, **parallel model calls**, **run time
   limit**), **conversation
   history** (turns kept, character budget, intro line, turn format, which
@@ -337,7 +339,7 @@ it everything below is read-only and a banner says so):
   server), links go only to web and mail addresses, and the result is
   sanitized again with DOMPurify. The Trace always shows raw text.
 
-**Tests** (a tab in the panel): the pipeline's test cases — a message
+**Tests** (a tab in the run panel): the pipeline's test cases — a message
 each, and what the answer must satisfy: contains / doesn't contain
 (case-insensitive), a `check` condition like a branch's, or a requirement a
 **judge model** grades PASS/FAIL with its reason. Cases are saved with the

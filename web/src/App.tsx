@@ -63,8 +63,9 @@ import {
 import type { ConversationSummary } from "./run/runHistory";
 import { Chat, Composer } from "./run/Chat";
 import type { ComposerHandle, Turn } from "./run/Chat";
-import { SidePanel } from "./ui/SidePanel";
-import type { PanelTab } from "./ui/SidePanel";
+import { RunPanel } from "./ui/RunPanel";
+import type { PanelTab } from "./ui/RunPanel";
+import { SettingsColumn, settingsSubject } from "./editor/SettingsColumn";
 
 const NAME_PATTERN = /^[A-Za-z0-9_-]+$/;
 
@@ -108,8 +109,10 @@ export function App() {
   const [presets, setPresets] = useState<NodePreset[]>([]);
   const [viewState, setViewState] = useState<GraphViewState | undefined>();
   const [lastOutputs, setLastOutputs] = useState<Record<string, NodeOutput>>({});
-  // Which tab of the side panel is showing (see ui/SidePanel.tsx).
+  // Which tab of the run panel is showing (see ui/RunPanel.tsx), and
+  // whether the settings column is open (see editor/SettingsColumn.tsx).
   const [panelTab, setPanelTab] = useState<PanelTab>("chat");
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [testRun, setTestRun] = useState<TestRunState | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
   // Stops the run / test run in progress (Stop buttons, Esc).
@@ -899,20 +902,26 @@ export function App() {
 
   // ---------- derived ----------
 
-  // Selecting a node or edge — on the canvas, from Messages, by adding one —
-  // shows its settings.
+  // Selecting a node or edge — on the canvas, in a trace, by adding one —
+  // opens the settings column on it. Nothing else changes what's showing.
   const selectionKey =
     selection?.kind === "node" ? `node:${selection.id}` : selection?.kind === "edge" ? `edge:${selection.from}->${selection.to}` : "";
   useEffect(() => {
-    if (selectionKey) setPanelTab("settings");
+    if (selectionKey) setSettingsOpen(true);
   }, [selectionKey]);
 
-  // The pipeline's own settings are Settings with nothing selected — opened
-  // from the button beside the pipeline picker, or a node's breadcrumb.
-  const pipelineSettingsOpen = panelTab === "settings" && selection === null;
-  const openPipelineSettings = () => {
+  // The column, while there's a pipeline to show settings for.
+  const settingsShown = settingsOpen && doc !== null;
+  // The pipeline's own settings are the column with nothing selected —
+  // opened, and closed again, by the gear beside the pipeline picker.
+  const pipelineSettingsOpen = settingsShown && selection === null;
+  const togglePipelineSettings = () => {
+    if (pipelineSettingsOpen) {
+      setSettingsOpen(false);
+      return;
+    }
     setSelection(null);
-    setPanelTab("settings");
+    setSettingsOpen(true);
   };
 
   const lastTurn = turns.at(-1);
@@ -1113,7 +1122,7 @@ export function App() {
             aria-pressed={pipelineSettingsOpen}
             title="Pipeline settings: output, execution, conversation history, defaults for all nodes"
             disabled={!doc}
-            onClick={openPipelineSettings}
+            onClick={togglePipelineSettings}
           >
             <GearIcon />
           </button>
@@ -1203,7 +1212,7 @@ export function App() {
         )}
       </div>
 
-      <div className="workspace">
+      <div className={settingsShown && panels.placement === "docked" ? "workspace settings-docked" : "workspace"}>
         <main className="canvas-wrap">
           {doc ? (
             <PipelineCanvas
@@ -1247,6 +1256,44 @@ export function App() {
             <div className="canvas-empty">{loadError ?? "loading…"}</div>
           )}
         </main>
+        {settingsShown && (
+          <Splitter
+            axis="x"
+            grow={-1}
+            value={panels.sizes.settings}
+            onResize={(px) => panels.setSize("settings", px)}
+            onReset={() => panels.resetSize("settings")}
+            label="Resize the settings column"
+            className="splitter-settings"
+          />
+        )}
+        {settingsShown && doc && (
+          <SettingsColumn
+            pipeline={doc.definition.name}
+            subject={settingsSubject(doc.definition, selection)}
+            placement={panels.placement}
+            onPipeline={() => setSelection(null)}
+            onClose={() => setSettingsOpen(false)}
+          >
+            <Inspector
+              doc={doc}
+              selection={selection}
+              editable={editable}
+              models={models}
+              presets={presets}
+              turns={turns}
+              validation={doc.dirty ? validation : { status: "idle" }}
+              onEdit={edit}
+              onSelect={setSelection}
+              onRefreshModels={() => void refreshModels(true)}
+              onSaveAsPreset={(id) => void saveNodeAsPreset(id)}
+              onDuplicate={duplicate}
+              rerunnable={rerunnable}
+              onRerun={(id) => void run("", id)}
+              previewContext={previewContext}
+            />
+          </SettingsColumn>
+        )}
         {doc && (
           <Splitter
             axis="x"
@@ -1258,7 +1305,7 @@ export function App() {
             className="splitter-run"
           />
         )}
-        <SidePanel
+        <RunPanel
           tab={panelTab}
           onTab={setPanelTab}
           badges={{
@@ -1275,16 +1322,28 @@ export function App() {
               running={running}
               saveFirst={doc?.dirty ?? false}
               disabledReason={runDisabled}
-              onSubmit={(prompt) => {
-                // Show the answer coming in (and its trace).
-                setPanelTab("chat");
-                void run(prompt);
-              }}
+              onSubmit={(prompt) => void run(prompt)}
               onStop={() => stopRun.current?.abort()}
             />
           }
         >
-          {panelTab === "chat" ? (
+          {panelTab === "tests" ? (
+            doc ? (
+              <TestsView
+                definition={doc.definition}
+                editable={editable}
+                models={models}
+                onEdit={edit}
+                onRefreshModels={() => void refreshModels(true)}
+                run={testRun}
+                onRun={(request) => void runTests(request)}
+                onStop={() => stopTests.current?.abort()}
+                lastMessage={lastTurn?.prompt ?? null}
+              />
+            ) : (
+              <div className="empty-state">{loadError ?? "loading…"}</div>
+            )
+          ) : (
             <Chat
               turns={turns}
               running={running}
@@ -1306,40 +1365,8 @@ export function App() {
               retryDisabledReason={runDisabled}
               onEditMessage={(prompt) => composer.current?.fill(prompt)}
             />
-          ) : !doc ? (
-            <div className="empty-state">{loadError ?? "loading…"}</div>
-          ) : panelTab === "tests" ? (
-            <TestsView
-              definition={doc.definition}
-              editable={editable}
-              models={models}
-              onEdit={edit}
-              onRefreshModels={() => void refreshModels(true)}
-              run={testRun}
-              onRun={(request) => void runTests(request)}
-              onStop={() => stopTests.current?.abort()}
-              lastMessage={lastTurn?.prompt ?? null}
-            />
-          ) : (
-            <Inspector
-              doc={doc}
-              selection={selection}
-              editable={editable}
-              models={models}
-              presets={presets}
-              turns={turns}
-              validation={doc.dirty ? validation : { status: "idle" }}
-              onEdit={edit}
-              onSelect={setSelection}
-              onRefreshModels={() => void refreshModels(true)}
-              onSaveAsPreset={(id) => void saveNodeAsPreset(id)}
-              onDuplicate={duplicate}
-              rerunnable={rerunnable}
-              onRerun={(id) => void run("", id)}
-              previewContext={previewContext}
-            />
           )}
-        </SidePanel>
+        </RunPanel>
       </div>
     </div>
   );

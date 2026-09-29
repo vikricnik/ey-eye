@@ -1,19 +1,19 @@
 import type { ReactNode } from "react";
 
-export type PanelTab = "chat" | "settings" | "tests";
+export type PanelTab = "chat" | "tests";
 
 export const PANEL_TABS: { id: PanelTab; label: string; title: string }[] = [
   { id: "chat", label: "Chat", title: "The conversation with this pipeline, and each run's trace" },
-  { id: "settings", label: "Settings", title: "The selected node — or the pipeline, with nothing selected (⚙ beside the pipeline picker)" },
   { id: "tests", label: "Tests", title: "Test cases and model comparisons" },
 ];
 
 /**
- * The one panel beside the canvas: a tab for everything that isn't the
- * graph itself, and the message box below them — so a message can be sent
- * while editing (every tab but Tests, see App).
+ * The run panel, at the right: Chat and Tests, and the message box under
+ * Chat (Tests has its own Run buttons, for test cases). Settings have their
+ * own column (editor/SettingsColumn.tsx), so nothing here switches tabs
+ * on its own.
  */
-export function SidePanel(props: {
+export function RunPanel(props: {
   tab: PanelTab;
   onTab: (tab: PanelTab) => void;
   /** Shown after a tab's label — e.g. a pulsing dot while it's busy. */
@@ -24,8 +24,8 @@ export function SidePanel(props: {
   footerHidden?: boolean;
 }) {
   return (
-    <aside className="side-panel" aria-label="Panel">
-      <div className="panel-tabs" role="tablist" aria-label="Panel">
+    <aside className="run-panel" aria-label="Run">
+      <div className="panel-tabs" role="tablist" aria-label="Run">
         {PANEL_TABS.map((t) => (
           <button
             key={t.id}

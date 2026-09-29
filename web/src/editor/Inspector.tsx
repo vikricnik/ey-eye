@@ -119,20 +119,6 @@ export function Inspector(props: InspectorProps) {
 
 // ---------------------------------------------------------------------------
 
-/** "pipeline-name › node": where these settings sit, and the way back up
- * to the pipeline's own settings. */
-function Breadcrumb({ pipeline, kind, onPipeline }: { pipeline: string; kind: string; onPipeline: () => void }) {
-  return (
-    <nav className="kicker breadcrumb" aria-label="Breadcrumb">
-      <button type="button" className="link" title="The pipeline's own settings" onClick={onPipeline}>
-        {pipeline}
-      </button>
-      <span aria-hidden="true">›</span>
-      <span>{kind}</span>
-    </nav>
-  );
-}
-
 /** A variable a prompt template can use, and what it holds — its insert
  * button's tooltip, and a line of the template syntax. */
 interface TemplateVariable {
@@ -318,7 +304,6 @@ function NodeInspector(props: InspectorProps & { node: NodeConfig }) {
   return (
     <div className="inspector-body">
       <header className="inspector-title">
-        <Breadcrumb pipeline={def.name} kind="node" onPipeline={() => onSelect(null)} />
         <h2>{id}</h2>
         {(editable || props.rerunnable.has(id)) && (
           <div className="title-actions">
@@ -866,7 +851,6 @@ function EdgeInspector(props: InspectorProps & { from: string; to: string }) {
   return (
     <div className="inspector-body">
       <header className="inspector-title">
-        <Breadcrumb pipeline={props.doc.definition.name} kind="dependency" onPipeline={() => onSelect(null)} />
         <h2>
           {from} → {to}
         </h2>
@@ -910,7 +894,6 @@ function PipelineInspector(props: InspectorProps) {
   return (
     <div className="inspector-body">
       <header className="inspector-title">
-        <span className="kicker">pipeline</span>
         <h2>{def.name}</h2>
       </header>
       {validation.status === "invalid" && (

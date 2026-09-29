@@ -281,15 +281,46 @@ button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-
 
 /* ---------- Workspace ---------- */
 .workspace {
-  position: relative; /* anchors the panel splitter */
+  position: relative; /* anchors the splitters and the floating settings column */
   grid-row: 3;
   display: grid;
   grid-template-columns: minmax(0, 1fr) var(--run-w);
   min-height: 0;
 }
+.workspace.settings-docked { grid-template-columns: minmax(0, 1fr) var(--settings-w) var(--run-w); }
 
-/* ---------- The side panel: tabs, their content, the message box ---------- */
-.side-panel {
+/* ---------- The settings column (editor/SettingsColumn.tsx) ---------- */
+.settings-column {
+  border-left: 1px solid var(--border);
+  background: var(--panel);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+.settings-column > .inspector { flex: 1; }
+/* Floating: over the canvas's right edge, beside the run panel; the canvas
+   keeps its width underneath (see ui/panelSizes.ts). */
+.settings-column.floating {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: var(--run-w);
+  width: var(--settings-w);
+  z-index: 15;
+  box-shadow: -8px 0 24px var(--shadow-strong);
+}
+.settings-column-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px 6px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* ---------- The run panel: Chat and Tests, the message box ---------- */
+.run-panel {
   border-left: 1px solid var(--border);
   background: var(--panel);
   display: flex;
@@ -670,7 +701,7 @@ button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-
 .inspector { overflow-y: auto; min-height: 0; }
 .inspector-body { padding: 14px 16px 24px; display: grid; gap: 4px; }
 .inspector-title { display: grid; gap: 2px; margin-bottom: 6px; }
-.inspector-title .kicker { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-dim); }
+.settings-column-head .kicker { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-dim); }
 /* "pipeline-name › node": the pipeline's name links back to its settings,
    and keeps its own spelling (it's a file name). */
 .breadcrumb { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
@@ -969,7 +1000,8 @@ button.loading .btn-spinner { display: inline-block; }
   .app { grid-template-rows: auto auto auto; height: auto; min-height: 100%; }
   .workspace { grid-template-columns: 1fr; }
   .canvas-wrap { height: 55vh; }
-  .side-panel { border-left: none; border-top: 1px solid var(--border); height: 80vh; }
+  .run-panel { border-left: none; border-top: 1px solid var(--border); height: 80vh; }
+  .settings-column { border-left: none; border-top: 1px solid var(--border); max-height: 80vh; }
   .toolbar { width: 100%; }
   /* Stacked, the panel starts below the canvas, so its footer — the
      message box — would sit past the fold. It sticks to the bottom of the
@@ -995,6 +1027,7 @@ button.loading .btn-spinner { display: inline-block; }
 .splitter:hover::after, .splitter.active::after, .splitter:focus-visible::after { background: var(--accent); }
 .splitter:focus-visible { outline: none; }
 .splitter-run { right: calc(var(--run-w) - 4px); }
+.splitter-settings { right: calc(var(--run-w) + var(--settings-w) - 4px); }
 /* While dragging, keep the resize cursor everywhere and stop text selection. */
 body.resizing-x, body.resizing-x * { cursor: col-resize !important; user-select: none; }
 body.resizing-y, body.resizing-y * { cursor: row-resize !important; user-select: none; }
