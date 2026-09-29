@@ -94,7 +94,7 @@ keep, not by a fixed breakpoint:
 |---|---|
 | ≥ 480px | **docked** — its own grid column. (1366px laptop, default widths → canvas ≈ 566px) |
 | < 480px | **floating** — overlays the canvas's right edge with a shadow; the run panel keeps its column, the canvas keeps its full width beneath |
-| window ≤ 960px | existing **stacked** layout: canvas, then settings (when open), then the run panel; the message box stays sticky at the bottom |
+| window ≤ 960px | existing **stacked** layout: canvas, then settings (when open), then the run panel; the message box stays sticky at the bottom. `settingsPlacement()` returns `"stacked"` here too, so the code and the CSS media query agree |
 
 **Run panel**: two tabs, **Chat** and **Tests**. The message box sits under
 Chat and stays hidden on Tests (so two different "Run" buttons never share the
@@ -106,8 +106,10 @@ is open with the pipeline's settings.
 ### 2. Settings column
 
 **Header** — a thin bar with the path and a close button:
-`consensus-qa › node`, `consensus-qa › dependency`, or `consensus-qa` for the
-pipeline itself; clicking the pipeline name opens its settings. This is the
+`consensus-qa › node`, `consensus-qa › dependency`, or `pipeline` for the
+pipeline itself (its name is the title right below, as today); clicking the
+pipeline name opens its settings. A selected node that no longer exists
+(deleted, renamed, undone) shows the pipeline, as the Inspector already does. This is the
 existing breadcrumb, moved out of the node and dependency views into the
 column header so it's always in the same place. ✕ sits at the right.
 
@@ -205,7 +207,7 @@ Pure logic, in the existing `node:test` style (`web/test/*.test.ts`):
 
 - `panelSizes.test.ts` (rewritten): clamping both widths; a v2-only value is
   ignored; `settingsPlacement()` is docked at 1280 / 1366 / 1920 and floating
-  at 1100 with default widths.
+  at 1100 with default widths, stacked at 960.
 - `canvasHint.test.ts`: the hint names **+ Add node**.
 - `nodeTrace.test.ts` (new): summary for never run, finished, and running.
 - Off-screen check for keeping the selected node in view.
