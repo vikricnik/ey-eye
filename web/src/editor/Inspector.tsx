@@ -55,6 +55,7 @@ import { parseList } from "../format";
 import type { PreviewContext } from "./PromptPreview";
 import { NodeTrace } from "./NodeTrace";
 import { nodeTraceSummary } from "./traceSummary";
+import { defaultsSummary, executionSummary, historySummary, outputSummary, routingSummary } from "./pipelineSummaries";
 import type { Turn } from "../run/Chat";
 
 // The server's built-in history defaults (pipeline_config/schema.py), shown
@@ -932,8 +933,9 @@ function PipelineInspector(props: InspectorProps) {
         </Field>
       </section>
 
-      <section>
-        <h3>Output</h3>
+      {/* Foldable like a node's settings; ids are prefixed because open/closed
+          states are remembered in one list shared with node sections. */}
+      <Section id="pipeline-output" title="Output" defaultOpen summary={outputSummary(outputs)}>
         <p className="dim">The first listed node that actually ran provides the answer.</p>
         {def.nodes.map((n) => {
           const only = outputs.length === 1 && outputs[0] === n.id;
@@ -957,10 +959,9 @@ function PipelineInspector(props: InspectorProps) {
             {outputs[0]} is the only output node — a pipeline needs at least one, so mark another before unmarking it.
           </p>
         )}
-      </section>
+      </Section>
 
-      <section>
-        <h3>Execution</h3>
+      <Section id="pipeline-execution" title="Execution" defaultOpen={false} summary={executionSummary(def.execution)}>
         <div className="field-stack">
           <Field label="timeout (s)" hint="per model call">
             <NumberField value={exec.model_timeout_seconds} disabled={!editable} onChange={(v) => setExec("model_timeout_seconds", v)} />
@@ -988,14 +989,18 @@ function PipelineInspector(props: InspectorProps) {
             <NumberField value={exec.retry_backoff_seconds} disabled={!editable} onChange={(v) => setExec("retry_backoff_seconds", v)} />
           </Field>
         </div>
-      </section>
+      </Section>
 
       <HistorySettings {...props} />
       <NodeDefaultsSettings {...props} />
 
       {((def.branches ?? []).length > 0 || (def.loops ?? []).length > 0) && (
-        <section>
-          <h3>Routing</h3>
+        <Section
+          id="pipeline-routing"
+          title="Routing"
+          defaultOpen={false}
+          summary={routingSummary((def.branches ?? []).length, (def.loops ?? []).length)}
+        >
           <ul className="dep-list">
             {(def.branches ?? []).map((b) => (
               <li key={b.id}>
@@ -1015,7 +1020,7 @@ function PipelineInspector(props: InspectorProps) {
               </li>
             ))}
           </ul>
-        </section>
+        </Section>
       )}
 
       <p className="dim tip">Select a node to configure its model, temperature, prompts and Ollama options.</p>
@@ -1055,8 +1060,7 @@ function HistorySettings(props: InspectorProps) {
   const summaryLimits = useModelLimits(history.summarize?.model);
 
   return (
-    <section>
-      <h3>Conversation history</h3>
+    <Section id="pipeline-history" title="Conversation history" defaultOpen summary={historySummary(history)}>
       <p className="dim">
         Earlier turns reach nodes through <code>{"{{ conversation }}"}</code> (earlier turns, then the new
         message) and <code>{"{{ history }}"}</code> (earlier turns only); <code>{"{{ message }}"}</code> is the new
@@ -1165,7 +1169,7 @@ function HistorySettings(props: InspectorProps) {
           />
         </Field>
       )}
-    </section>
+    </Section>
   );
 }
 
@@ -1183,8 +1187,7 @@ function NodeDefaultsSettings(props: InspectorProps) {
   const limits = useModelLimits(defaults.model);
 
   return (
-    <section>
-      <h3>Defaults for all nodes</h3>
+    <Section id="pipeline-defaults" title="Defaults for all nodes" defaultOpen={false} summary={defaultsSummary(defaults)}>
       <p className="dim">Nodes use these unless they set their own.</p>
       <Field label="Model" hint="nodes without their own model use it; others inherit its temperature and Ollama options">
         <ModelPicker
@@ -1237,6 +1240,6 @@ function NodeDefaultsSettings(props: InspectorProps) {
           onChange={(key, value) => tuneDefaultModel((m) => modelWithOption(m, key, value), `options.${key}`)}
         />
       )}
-    </section>
+    </Section>
   );
 }

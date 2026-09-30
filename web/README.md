@@ -270,6 +270,9 @@ it everything below is read-only and a banner says so):
   nodes' outputs to remember, and an optional summarizer model + prompt),
   **defaults for all nodes** (model, temperature, Ollama options, system
   prompt, strip `<think>` reasoning), and a list of branches and loops.
+  Below the description they fold like a node's sections, each showing a
+  one-line summary while folded (Output and Conversation history start
+  open); which are open is remembered.
 - On a node: pick "pipeline default" as the model to inherit it, switch
   "sees the conversation history" off for nodes that should only see the
   new message, and override reasoning stripping. Prompt insert buttons
