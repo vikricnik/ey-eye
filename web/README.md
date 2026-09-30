@@ -23,16 +23,17 @@ web/
     │   ├── LlmNode.tsx         # a node card: model, temperature, live status, output badge
     │   ├── CanvasLegend.tsx    # the "?" legend in the canvas corner
     │   ├── canvasHint.ts       # the hint across the top while nothing is connected yet
-    │   ├── revealNode.ts       # keeping the selected node in sight beside the settings column
+    │   ├── revealNode.ts       # keeping the selected node in sight as the panel resizes
     │   ├── zoomDetail.ts       # compact cards and fit limits when zoomed out
     │   ├── Inspector.tsx       # node / pipeline / edge / branch / loop settings
     │   ├── Section.tsx         # foldable settings sections, remembered open or closed
-    │   ├── SettingsColumn.tsx  # the settings column: header (path, ✕) around the Inspector
+    │   ├── PipelineSettings.tsx # the Pipeline section: the pipeline's own settings
+    │   ├── selection.ts        # what's selected, and what selecting opens
     │   ├── NodeTrace.tsx       # a node's own trace, in its settings
     │   ├── traceSummary.ts     # the folded Trace section's one-line summary
     │   ├── fields.tsx          # model picker, Ollama options, inputs
     │   ├── PromptPreview.tsx   # what a node would receive, rendered by the server
-    │   ├── AddNodeMenu.tsx     # "+ Add node" in the canvas corner: blank node, presets
+    │   ├── NodePalette.tsx     # the Add node section: blank node, presets
     │   ├── conversion.ts       # pipeline definition -> React Flow nodes/edges
     │   └── editorState.ts      # the edited document and validation state
     ├── run/
@@ -42,6 +43,8 @@ web/
     │   ├── RunErrorView.tsx    # a failed run: what happened, what to do, the raw error
     │   ├── runFailure.ts       # plain-language explanations of run failures
     │   ├── RunTrace.tsx        # a run's trace in Chat: what every node received and replied
+    │   ├── ChatPreview.tsx     # folded Chat: the latest message and its answer
+    │   ├── lastExchange.ts     # what that preview shows
     │   ├── stickToBottom.ts    # follow new text only while scrolled to the end
     │   ├── MessageEntry.tsx
     │   └── runHistory.ts       # conversations kept in this browser (IndexedDB)
@@ -50,9 +53,13 @@ web/
         ├── Dialogs.tsx         # in-app confirm / prompt / form dialogs
         ├── Menu.tsx            # menu button (File ▾, ⋯) with the ARIA keyboard contract
         ├── ServerStatus.tsx    # API / Ollama health lights and the outage notice
-        ├── RunPanel.tsx        # Chat and Tests tabs + the message box
-        ├── Splitter.tsx        # resizing the columns
-        ├── panelSizes.ts       # column widths, and where the settings column goes
+        ├── LeftPanel.tsx       # the one panel: header, notices, sections, dock
+        ├── PanelSection.tsx    # a foldable section that shares the panel's height
+        ├── PanelRail.tsx       # the hidden panel's rail
+        ├── usePanelLayout.ts   # the panel's layout, remembered in this browser; ⌘\
+        ├── sectionSummaries.ts # each section's one-line header
+        ├── Splitter.tsx        # the panel's resizable edge
+        ├── panelLayout.ts      # width, hiding, open sections and the split — the rules
         ├── DisplaySettings.tsx # light/dark theme and text size
         └── icons.tsx           # the few drawn icons (settings, auto-layout)
 ```
@@ -170,19 +177,25 @@ already configured server-side via `CORS_ALLOWED_ORIGINS` in `.env`.
 
 ## Features
 
-**Layout**: the canvas, then the **settings column**, then the **run
-panel**. Selecting a node or dependency opens its settings in the column;
-**⚙** beside the pipeline picker opens (and closes) the pipeline's, and ✕
-closes the column to give the canvas its width back. The run panel has
-**Chat** (the conversation, with each run's trace) and **Tests**; the
-message box sits under Chat, so you can edit a node and send a message
-without anything switching views. Drag a column's edge to resize it
-(double-click resets; the widths you choose are remembered — a narrower
-window only shows them narrower for as long as it's narrow). When docking
-the settings column would leave the canvas under 480px, it floats over the
-canvas's right edge instead (either way, a selected node it would hide is panned into view); on a narrow screen (960px or less) everything
-stacks — canvas, settings, run panel — and the message box stays at the
-bottom of the screen as you scroll.
+**Layout**: one **panel** on the left, the canvas taking the rest of the
+window. The panel's header holds what a top bar would: the pipeline's
+status, the API/Ollama lights, display settings, the pipeline picker,
+undo/redo, **Save** and **File ▾**; notices sit under it. Below are
+foldable sections — **Node** (the selected node's or dependency's
+settings), **Chat**, **Pipeline** (the pipeline's own settings),
+**Tests** and **Add node** (the node palette). Any number can be open;
+open sections share the panel's height, each scrolling on its own — drag
+a section's header (or ↑/↓ on it) to change the split. Folded, Chat shows
+the latest message and the start of its answer. The message box is
+docked at the bottom of the panel, so a message can be sent whatever is
+open. Drag the panel's right edge to resize it (340–760px; double-click
+resets); hide it with the button in its header, **⌘\ / Ctrl+\**, or by
+dragging the edge far left — a narrow rail keeps the pipeline's state and
+a button per section, notices show beside it, and whatever was typed or
+open in the panel is still there when it's shown again. Width, hiding, open sections and the split are
+remembered in this browser. On a narrow screen (960px or less) the panel
+sits above the canvas and the message box stays at the bottom of the
+screen as you scroll.
 
 **Display** ("Aa" in the header): **light or dark theme** — "System"
 (the default) follows the operating system and switches with it — and
@@ -216,7 +229,7 @@ it everything below is read-only and a banner says so):
   undoes that delete.
 - Names, confirmations and deletes use in-app dialogs with inline
   validation (no browser popups).
-- **Add nodes** with **+ Add node** in the canvas corner: drag "LLM node"
+- **Add nodes** from the **Add node** section: drag "LLM node"
   (or a preset) onto the canvas, or click it — with a node selected, the
   new node is added *after* it (below it; further clicks place siblings
   side by side).
@@ -227,7 +240,7 @@ it everything below is read-only and a banner says so):
   while nothing is connected yet. **?** in the canvas corner opens a legend of
   the statuses, edge styles and marks. Output nodes carry an **OUTPUT** badge. Select an edge or node and press
   Backspace/Delete to remove it.
-- **Configure a node** in the **settings column**, in sections that fold — each
+- **Configure a node** in the **Node** section, in sections that fold — each
   folded one shows a one-line summary, and which are open is remembered in
   this browser (the same for every node):
   **Model** (picked from what `GET /v1/models` says is installed or
@@ -247,7 +260,7 @@ it everything below is read-only and a banner says so):
   system prompt, prompt template, history and reasoning settings (a model or
   system prompt it inherits from the pipeline defaults is written out) —
   under a name and optional description. Presets are listed in the
-  **+ Add node** menu (hover for the details, filter when there are many): drag or
+  **Add node** section (hover for the details, filter when there are many): drag or
   click one to add it to any pipeline, pick one under **Start with** when
   creating a pipeline, or give an existing node its configuration from the
   node's **Presets** section. It's always a copy — changing a preset
@@ -261,9 +274,7 @@ it everything below is read-only and a banner says so):
   server's message. Save and Run are disabled while it's invalid. Warnings
   (a model a save would reject, or e.g. `num_ctx` above the model's maximum
   context) outline the node in amber but don't block anything.
-- **Pipeline settings** (**⚙** beside the pipeline picker, the pipeline's
-  name at the top of the settings column, or click empty canvas while the
-  column is open): description, output node(s),
+- **Pipeline settings** (the **Pipeline** section): description, output node(s),
   execution (timeout, retries, **parallel model calls**, **run time
   limit**), **conversation
   history** (turns kept, character budget, intro line, turn format, which
@@ -343,7 +354,7 @@ it everything below is read-only and a banner says so):
   server), links go only to web and mail addresses, and the result is
   sanitized again with DOMPurify. The Trace always shows raw text.
 
-**Tests** (a tab in the run panel): the pipeline's test cases — a message
+**Tests** (a section of the panel): the pipeline's test cases — a message
 each, and what the answer must satisfy: contains / doesn't contain
 (case-insensitive), a `check` condition like a branch's, or a requirement a
 **judge model** grades PASS/FAIL with its reason. Cases are saved with the
@@ -428,6 +439,6 @@ One name per idea, used the same way on every screen:
 
 The client sends the earlier turns (with any remembered node outputs) on
 every request; how many are kept, the character budget and whether older
-turns are summarized are per-pipeline settings (⚙ beside the pipeline
-picker → Conversation history). "+ new" in Chat starts a new conversation;
+turns are summarized are per-pipeline settings (Pipeline → Conversation
+history). "+ new" in Chat starts a new conversation;
 switching pipelines continues that pipeline's latest one.

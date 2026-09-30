@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, DragEvent, ReactNode, RefObject } from "react";
+import type { DragEvent, RefObject } from "react";
 import {
   Background,
   ControlButton,
@@ -26,8 +26,8 @@ import { CanvasLegend } from "./CanvasLegend";
 import { canvasHint } from "./canvasHint";
 import { needsReveal, revealCenter } from "./revealNode";
 
-/** Drag-and-drop payload type set by the + Add node palette
- * (AddNodeMenu.tsx). The value is a preset name, or "" for a plain node. */
+/** Drag-and-drop payload type set by the node palette (NodePalette.tsx,
+ * the Add node section). The value is a preset name, or "" for a plain node. */
 export const NODE_DRAG_TYPE = "application/x-llm-pipeline-node";
 
 const nodeTypes: NodeTypes = { llm: LlmNode };
@@ -57,11 +57,6 @@ export interface PipelineCanvasProps {
   /** Re-arranges every node by dependency level (a canvas control, beside
    * zoom and fit). */
   onAutoLayout: () => void;
-  /** Shown in the canvas's top-left corner: the + Add node menu. */
-  topLeft?: ReactNode;
-  /** How much of the canvas's right edge is covered — by the floating
-   * settings column — so the selected node is kept out from under it. */
-  coveredRight: number;
 }
 
 const isValidConnection: IsValidConnection = (c) => c.source !== c.target;
@@ -77,7 +72,7 @@ function CompactTextScale({ target, textScale }: { target: RefObject<HTMLDivElem
 }
 
 function CanvasInner(props: PipelineCanvasProps) {
-  const { editable, selectedNodeId, selectedEdgeId, textScale, coveredRight } = props;
+  const { editable, selectedNodeId, selectedEdgeId, textScale } = props;
   const flow = useReactFlow();
   const fit = useMemo(() => fitOptions(textScale), [textScale]);
   const canvas = useRef<HTMLDivElement>(null);
@@ -151,17 +146,17 @@ function CanvasInner(props: PipelineCanvasProps) {
     return () => observer.disconnect();
   }, []);
 
-  // Keeps the selected node in sight when the canvas narrows or the floating
-  // settings column covers it — e.g. right after selecting it opens the
-  // column. Pans only; the zoom stays. It's asked for when the selection,
-  // the size or the cover changes, and tried until the node is on the canvas
-  // and measured: a node just added or duplicated reaches React Flow a
-  // render or two after it's selected. A pan the user makes afterwards is
-  // left alone. (The request is declared first, so it runs first.)
+  // Keeps the selected node in sight when the canvas narrows or widens —
+  // the panel being resized, hidden or shown. Pans only; the zoom stays.
+  // It's asked for when the selection or the size changes, and tried until
+  // the node is on the canvas and measured: a node just added or duplicated
+  // reaches React Flow a render or two after it's selected. A pan the user
+  // makes afterwards is left alone. (The request is declared first, so it
+  // runs first.)
   const revealPending = useRef(false);
   useEffect(() => {
     revealPending.current = true;
-  }, [selectedNodeId, size, coveredRight]);
+  }, [selectedNodeId, size]);
   useEffect(() => {
     if (!revealPending.current || !selectedNodeId || !size) return;
     const node = flow.getInternalNode(selectedNodeId);
@@ -174,10 +169,10 @@ function CanvasInner(props: PipelineCanvasProps) {
       height: node.measured.height ?? 0,
     };
     const viewport = flow.getViewport();
-    if (!needsReveal(rect, viewport, { width: size.width - coveredRight, height: size.height })) return;
-    const center = revealCenter(rect, viewport.zoom, coveredRight);
+    if (!needsReveal(rect, viewport, size)) return;
+    const center = revealCenter(rect);
     void flow.setCenter(center.x, center.y, { zoom: viewport.zoom, duration: 200 });
-  }, [flow, selectedNodeId, size, coveredRight, nodes]);
+  }, [flow, selectedNodeId, size, nodes]);
 
   // Removals go through onNodesDelete/onEdgesDelete (-> the definition);
   // everything else (drag, select, measure) is applied locally.
@@ -199,10 +194,7 @@ function CanvasInner(props: PipelineCanvasProps) {
   return (
     <div
       ref={canvas}
-      className={`canvas${compact ? " detail-compact" : ""}${coveredRight > 0 ? " covered" : ""}`}
-      // The canvas's own right-hand controls (legend, minimap) move clear of
-      // the floating settings column (style.css, --covered-right).
-      style={{ "--covered-right": `${coveredRight}px` } as CSSProperties}
+      className={compact ? "canvas detail-compact" : "canvas"}
       onDragOver={(e) => {
         if (editable && e.dataTransfer.types.includes(NODE_DRAG_TYPE)) {
           e.preventDefault();
@@ -260,7 +252,6 @@ function CanvasInner(props: PipelineCanvasProps) {
           </ControlButton>
         </Controls>
         <MiniMap pannable zoomable nodeStrokeWidth={3} style={{ width: 140, height: 90 }} />
-        {props.topLeft && <Panel position="top-left">{props.topLeft}</Panel>}
         <Panel position="top-right">
           <CanvasLegend />
         </Panel>

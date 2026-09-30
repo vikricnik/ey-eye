@@ -23,6 +23,7 @@ import type {
 } from "@llm-pipeline/client";
 import { CommitInput, Field, ModelPicker } from "../editor/fields";
 import { formatDuration } from "../format";
+import { resultKey } from "./resultKey";
 
 /** `removed` says what a deletion removed; the app then offers to undo it. */
 type Edit = (op: (d: PipelineDefinition) => PipelineDefinition, coalesce?: string, removed?: string) => void;
@@ -38,7 +39,7 @@ export interface TestRunState {
   error?: string;
 }
 
-export const resultKey = (testCase: string, variant: string) => `${testCase}\u0000${variant}`;
+export { resultKey };
 
 const KIND_LABEL: Record<ExpectationKind, string> = {
   contains: "contains",

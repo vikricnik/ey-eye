@@ -1,3 +1,41 @@
+# Theme — ey-eye web client
+
+## Part 1 — Token summary
+
+Plain CSS custom properties in `web/src/style.css`. Dark theme is the default (`:root`); light theme is `:root[data-theme="light"]` (set on `<html>` by the display settings; "system" follows the OS).
+
+| Token | Dark | Light | Use |
+|---|---|---|---|
+| `--bg` | `#0B1220` | `#F3F5F9` | page / canvas background |
+| `--panel` | `#101A2E` | `#FFFFFF` | top bar, columns, popovers |
+| `--panel-raised` | `#16223B` | `#EDF1F6` | inputs, hovered items, code |
+| `--border` | `#22304C` | `#D3DAE4` | 1px borders everywhere |
+| `--text` | `#E6EDF5` | `#142033` | body text |
+| `--text-dim` | `#7C8DA6` | `#4F5F77` | labels, hints, secondary |
+| `--text-faint` | `#4B5A78` | `#7E8CA2` | decoration / disabled only |
+| `--accent` | `#4FD1C5` (teal) | `#0A6A62` | primary buttons, links, active tab, focus |
+| `--accent-dim` | `#2B7A72` | `#8FD3CC` | accent borders, selection |
+| `--valid` | `#34D399` | `#04694C` | done / saved / pass |
+| `--invalid` | `#F87171` | `#AC2A2A` | errors, danger |
+| `--warn` | `#F5C061` | `#865206` | warnings, loop edges |
+| `--running` | `#60A5FA` | `#1D4ED8` | running status |
+| `--on-accent` | `#06201D` | `#FFFFFF` | text on accent buttons |
+
+- **Font:** `--mono` = 'JetBrains Mono' (Google Fonts, 400/500/600/700), fallback ui-monospace, SF Mono, Menlo — used for ALL text.
+- **Type scale (rem):** `--fs-xs` 0.6875 (11px, uppercase labels/badges) · `--fs-sm` 0.75 (12px, controls/hints) · `--fs-md` 0.8125 (13px, body) · `--fs-lg` 0.9375 (15px, titles) · `--fs-xl` 1.0625 (17px, panel title). Nothing below 11px.
+- **Labels & section titles:** uppercase, letter-spacing 0.06–0.08em, weight 700, `--fs-xs`.
+- **Radius:** `--radius` 3px (controls); popovers/menus 6px; pills 999px.
+- **Shadows:** `--shadow` rgba(0,0,0,.25) / `--shadow-strong` rgba(0,0,0,.5) dark; popovers `0 8px 24px var(--shadow-strong)`.
+- **Spacing:** px-based, mostly 4 / 6 / 8 / 10 / 12 / 14 / 16px; top bar padding 10px 16px; inspector body 14px 16px.
+- **Layout widths:** `--settings-w` 380px, `--run-w` 420px; narrow breakpoint `@media (max-width: 960px)` stacks everything.
+- **Graph colors:** plain edges `--text-dim`, branch edges `--accent`, loop edges `--warn`; dot grid `--grid-dot`.
+- **Motion:** 0.15s transitions (section chevrons, splitter highlight); pulsing dots for running; honours prefers-reduced-motion.
+
+## Part 2 — Raw sources
+
+### `web/src/style.css`
+
+```css
 :root {
   --bg: #0B1220;
   --panel: #101A2E;
@@ -42,6 +80,8 @@
   --graph-branch: var(--accent);
   --graph-loop: var(--warn);
 
+  --settings-w: 380px;
+  --run-w: 420px;
 }
 
 /* Light theme: set on <html data-theme="light"> by the display settings
@@ -109,13 +149,41 @@ code {
 /* ---------- App shell ---------- */
 .app {
   height: 100%;
-  position: relative; /* anchors the panel's edge splitter */
   display: grid;
-  /* The left panel (--panel-w, from ui/usePanelLayout.ts), then the canvas. */
-  grid-template-columns: var(--panel-w, 440px) minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr); /* top bar, notices, workspace */
+  /* One column no wider than the window: content that can't shrink must
+     wrap or clip inside it, never widen the page (on a phone that pushes
+     the bottom of the screen — and the message box — out of view). */
+  grid-template-columns: minmax(0, 1fr);
   min-height: 0;
 }
+
+.topbar {
+  grid-row: 1;
+  border-bottom: 1px solid var(--border);
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: var(--panel);
+  flex-wrap: wrap;
+}
+
+/* Wraps on a narrow screen: the health lights go under the name and URL. */
+.title-block { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; min-width: 0; }
+.title-block h1 {
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  margin: 0;
+  color: var(--accent);
+  white-space: nowrap;
+}
+.subtitle { font-size: var(--fs-xs); color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+
+.toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.toolbar .sep { width: 1px; height: 22px; background: var(--border); margin: 0 4px; }
 
 .pipeline-select, select, input[type="text"] {
   background: var(--panel-raised);
@@ -175,6 +243,7 @@ button.chip-status { min-width: 0; font-weight: 600; cursor: pointer; }
 .status-dot.online { background: var(--valid); box-shadow: 0 0 6px var(--valid); }
 .status-dot.offline { background: var(--invalid); }
 
+.notices { grid-row: 2; }
 .notice {
   display: flex;
   align-items: center;
@@ -248,7 +317,69 @@ button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-
   outline-offset: 1px;
 }
 
-/* ---------- Chat ---------- */
+/* ---------- Workspace ---------- */
+.workspace {
+  position: relative; /* anchors the splitters and the floating settings column */
+  grid-row: 3;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--run-w);
+  min-height: 0;
+}
+.workspace.settings-docked { grid-template-columns: minmax(0, 1fr) var(--settings-w) var(--run-w); }
+
+/* ---------- The settings column (editor/SettingsColumn.tsx) ---------- */
+.settings-column {
+  border-left: 1px solid var(--border);
+  background: var(--panel);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+.settings-column > .inspector { flex: 1; }
+/* Floating: over the canvas's right edge, beside the run panel; the canvas
+   keeps its width underneath (see ui/panelSizes.ts). */
+.settings-column.floating {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: var(--run-w);
+  width: var(--settings-w);
+  z-index: 15;
+  box-shadow: -8px 0 24px var(--shadow-strong);
+}
+.settings-column-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px 6px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* ---------- The run panel: Chat and Tests, the message box ---------- */
+.run-panel {
+  border-left: 1px solid var(--border);
+  background: var(--panel);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+.panel-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 4px 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.panel-tabs .pulse-dot { margin-left: 6px; }
+.panel-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* Each tab's content fills the body and scrolls itself. */
+.panel-body > * { flex: 1; min-height: 0; overflow-y: auto; }
+.panel-body > .empty-state { flex: none; }
+.panel-footer { border-top: 1px solid var(--border); padding: 10px 12px; }
+
 .chat { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px 8px; overflow: hidden; }
 .conversation-bar { display: flex; gap: 6px; align-items: center; }
 .conversation-bar select { flex: 1; min-width: 0; }
@@ -354,12 +485,31 @@ button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-
 /* "?" in the canvas corner and the legend it opens (editor/CanvasLegend.tsx). */
 .canvas-legend { position: relative; }
 .canvas-legend > button { background: var(--panel); }
+/* "+ Add node" in the canvas's top-left corner (editor/AddNodeMenu.tsx):
+   placed like the display popover, opening rightwards from the corner. */
+.add-node-menu { position: relative; }
+.add-node-menu > button { background: var(--panel); box-shadow: 0 2px 10px var(--shadow); }
+.add-node-popover {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 6px);
+  z-index: 50;
+  width: 20rem;
+  max-width: calc(100cqi - 30px - var(--covered-right, 0px));
+  max-height: min(60vh, 32rem);
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px var(--shadow-strong);
+  padding: 12px;
+}
 .legend-panel {
   position: absolute;
   right: 0;
   top: calc(100% + 6px);
   width: 20rem;
-  max-width: calc(100cqi - 30px);
+  max-width: calc(100cqi - 30px - var(--covered-right, 0px));
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -390,11 +540,24 @@ button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-
   /* Centered with left: 50%, which would otherwise cap it at half the
      canvas — so size it to its text, up to the canvas less the corners. */
   width: max-content;
-  max-width: calc(100% - 140px);
+  max-width: calc(100% - 300px);
   text-align: center;
+}
+/* On a narrow canvas there's no room beside the corner controls: drop the
+   hint below them instead. */
+@container (max-width: 760px) {
+  .canvas-hint { max-width: calc(100% - 30px); margin-top: 60px; }
 }
 
 .canvas-wrap { position: relative; min-width: 0; min-height: 0; container-type: inline-size; }
+/* While the floating settings column covers the canvas's right edge, the
+   canvas's right-hand controls (legend, minimap) and its centered hint sit
+   in the part that can still be seen (editor/PipelineCanvas.tsx). */
+.canvas .react-flow__panel.right { right: var(--covered-right, 0px); }
+.canvas .react-flow__panel.top.center { left: calc(50% - var(--covered-right, 0px) / 2); }
+/* What's left uncovered is under 480px (ui/panelSizes.ts): the hint goes
+   below the corner controls, as on a narrow canvas. */
+.canvas.covered .canvas-hint { max-width: calc(100% - 30px - var(--covered-right, 0px)); margin-top: 60px; }
 .canvas { position: absolute; inset: 0; }
 .canvas-empty {
   height: 100%;
@@ -584,6 +747,11 @@ button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-
 .inspector { overflow-y: auto; min-height: 0; }
 .inspector-body { padding: 14px 16px 24px; display: grid; gap: 4px; }
 .inspector-title { display: grid; gap: 2px; margin-bottom: 6px; }
+.settings-column-head .kicker { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-dim); }
+/* "pipeline-name › node": the pipeline's name links back to its settings,
+   and keeps its own spelling (it's a file name). */
+.breadcrumb { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.breadcrumb button.link { font-size: inherit; letter-spacing: normal; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .inspector-title h2 { font-size: var(--fs-xl); margin: 0; color: var(--text); word-break: break-all; }
 .inspector section { border-top: 1px solid var(--border); padding: 10px 0 6px; display: grid; gap: 10px; }
 .inspector section > h3 { margin: 0; }
@@ -875,12 +1043,22 @@ button.loading .btn-spinner { display: inline-block; }
 /* ---------- Narrow screens: stack the panels ---------- */
 @media (max-width: 960px) {
   .splitter { display: none; } /* stacked: nothing side by side to resize */
-  .app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto; height: auto; min-height: 100%; }
-  .left-panel { height: 80vh; border-right: none; border-bottom: 1px solid var(--border); }
+  .app { grid-template-rows: auto auto auto; height: auto; min-height: 100%; }
+  .workspace { grid-template-columns: 1fr; }
   .canvas-wrap { height: 55vh; }
-  /* The message box stays at the bottom of the screen while any of the
-     panel is in view. */
-  .dock { position: sticky; bottom: 0; z-index: 10; }
+  .run-panel { border-left: none; border-top: 1px solid var(--border); height: 80vh; }
+  .settings-column { border-left: none; border-top: 1px solid var(--border); max-height: 80vh; }
+  .toolbar { width: 100%; }
+  /* Stacked, the panel starts below the canvas, so its footer — the
+     message box — would sit past the fold. It sticks to the bottom of the
+     screen instead, while any of the panel is in view. */
+  .panel-footer {
+    position: sticky;
+    bottom: 0;
+    z-index: 10;
+    background: var(--panel);
+    box-shadow: 0 -6px 16px var(--shadow);
+  }
 }
 
 /* ---------- Resizable panels ---------- */
@@ -894,6 +1072,8 @@ button.loading .btn-spinner { display: inline-block; }
 .splitter-y::after { left: 0; right: 0; top: 3px; height: 2px; }
 .splitter:hover::after, .splitter.active::after, .splitter:focus-visible::after { background: var(--accent); }
 .splitter:focus-visible { outline: none; }
+.splitter-run { right: calc(var(--run-w) - 4px); }
+.splitter-settings { right: calc(var(--run-w) + var(--settings-w) - 4px); }
 /* While dragging, keep the resize cursor everywhere and stop text selection. */
 body.resizing-x, body.resizing-x * { cursor: col-resize !important; user-select: none; }
 body.resizing-y, body.resizing-y * { cursor: row-resize !important; user-select: none; }
@@ -1181,135 +1361,4 @@ button.message-node { color: var(--accent); }
   font-size: var(--fs-sm);
 }
 .stop-spinner { display: inline-block; }
-
-/* ---------- The left panel (ui/LeftPanel.tsx) ---------- */
-.left-panel {
-  position: relative;
-  z-index: 2; /* its menus and popovers paint over the canvas */
-  background: var(--panel);
-  border-right: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  min-width: 0;
-  container-type: inline-size;
-}
-.panel-head { flex: none; padding: 9px 12px; display: grid; gap: 7px; border-bottom: 1px solid var(--border); }
-.brand-row, .actions-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.brand-row .brand { margin: 0; font-size: var(--fs-lg); font-weight: 700; letter-spacing: 0.02em; color: var(--accent); white-space: nowrap; }
-.brand-row .spacer { flex: 1; }
-.head-status { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
-.state-dot { display: none; width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); }
-.state-dot.ok { background: var(--valid); }
-.state-dot.warn { background: var(--warn); }
-.state-dot.error { background: var(--invalid); }
-.brand-row .status { gap: 6px; }
-.actions-row .pipeline-select { flex: 1; max-width: none; }
-/* A narrow panel keeps the pipeline's state as a dot (its tooltip says it). */
-@container (max-width: 400px) {
-  .head-status .chip-status, .head-status .dirty-dot { display: none; }
-  .head-status .state-dot { display: inline-block; }
-}
-.panel-notices { flex: none; }
-.panel-notices .notice { padding: 7px 12px; }
-
-/* Sections: open ones share the height (flex-grow = their weight). */
-.psections { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.psec { display: flex; flex-direction: column; min-height: 0; flex: none; }
-.psec.open { flex: 1 1 0; min-height: 76px; }
-.psec-head {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 32px;
-  padding: 0 12px 0 6px;
-  border-bottom: 1px solid var(--border);
-}
-.psec.open > .psec-head { box-shadow: inset 3px 0 0 var(--accent); }
-.psec-head.resizable { cursor: row-resize; }
-.psec-head:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.psec-toggle {
-  background: none;
-  border: none;
-  height: 100%;
-  padding: 0 6px;
-  gap: 8px;
-  color: var(--text);
-  font-size: var(--fs-xs);
-  flex-shrink: 1;
-  min-width: 0;
-}
-.psec-toggle:hover:not(:disabled) { opacity: 1; color: var(--accent); }
-.psec-chev { width: 0.8em; color: var(--text-dim); }
-.psec-icon { display: inline-flex; color: var(--text-dim); }
-.psec.open .psec-icon { color: var(--accent); }
-.psec-title { letter-spacing: 0.07em; white-space: nowrap; }
-.psec-detail { text-transform: none; letter-spacing: normal; font-weight: 600; color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.psec-summary { flex: 1; min-width: 0; text-align: right; font-size: var(--fs-xs); color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.psec-grip { flex: none; width: 18px; height: 3px; border-top: 1px solid var(--text-faint); border-bottom: 1px solid var(--text-faint); }
-.psec-body { flex: 1; min-height: 0; overflow-y: auto; }
-.psec-body.fill { display: flex; flex-direction: column; overflow: hidden; }
-.psec-body.fill > * { flex: 1; min-height: 0; }
-.psec-body > .palette { padding: 10px 12px; }
-
-/* Folded Chat: the last exchange. */
-.chat-preview {
-  display: grid;
-  justify-items: start;
-  gap: 3px;
-  width: 100%;
-  padding: 6px 12px 8px 36px;
-  background: none;
-  border: none;
-  border-bottom: 1px solid var(--border);
-  border-radius: 0;
-  color: var(--text-dim);
-  font-size: var(--fs-sm);
-  font-weight: 400;
-  text-transform: none;
-  letter-spacing: normal;
-  text-align: left;
-}
-.chat-preview:hover:not(:disabled) { opacity: 1; background: var(--panel-raised); }
-.chat-preview-q { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.chat-preview-q .marker { color: var(--accent); }
-.chat-preview-a { color: var(--text); line-height: 1.55; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.chat-preview-a.failed { color: var(--invalid); }
-.chat-preview-a.stopped { color: var(--text-dim); }
-
-/* The docked message box. */
-.dock { flex: none; padding: 8px 12px 9px; border-top: 1px solid var(--border); background: var(--panel); box-shadow: 0 -6px 16px var(--shadow); }
-.dock .input-row { align-items: flex-end; }
-.dock .input-row textarea { min-height: 34px; max-height: 8.5rem; padding: 7px 8px; }
-.dock .input-row button { min-width: 88px; height: 34px; padding: 0 12px; }
-
-/* Resizing and hiding the panel (ui/LeftPanel.tsx, ui/PanelRail.tsx). */
-.app { transition: grid-template-columns 0.18s ease; }
-body.resizing-x .app { transition: none; }
-.splitter-panel-edge { left: calc(var(--panel-w) - 4px); }
-.left-panel.hidden { align-items: center; }
-/* Hidden, the panel's content stays mounted (its [hidden] parts beat their
-   own display rules here), and the notices float beside the rail. */
-.left-panel > [hidden] { display: none; }
-.left-panel.hidden > .panel-notices { position: absolute; top: 8px; left: calc(100% + 8px); width: min(380px, calc(100vw - 72px)); }
-.left-panel.hidden > .panel-notices:not(:empty) { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 6px 16px var(--shadow); overflow: hidden; }
-.rail { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 9px 0; }
-.rail-btn {
-  position: relative;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  background: transparent;
-  border: 1px solid transparent;
-  color: var(--text-dim);
-}
-.rail-btn:hover:not(:disabled) { background: var(--panel-raised); color: var(--text); opacity: 1; }
-.rail-sec.open { color: var(--accent); box-shadow: inset 2px 0 0 var(--accent); }
-.rail-btn .pulse-dot { position: absolute; top: 4px; right: 4px; margin: 0; }
-.rail-state { width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); margin: 2px 0; }
-.rail-state.ok { background: var(--valid); }
-.rail-state.warn { background: var(--warn); }
-.rail-state.error { background: var(--invalid); }
-.rail-sep { width: 20px; height: 1px; background: var(--border); margin: 2px 0; }
-@media (prefers-reduced-motion: reduce) { .app { transition: none; } }
+```

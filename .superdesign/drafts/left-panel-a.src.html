@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Left panel · A · Split sections</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="shared.css">
+<style>
+  /* A — independent folding: every open section gets a share of the panel
+     height and scrolls on its own; headers never scroll away. Drag a header
+     to change the split (VS Code / admin "views" pattern). */
+  .stack { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .sec { display: flex; flex-direction: column; min-height: 0; }
+  .sec.open { flex: 1 1 0; }
+  .sec.open.chat { flex-grow: 1.25; }
+  .sec-head { cursor: row-resize; }
+  .sec-head:hover { background: var(--panel-raised); }
+  .sec:not(.open) .sec-head { cursor: pointer; }
+  .sec-body { flex: 1; min-height: 0; overflow-y: auto; padding: 0 14px; }
+  .sec.chat .sec-body { display: flex; flex-direction: column; gap: 12px; padding-top: 10px; overflow: hidden; }
+  .transcript { flex: 1; min-height: 0; overflow-y: auto; display: grid; gap: 14px; align-content: start; padding-right: 2px; }
+  .chat-foot { display: grid; gap: 8px; padding: 10px 0 12px; border-top: 1px solid var(--border); }
+  .grip { width: 22px; height: 3px; border-top: 1px solid var(--text-faint); border-bottom: 1px solid var(--text-faint); opacity: 0.7; }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="panel" aria-label="Pipeline panel">
+    <header class="panel-head">
+      <div class="brand-row">
+        <span class="brand">LLM Pipeline</span>
+        <span class="server">localhost:8000</span>
+        <span class="spacer"></span>
+        <span class="lights">
+          <span class="indicator"><span class="status-dot"></span>API</span>
+          <span class="indicator"><span class="status-dot"></span>Ollama</span>
+        </span>
+        <button class="ghost icon" title="Display: theme and text size">Aa</button>
+      </div>
+      <div class="pipeline-row">
+        <select aria-label="Pipeline"><option>simple-local</option></select>
+        <span class="dirty-dot" title="unsaved changes">●</span>
+        <span class="chip-status ok">valid · unsaved</span>
+      </div>
+      <div class="actions-row">
+        <button class="ghost icon" title="Undo (⌘Z)">↶</button>
+        <button class="ghost icon" title="Redo (⇧⌘Z)">↷</button>
+        <span class="spacer"></span>
+        <button>Save</button>
+        <button class="ghost">File <span style="font-size:var(--fs-xs)">▾</span></button>
+      </div>
+    </header>
+
+    <div class="stack">
+      <!-- NODE — open, shares the height -->
+      <section class="sec open">
+        <div class="sec-head open" title="Drag to resize · click to fold">
+          <span class="chev">▾</span>
+          <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="3" y="4" width="10" height="8" rx="1.5"/><circle cx="8" cy="2.5" r="1"/><circle cx="8" cy="13.5" r="1"/></svg>
+          <span class="title">Node · <span class="sub">other</span></span>
+          <span class="summary">ollama:llama3 · T 0.3</span>
+          <span class="grip" aria-hidden="true"></span>
+        </div>
+        <div class="sec-body">
+          <div class="node-title">
+            <h2>other</h2>
+            <div class="title-actions">
+              <button>↻ Re-run from here</button>
+              <button class="ghost">Duplicate</button>
+              <button class="ghost">Save as preset</button>
+              <button class="ghost">⋯</button>
+            </div>
+          </div>
+          <div class="sub"><div class="sub-head"><span class="chev">▸</span><span class="t">Trace</span><span class="s">run 3 · 464ms</span></div></div>
+          <div class="sub">
+            <div class="sub-head"><span class="chev">▾</span><span class="t">Model</span></div>
+            <div class="sub-body">
+              <div class="row"><select style="flex:1"><option>llama3:latest — 8.0B · Q4_0</option></select><button class="ghost">Refresh</button></div>
+              <div class="field">
+                <span class="field-label">Temperature · 0.3</span>
+                <div class="row"><div class="slider"></div><input class="num" type="text" value="0.3"></div>
+                <span class="hint">0 = deterministic, higher = more varied</span>
+              </div>
+            </div>
+          </div>
+          <div class="sub">
+            <div class="sub-head"><span class="chev">▾</span><span class="t">Prompts</span></div>
+            <div class="sub-body">
+              <div class="field">
+                <span class="field-label">System prompt</span>
+                <textarea rows="2">if input contains "OTHER" answer user question, otherwise dont do anything.</textarea>
+              </div>
+              <div class="field">
+                <span class="field-label">Prompt template</span>
+                <div class="chips"><span class="chip">{{ message }}</span><span class="chip">{{ conversation }}</span><span class="chip">{{ clasify.output }}</span></div>
+                <textarea rows="2">Answer: {{ message }}</textarea>
+              </div>
+            </div>
+          </div>
+          <div class="sub"><div class="sub-head"><span class="chev">▸</span><span class="t">Input &amp; output</span><span class="s">output node</span></div></div>
+          <div class="sub"><div class="sub-head"><span class="chev">▸</span><span class="t">Ollama options</span><span class="s">defaults</span></div></div>
+          <div class="sub"><div class="sub-head"><span class="chev">▸</span><span class="t">Depends on</span><span class="s">clasify</span></div></div>
+          <div class="sub"><div class="sub-head"><span class="chev">▸</span><span class="t">Presets</span><span class="s">2 saved</span></div></div>
+        </div>
+      </section>
+
+      <!-- CHAT — open, shares the height; message box pinned to its bottom -->
+      <section class="sec open chat">
+        <div class="sec-head open" title="Drag to resize · click to fold">
+          <span class="chev">▾</span>
+          <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/></svg>
+          <span class="title">Chat</span>
+          <span class="summary">3 runs · last 464ms</span>
+          <span class="grip" aria-hidden="true"></span>
+        </div>
+        <div class="sec-body">
+          <div class="conversation-bar">
+            <select aria-label="Conversation"><option>Give me three tips for writing clean code · 3 runs</option></select>
+            <button class="ghost small">+ new</button>
+          </div>
+          <div class="transcript">
+            <div class="turn">
+              <div class="turn-prompt"><span class="marker">›</span><span>Give me one short tip for naming variables.</span></div>
+              <span class="trace-toggle">▸ Trace · 2 nodes</span>
+              <div class="turn-response">
+                <div class="turn-meta"><span>output node: <b>other</b></span><span>took: <b>2.4s</b></span></div>
+                <div class="answer">Name a value for what it's for: <code>retryDelayMs</code> beats <code>d</code>. If a name needs a comment to explain it, rename it.</div>
+              </div>
+            </div>
+            <div class="turn">
+              <div class="turn-prompt"><span class="marker">›</span><span>Write two sentences about why short functions help.</span></div>
+              <span class="trace-toggle">▸ Trace · 2 nodes</span>
+              <div class="turn-response">
+                <div class="turn-meta"><span>output node: <b>other</b></span><span>took: <b>752ms</b></span></div>
+                <div class="answer">Short functions do one thing, so their name can say exactly what that is and a reader can check it at a glance. They're also easier to test and reuse, because each piece runs on its own.</div>
+              </div>
+            </div>
+          </div>
+          <div class="chat-foot">
+            <div class="chat-options">
+              <span class="toggle"><span class="box on"></span>format answers</span>
+              <span class="toggle"><span class="box"></span>open traces</span>
+            </div>
+            <div class="composer">
+              <textarea placeholder="Type a message…  (Enter to send)"></textarea>
+              <button>Send</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Folded sections: header only, summary on the right -->
+      <section class="sec">
+        <div class="sec-head">
+          <span class="chev">▸</span>
+          <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="4" cy="3.5" r="1.5"/><circle cx="4" cy="12.5" r="1.5"/><circle cx="12" cy="8" r="1.5"/><path d="M4 5v6M5.4 4.3l5.2 3"/></svg>
+          <span class="title">Pipeline</span>
+          <span class="summary">answer from other · history off</span>
+        </div>
+      </section>
+      <section class="sec">
+        <div class="sec-head">
+          <span class="chev">▸</span>
+          <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2.5" y="2.5" width="11" height="11" rx="1.5"/><path d="M5 8.2l2 2 4-4.4"/></svg>
+          <span class="title">Tests</span>
+          <span class="summary">4 cases · 3/4 passed</span>
+        </div>
+      </section>
+      <section class="sec">
+        <div class="sec-head">
+          <span class="chev">▸</span>
+          <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="5.5"/><path d="M8 5.5v5M5.5 8h5"/></svg>
+          <span class="title">Add node</span>
+          <span class="summary">LLM node · 2 presets</span>
+        </div>
+      </section>
+    </div>
+  </aside>
+
+  <!-- CANVAS — the whole rest of the window -->
+  <main class="canvas" aria-label="Canvas">
+    <!--CANVAS-->
+  </main>
+</div>
+</body>
+</html>

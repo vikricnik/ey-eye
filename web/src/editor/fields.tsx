@@ -344,3 +344,10 @@ export function OllamaOptionFields(props: OllamaOptionsProps) {
     </div>
   );
 }
+
+/** `model` with its own temperature, or — with `undefined` — none, so it
+ * inherits the pipeline default's. */
+export function withTemperature(model: NodeModelConfig, temperature: number | undefined): NodeModelConfig {
+  const { temperature: _old, ...rest } = model;
+  return temperature === undefined ? rest : { ...rest, temperature };
+}

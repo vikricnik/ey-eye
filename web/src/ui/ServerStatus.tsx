@@ -3,14 +3,23 @@ import type { ProviderModels } from "@llm-pipeline/client";
 
 type Health = "ok" | "down" | "unknown";
 
-/** One health light with its name beside it — "offline" is spelled out,
- * so the state doesn't rest on the dot's color alone. */
-function Indicator({ label, health, detail }: { label: string; health: Health; detail: string }) {
+/** One health light. Beside its name, "offline" is spelled out, so the
+ * state doesn't rest on the dot's color alone; compact (in the panel
+ * header), it's just the dot — the name and state are its tooltip and
+ * read by screen readers. */
+function Indicator({ label, health, detail, compact }: { label: string; health: Health; detail: string; compact: boolean }) {
+  const state = health === "ok" ? "online" : health === "down" ? "offline" : "checking";
   return (
-    <span className={`indicator ${health}`} title={detail}>
+    <span className={`indicator ${health}`} title={compact ? `${label} · ${detail}` : detail}>
       <span className={`status-dot ${health === "ok" ? "online" : health === "down" ? "offline" : ""}`} aria-hidden="true" />
-      {label}
-      {health === "down" ? " offline" : <span className="visually-hidden">{health === "ok" ? " online" : " checking"}</span>}
+      {compact ? (
+        <span className="visually-hidden">{`${label} ${state}`}</span>
+      ) : (
+        <>
+          {label}
+          {health === "down" ? " offline" : <span className="visually-hidden">{` ${state}`}</span>}
+        </>
+      )}
     </span>
   );
 }
@@ -26,23 +35,28 @@ export function ServerStatus(props: {
   /** Ollama as GET /v1/models last reported it; undefined until known. */
   ollama: ProviderModels | undefined;
   readOnly: boolean;
+  /** Dots only (the panel header). */
+  compact?: boolean;
 }) {
   const { baseUrl, online, ollama } = props;
+  const compact = props.compact ?? false;
   return (
     <div className="status" role="group" aria-label="Server status">
       <Indicator
+        compact={compact}
         label="API"
         health={online === null ? "unknown" : online ? "ok" : "down"}
         detail={online === null ? `checking ${baseUrl}…` : online ? `${baseUrl} is reachable` : `can't reach ${baseUrl}`}
       />
       {ollama && (
         <Indicator
+        compact={compact}
           label="Ollama"
           health={ollama.reachable ? "ok" : "down"}
           detail={ollama.reachable ? "Ollama is reachable" : (ollama.error ?? "Ollama isn't reachable")}
         />
       )}
-      {props.readOnly && <span className="chip-status">read-only</span>}
+      {props.readOnly && !compact && <span className="chip-status">read-only</span>}
     </div>
   );
 }

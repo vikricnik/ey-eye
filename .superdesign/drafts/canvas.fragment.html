@@ -1,0 +1,46 @@
+    <svg class="edges" aria-hidden="true">
+      <path class="edge" d="M500 316 C500 400, 230 386, 230 470"/>
+      <path class="edge" d="M500 316 C500 380, 500 410, 500 470"/>
+      <path class="edge" d="M500 316 C500 400, 770 386, 770 470"/>
+    </svg>
+    <span class="edge-label" style="left:352px;top:398px">"JOKE" in output</span>
+    <span class="edge-label" style="left:500px;top:408px">"STORY" in output</span>
+    <span class="edge-label" style="left:652px;top:398px">default</span>
+
+    <div class="llm-node done" style="left:400px;top:230px">
+      <span class="handle top"></span>
+      <div class="id">clasify</div>
+      <div class="model">ollama:llama3</div>
+      <div class="meta"><span>T=1.1 · system</span><span class="pill">done 1.4s</span></div>
+      <div class="meta"><span>63/8.2k ctx</span></div>
+      <span class="handle bottom"></span>
+    </div>
+    <div class="llm-node" style="left:130px;top:470px">
+      <span class="handle top"></span>
+      <div class="id">joke</div>
+      <div class="model">ollama:llama3</div>
+      <div class="meta"><span>T=0.3 · system</span></div>
+      <span class="handle bottom"></span>
+    </div>
+    <div class="llm-node" style="left:400px;top:470px">
+      <span class="handle top"></span>
+      <div class="id">story</div>
+      <div class="model">ollama:llama3</div>
+      <div class="meta"><span>T=0.3 · system</span></div>
+      <span class="handle bottom"></span>
+    </div>
+    <div class="llm-node done selected" style="left:670px;top:470px">
+      <span class="output-badge">output</span>
+      <span class="handle top"></span>
+      <div class="id">other</div>
+      <div class="model">ollama:llama3</div>
+      <div class="meta"><span>T=0.3 · system</span><span class="pill">done 464ms</span></div>
+      <div class="meta"><span>41/8.2k ctx</span></div>
+      <span class="handle bottom"></span>
+    </div>
+
+    <button class="ghost icon legend" title="Legend">?</button>
+    <div class="controls" aria-hidden="true"><span>+</span><span>−</span><span>⛶</span><span>⇵</span></div>
+    <div class="minimap" aria-hidden="true">
+      <i style="left:62px;top:24px"></i><i style="left:22px;top:56px"></i><i style="left:62px;top:56px"></i><i style="left:102px;top:56px;border-color:var(--accent)"></i>
+    </div>

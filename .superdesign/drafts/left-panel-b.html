@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Left panel · B · One section at a time</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* Shared styles for the left-panel layout mockups — the app's own tokens
+   and component styles (web/src/style.css), so only the layout differs. */
+:root {
+  --bg: #0B1220;
+  --panel: #101A2E;
+  --panel-raised: #16223B;
+  --border: #22304C;
+  --text: #E6EDF5;
+  --text-dim: #7C8DA6;
+  --text-faint: #4B5A78;
+  --accent: #4FD1C5;
+  --accent-dim: #2B7A72;
+  --valid: #34D399;
+  --invalid: #F87171;
+  --warn: #F5C061;
+  --running: #60A5FA;
+  --on-accent: #06201D;
+  --grid-dot: #1A2742;
+  --shadow: rgba(0, 0, 0, 0.25);
+  --shadow-strong: rgba(0, 0, 0, 0.5);
+  --radius: 3px;
+  --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --fs-xs: 0.6875rem;
+  --fs-sm: 0.75rem;
+  --fs-md: 0.8125rem;
+  --fs-lg: 0.9375rem;
+  --fs-xl: 1.0625rem;
+  --panel-w: 440px;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--text); font-family: var(--mono); font-size: var(--fs-md); }
+
+/* ---------- Shell: one panel on the left, the canvas fills the rest ---------- */
+.app { height: 100%; display: grid; grid-template-columns: var(--panel-w) minmax(0, 1fr); }
+.panel {
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  position: relative;
+}
+
+/* ---------- Panel header: what the top bar held ---------- */
+.panel-head { padding: 12px 14px 10px; border-bottom: 1px solid var(--border); display: grid; gap: 9px; flex: none; }
+.brand-row { display: flex; align-items: center; gap: 10px; }
+.brand { font-size: var(--fs-lg); font-weight: 700; letter-spacing: 0.02em; color: var(--accent); white-space: nowrap; }
+.server { font-size: var(--fs-xs); color: var(--text-dim); white-space: nowrap; }
+.brand-row .spacer { flex: 1; }
+.lights { display: flex; gap: 10px; }
+.indicator { display: inline-flex; align-items: center; gap: 5px; font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--valid); box-shadow: 0 0 6px var(--valid); display: inline-block; }
+.pipeline-row { display: flex; align-items: center; gap: 8px; }
+.pipeline-row select { flex: 1; }
+.actions-row { display: flex; align-items: center; gap: 6px; }
+.actions-row .spacer { flex: 1; }
+.dirty-dot { color: var(--warn); }
+
+select, input[type="text"], textarea {
+  background: var(--panel-raised);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: var(--mono);
+  font-size: var(--fs-md);
+  padding: 6px 8px;
+  min-width: 0;
+}
+textarea { width: 100%; resize: none; line-height: 1.5; }
+textarea::placeholder { color: var(--text-dim); }
+
+.chip-status {
+  font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.05em;
+  padding: 3px 7px; border-radius: 2px; background: var(--panel-raised);
+  color: var(--text-dim); border: 1px solid var(--border); white-space: nowrap;
+}
+.chip-status.ok { color: var(--valid); }
+
+button {
+  background: var(--accent); color: var(--on-accent); border: 1px solid transparent; border-radius: var(--radius);
+  font-family: var(--mono); font-weight: 700; font-size: var(--fs-sm); letter-spacing: 0.03em; text-transform: uppercase;
+  padding: 7px 12px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex-shrink: 0;
+}
+button.ghost { background: transparent; color: var(--text-dim); border-color: var(--border); }
+button.icon { padding: 5px 9px; font-size: var(--fs-lg); text-transform: none; letter-spacing: normal; }
+button.small { padding: 2px 6px; font-size: var(--fs-xs); }
+button.link { background: none; border: none; padding: 0; color: var(--accent); text-transform: none; letter-spacing: normal; font-weight: 400; text-decoration: underline; text-underline-offset: 2px; }
+
+/* ---------- Sections (the admin-panel accordion) ---------- */
+.sec-head {
+  display: flex; align-items: center; gap: 9px;
+  padding: 0 14px; height: 38px; flex: none;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer; user-select: none;
+}
+.sec-head .chev { width: 0.8em; color: var(--text-dim); font-size: var(--fs-xs); }
+.sec-head .ico { width: 15px; height: 15px; color: var(--text-dim); flex: none; }
+.sec-head .title { font-size: var(--fs-xs); font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text); white-space: nowrap; }
+.sec-head .title .sub { color: var(--accent); }
+.sec-head .summary { flex: 1; min-width: 0; text-align: right; font-size: var(--fs-xs); color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sec-head.open .ico { color: var(--accent); }
+.pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--running); display: inline-block; }
+
+/* Sub-sections inside the node section: the existing foldable Section */
+.sub { border-top: 1px solid var(--border); }
+.sub-head { display: flex; align-items: baseline; gap: 8px; padding: 9px 0; }
+.sub-head .chev { width: 0.8em; color: var(--text-dim); font-size: var(--fs-xs); }
+.sub-head .t { font-size: var(--fs-xs); font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text); }
+.sub-head .s { flex: 1; min-width: 0; text-align: right; font-size: var(--fs-xs); color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sub-body { display: grid; gap: 10px; padding: 0 0 12px; }
+.field-label { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); }
+.field { display: grid; gap: 5px; }
+.hint { font-size: var(--fs-xs); color: var(--text-dim); }
+.row { display: flex; gap: 8px; align-items: center; }
+.slider { flex: 1; height: 4px; background: var(--panel-raised); border-radius: 2px; position: relative; }
+.slider::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 15%; background: var(--accent); border-radius: 2px; }
+.slider::after { content: ""; position: absolute; left: calc(15% - 7px); top: -5px; width: 14px; height: 14px; border-radius: 50%; background: var(--accent); }
+.num { width: 64px; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip { font-size: var(--fs-xs); padding: 2px 6px; border: 1px dashed var(--accent-dim); color: var(--accent); border-radius: 2px; }
+
+.node-title { display: grid; gap: 7px; padding: 12px 0 8px; }
+.node-title h2 { margin: 0; font-size: var(--fs-xl); }
+.title-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.title-actions button { font-size: var(--fs-xs); padding: 3px 8px; }
+
+/* ---------- Chat ---------- */
+.conversation-bar { display: flex; gap: 6px; align-items: center; }
+.conversation-bar select { flex: 1; }
+.turn { display: grid; gap: 8px; }
+.turn-prompt { color: var(--text-dim); display: flex; gap: 8px; }
+.turn-prompt .marker { color: var(--accent); }
+.trace-toggle { color: var(--text-dim); font-size: var(--fs-sm); }
+.turn-response { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 11px 13px; }
+.turn-meta { display: flex; gap: 14px; font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); margin-bottom: 9px; padding-bottom: 7px; border-bottom: 1px solid var(--border); }
+.turn-meta b { color: var(--accent); font-weight: 600; }
+.answer { line-height: 1.65; }
+.chat-options { display: flex; gap: 16px; font-size: var(--fs-sm); color: var(--text-dim); }
+.toggle { display: inline-flex; gap: 6px; align-items: center; }
+.box { width: 12px; height: 12px; border: 1px solid var(--text-dim); border-radius: 2px; display: inline-block; }
+.box.on { background: var(--accent); border-color: var(--accent); }
+.composer { display: flex; gap: 8px; align-items: stretch; }
+.composer textarea { height: 52px; }
+
+/* ---------- Canvas ---------- */
+.canvas {
+  position: relative; overflow: hidden;
+  background-color: var(--bg);
+  background-image: radial-gradient(var(--grid-dot) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+.edges { position: absolute; inset: 0; width: 100%; height: 100%; }
+.edge { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 6 5; }
+.edge-label { position: absolute; transform: translate(-50%, -50%); font-size: var(--fs-xs); color: var(--text-dim); background: var(--panel); border: 1px solid var(--border); border-radius: 2px; padding: 1px 5px; white-space: nowrap; }
+.llm-node { position: absolute; width: 200px; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; display: grid; gap: 6px; box-shadow: 0 2px 10px var(--shadow); }
+.llm-node.done { border-color: color-mix(in srgb, var(--valid) 60%, transparent); }
+.llm-node.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 2px 10px var(--shadow); }
+.llm-node .id { font-weight: 700; }
+.llm-node .model { color: var(--accent); font-size: 12px; }
+.llm-node .meta { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-dim); }
+.pill { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--valid); }
+.output-badge { position: absolute; top: -9px; right: 10px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent); background: var(--bg); border: 1px solid var(--accent-dim); border-radius: 999px; padding: 0 7px; }
+.handle { position: absolute; left: 50%; width: 8px; height: 8px; margin-left: -4px; border-radius: 50%; background: var(--accent-dim); }
+.handle.top { top: -4px; }
+.handle.bottom { bottom: -4px; }
+.controls { position: absolute; left: 15px; bottom: 15px; display: grid; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; }
+.controls span { width: 28px; height: 26px; display: grid; place-items: center; color: var(--text-dim); border-bottom: 1px solid var(--border); font-size: 14px; }
+.controls span:last-child { border-bottom: none; }
+.minimap { position: absolute; right: 15px; bottom: 15px; width: 150px; height: 96px; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; }
+.minimap i { position: absolute; width: 26px; height: 9px; background: var(--panel-raised); border: 1px solid var(--border); }
+.legend { position: absolute; right: 15px; top: 15px; }
+.canvas-note { position: absolute; left: 50%; top: 18px; transform: translateX(-50%); font-size: var(--fs-sm); color: var(--text-dim); }
+</style>
+<style>
+  /* B — admin-panel accordion: one section open at a time, filling the
+     panel; the other sections stay as nav rows above and below it. The
+     message box is docked at the bottom of the panel, so a message can be
+     sent whichever section is open; the Chat row previews the last answer. */
+  .nav { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .sec-head { height: 42px; }
+  .sec-head:hover { background: var(--panel-raised); }
+  .sec-head.open { background: var(--panel-raised); box-shadow: inset 3px 0 0 var(--accent); }
+  .sec-head.open .title { color: var(--accent); }
+  .open-body { flex: 1; min-height: 0; overflow-y: auto; padding: 0 14px 6px; border-bottom: 1px solid var(--border); }
+  .peek {
+    display: grid; gap: 4px; padding: 0 14px 10px 38px; border-bottom: 1px solid var(--border);
+    font-size: var(--fs-sm); color: var(--text-dim); cursor: pointer;
+  }
+  .peek .q { color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .peek .q .marker { color: var(--accent); }
+  .peek .a {
+    color: var(--text); line-height: 1.55;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .peek .more { color: var(--accent); font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.05em; }
+  .dock { flex: none; display: grid; gap: 7px; padding: 10px 14px 12px; background: var(--panel); box-shadow: 0 -6px 16px var(--shadow); }
+  .dock-line { display: flex; align-items: center; gap: 8px; font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); }
+  .dock-line b { color: var(--accent); font-weight: 600; }
+  .dock-line .spacer { flex: 1; }
+  .kbd { font-size: var(--fs-xs); color: var(--text-dim); border: 1px solid var(--border); border-radius: 2px; padding: 0 4px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="panel" aria-label="Pipeline panel">
+    <header class="panel-head">
+      <div class="brand-row">
+        <span class="brand">LLM Pipeline</span>
+        <span class="server">localhost:8000</span>
+        <span class="spacer"></span>
+        <span class="lights">
+          <span class="indicator"><span class="status-dot"></span>API</span>
+          <span class="indicator"><span class="status-dot"></span>Ollama</span>
+        </span>
+        <button class="ghost icon" title="Display: theme and text size">Aa</button>
+      </div>
+      <div class="pipeline-row">
+        <select aria-label="Pipeline"><option>simple-local</option></select>
+        <span class="dirty-dot" title="unsaved changes">●</span>
+        <span class="chip-status ok">valid · unsaved</span>
+      </div>
+      <div class="actions-row">
+        <button class="ghost icon" title="Undo (⌘Z)">↶</button>
+        <button class="ghost icon" title="Redo (⇧⌘Z)">↷</button>
+        <span class="spacer"></span>
+        <button>Save</button>
+        <button class="ghost">File <span style="font-size:var(--fs-xs)">▾</span></button>
+      </div>
+    </header>
+
+    <nav class="nav" aria-label="Sections">
+      <!-- CHAT — folded, but previews the latest exchange -->
+      <div class="sec-head">
+        <span class="chev">▸</span>
+        <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/></svg>
+        <span class="title">Chat</span>
+        <span class="summary">3 runs · last 752ms</span>
+      </div>
+      <div class="peek" title="Open Chat">
+        <span class="q"><span class="marker">›</span> Write two sentences about why short functions help.</span>
+        <span class="a">Short functions do one thing, so their name can say exactly what that is and a reader can check it at a glance. They're also easier to test and reuse…</span>
+        <span class="more">Open chat · trace · 2 nodes</span>
+      </div>
+
+      <!-- NODE — the one open section, filling the panel -->
+      <div class="sec-head open">
+        <span class="chev">▾</span>
+        <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="3" y="4" width="10" height="8" rx="1.5"/><circle cx="8" cy="2.5" r="1"/><circle cx="8" cy="13.5" r="1"/></svg>
+        <span class="title">Node · other</span>
+        <span class="summary">ollama:llama3 · T 0.3</span>
+      </div>
+      <div class="open-body">
+        <div class="node-title">
+          <h2>other</h2>
+          <div class="title-actions">
+            <button>↻ Re-run from here</button>
+            <button class="ghost">Duplicate</button>
+            <button class="ghost">Save as preset</button>
+            <button class="ghost">⋯</button>
+          </div>
+        </div>
+        <div class="sub"><div class="sub-head"><span class="chev">▸</span><span class="t">Trace</span><span class="s">run 3 · 464ms</span></div></div>
+        <div class="sub">
+          <div class="sub-head"><span class="chev">▾</span><span class="t">Model</span></div>
+          <div class="sub-body">
+            <div class="row"><select style="flex:1"><option>llama3:latest — 8.0B · Q4_0</option></select><button class="ghost">Refresh</button></div>
+            <div class="field">
+              <span class="field-label">Temperature · 0.3</span>
+              <div class="row"><div class="slider"></div><input class="num" type="text" value="0.3"></div>
+              <span class="hint">0 = deterministic, higher = more varied</span>
+            </div>
+          </div>
+        </div>
+        <div class="sub">
+          <div class="sub-head"><span class="chev">▾</span><span class="t">Prompts</span></div>
+          <div class="sub-body">
+            <div class="field">
+              <span class="field-label">System prompt</span>
+              <textarea rows="3">if input contains "OTHER" answer user question, otherwise dont do anything.</textarea>
+            </div>
+            <div class="field">
+              <span class="field-label">Prompt template</span>
+              <div class="chips"><span class="chip">{{ message }}</span><span class="chip">{{ conversation }}</span><span class="chip">{{ clasify.output }}</span></div>
+              <textarea rows="3">Answer: {{ message }}</textarea>
+            </div>
+          </div>
+        </div>
+        <div class="sub"><div class="sub-head"><span class="chev">▸</span><span class="t">Input &amp; output</span><span class="s">output node</span></div></div>
+        <div class="sub"><div class="sub-head"><span class="chev">▸</span><span class="t">Ollama options</span><span class="s">defaults</span></div></div>
+        <div class="sub"><div class="sub-head"><span class="chev">▸</span><span class="t">Depends on</span><span class="s">clasify</span></div></div>
+        <div class="sub"><div class="sub-head"><span class="chev">▸</span><span class="t">Presets</span><span class="s">2 saved</span></div></div>
+      </div>
+
+      <!-- The rest: nav rows below the open section -->
+      <div class="sec-head">
+        <span class="chev">▸</span>
+        <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="4" cy="3.5" r="1.5"/><circle cx="4" cy="12.5" r="1.5"/><circle cx="12" cy="8" r="1.5"/><path d="M4 5v6M5.4 4.3l5.2 3"/></svg>
+        <span class="title">Pipeline</span>
+        <span class="summary">answer from other · history off</span>
+      </div>
+      <div class="sec-head">
+        <span class="chev">▸</span>
+        <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2.5" y="2.5" width="11" height="11" rx="1.5"/><path d="M5 8.2l2 2 4-4.4"/></svg>
+        <span class="title">Tests</span>
+        <span class="summary">4 cases · 3/4 passed</span>
+      </div>
+      <div class="sec-head">
+        <span class="chev">▸</span>
+        <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="5.5"/><path d="M8 5.5v5M5.5 8h5"/></svg>
+        <span class="title">Add node</span>
+        <span class="summary">LLM node · 2 presets</span>
+      </div>
+    </nav>
+
+    <!-- Docked message box: always there, whichever section is open -->
+    <div class="dock">
+      <div class="dock-line"><span>Send to <b>simple-local</b></span><span class="spacer"></span><span class="kbd">Esc</span><span>stops a run</span></div>
+      <div class="composer">
+        <textarea placeholder="Type a message…  (Enter to send)"></textarea>
+        <button>Save &amp; send</button>
+      </div>
+    </div>
+  </aside>
+
+  <main class="canvas" aria-label="Canvas">
+    <svg class="edges" aria-hidden="true">
+      <path class="edge" d="M500 316 C500 400, 230 386, 230 470"/>
+      <path class="edge" d="M500 316 C500 380, 500 410, 500 470"/>
+      <path class="edge" d="M500 316 C500 400, 770 386, 770 470"/>
+    </svg>
+    <span class="edge-label" style="left:352px;top:398px">"JOKE" in output</span>
+    <span class="edge-label" style="left:500px;top:408px">"STORY" in output</span>
+    <span class="edge-label" style="left:652px;top:398px">default</span>
+
+    <div class="llm-node done" style="left:400px;top:230px">
+      <span class="handle top"></span>
+      <div class="id">clasify</div>
+      <div class="model">ollama:llama3</div>
+      <div class="meta"><span>T=1.1 · system</span><span class="pill">done 1.4s</span></div>
+      <div class="meta"><span>63/8.2k ctx</span></div>
+      <span class="handle bottom"></span>
+    </div>
+    <div class="llm-node" style="left:130px;top:470px">
+      <span class="handle top"></span>
+      <div class="id">joke</div>
+      <div class="model">ollama:llama3</div>
+      <div class="meta"><span>T=0.3 · system</span></div>
+      <span class="handle bottom"></span>
+    </div>
+    <div class="llm-node" style="left:400px;top:470px">
+      <span class="handle top"></span>
+      <div class="id">story</div>
+      <div class="model">ollama:llama3</div>
+      <div class="meta"><span>T=0.3 · system</span></div>
+      <span class="handle bottom"></span>
+    </div>
+    <div class="llm-node done selected" style="left:670px;top:470px">
+      <span class="output-badge">output</span>
+      <span class="handle top"></span>
+      <div class="id">other</div>
+      <div class="model">ollama:llama3</div>
+      <div class="meta"><span>T=0.3 · system</span><span class="pill">done 464ms</span></div>
+      <div class="meta"><span>41/8.2k ctx</span></div>
+      <span class="handle bottom"></span>
+    </div>
+
+    <button class="ghost icon legend" title="Legend">?</button>
+    <div class="controls" aria-hidden="true"><span>+</span><span>−</span><span>⛶</span><span>⇵</span></div>
+    <div class="minimap" aria-hidden="true">
+      <i style="left:62px;top:24px"></i><i style="left:22px;top:56px"></i><i style="left:62px;top:56px"></i><i style="left:102px;top:56px;border-color:var(--accent)"></i>
+    </div>
+  </main>
+</div>
+</body>
+</html>

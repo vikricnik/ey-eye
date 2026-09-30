@@ -36,7 +36,6 @@ import type {
 import { BASE_URL, client } from "./config";
 import { Inspector } from "./editor/Inspector";
 import { PipelineCanvas } from "./editor/PipelineCanvas";
-import { AddNodeMenu } from "./editor/AddNodeMenu";
 import { LEVEL_SPACING, SIBLING_SPACING, autoLayout, definitionToFlow, dependencyEdgeId, graphOf } from "./editor/conversion";
 import { applyCanvasDeletion, deletionSummary } from "./editor/canvasDeletion";
 import { docReducer } from "./editor/editorState";
@@ -44,11 +43,9 @@ import type { DocAction, EditorDoc, Selection, ValidationState } from "./editor/
 import { useDialogs } from "./ui/Dialogs";
 import { DisplayMenu, useDisplaySettings } from "./ui/DisplaySettings";
 import { OutageNotice, ServerStatus } from "./ui/ServerStatus";
-import { GearIcon } from "./ui/icons";
 import { MenuButton } from "./ui/Menu";
 import type { MenuItem } from "./ui/Menu";
 import { outageMessage, runBlockedReason, runOutage } from "./providerStatus";
-import { Splitter, usePanelSizes } from "./ui/Splitter";
 import { errorText } from "./format";
 import type { PreviewContext } from "./editor/PromptPreview";
 import { TestsView, resultKey } from "./tests/TestsView";
@@ -63,9 +60,24 @@ import {
 import type { ConversationSummary } from "./run/runHistory";
 import { Chat, Composer } from "./run/Chat";
 import type { ComposerHandle, Turn } from "./run/Chat";
-import { RunPanel } from "./ui/RunPanel";
-import type { PanelTab } from "./ui/RunPanel";
-import { SettingsColumn, opensSettings, settingsSubject } from "./editor/SettingsColumn";
+import { NodePalette } from "./editor/NodePalette";
+import { PipelineSettings } from "./editor/PipelineSettings";
+import { AddNodeIcon, ChatIcon, NodeIcon, PanelHideIcon, PipelineIcon, TestsIcon } from "./ui/icons";
+import { LeftPanel } from "./ui/LeftPanel";
+import type { PanelSectionSpec } from "./ui/LeftPanel";
+import { usePanelLayout } from "./ui/usePanelLayout";
+import {
+  chatSummary,
+  paletteSummary,
+  pipelineSectionSummary,
+  pipelineState,
+  selectionHeading,
+  selectionSummary,
+  testsSummary,
+} from "./ui/sectionSummaries";
+import { opensSettings } from "./editor/selection";
+import { lastExchange } from "./run/lastExchange";
+import { ChatPreview } from "./run/ChatPreview";
 
 const NAME_PATTERN = /^[A-Za-z0-9_-]+$/;
 
@@ -109,10 +121,6 @@ export function App() {
   const [presets, setPresets] = useState<NodePreset[]>([]);
   const [viewState, setViewState] = useState<GraphViewState | undefined>();
   const [lastOutputs, setLastOutputs] = useState<Record<string, NodeOutput>>({});
-  // Which tab of the run panel is showing (see ui/RunPanel.tsx), and
-  // whether the settings column is open (see editor/SettingsColumn.tsx).
-  const [panelTab, setPanelTab] = useState<PanelTab>("chat");
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [testRun, setTestRun] = useState<TestRunState | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
   // Stops the run / test run in progress (Stop buttons, Esc).
@@ -139,7 +147,7 @@ export function App() {
   const composer = useRef<ComposerHandle>(null);
 
   const dialogs = useDialogs();
-  const panels = usePanelSizes();
+  const panel = usePanelLayout();
   const display = useDisplaySettings();
 
   // Every document change goes through docReducer applied to this ref first
@@ -156,13 +164,15 @@ export function App() {
   }, []);
 
   // Selecting a node or edge — on the canvas, in a trace, by adding one —
-  // opens the settings column on it, each time: one that stayed selected
-  // while the column was closed opens it again. Nothing else changes what's
-  // showing.
-  const select = useCallback((next: Selection | null) => {
-    setSelection(next);
-    if (opensSettings(next)) setSettingsOpen(true);
-  }, []);
+  // opens the Node section on it, each time (a hidden panel stays hidden).
+  const { openSection } = panel;
+  const select = useCallback(
+    (next: Selection | null) => {
+      setSelection(next);
+      if (opensSettings(next)) openSection("node");
+    },
+    [openSection]
+  );
 
   const editable = serverInfo?.editing_enabled === true && online !== false;
 
@@ -203,7 +213,7 @@ export function App() {
     try {
       setPresets((await client.listPresets()).presets);
     } catch {
-      /* optional feature — + Add node just lists none */
+      /* optional feature — the Add node section just lists none */
     }
   }, []);
 
@@ -482,7 +492,7 @@ export function App() {
       body: (
         <>
           Saves its model, options, prompts and history and reasoning settings, so you can add it to any pipeline
-          with + Add node on the canvas.
+          from the Add node section.
         </>
       ),
       confirmLabel: "Save",
@@ -498,7 +508,7 @@ export function App() {
           name: "description",
           label: "Description",
           optional: true,
-          placeholder: "what it's for — shown under + Add node",
+          placeholder: "what it's for — shown in the Add node section",
           initial: presets.find((p) => p.name === id)?.description ?? "",
         },
       ],
@@ -609,7 +619,7 @@ export function App() {
                   { value: "", label: "a blank LLM node" },
                   ...presets.map((p) => ({ value: p.name, label: `${p.name} — ${p.model.name} (preset)` })),
                 ],
-                hint: "add more with + Add node on the canvas",
+                hint: "add more from the Add node section",
               },
             ]
           : []),
@@ -911,20 +921,6 @@ export function App() {
 
   // ---------- derived ----------
 
-  // The column, while there's a pipeline to show settings for.
-  const settingsShown = settingsOpen && doc !== null;
-  // The pipeline's own settings are the column with nothing selected —
-  // opened, and closed again, by the gear beside the pipeline picker.
-  const pipelineSettingsOpen = settingsShown && selection === null;
-  const togglePipelineSettings = () => {
-    if (pipelineSettingsOpen) {
-      setSettingsOpen(false);
-      return;
-    }
-    setSelection(null);
-    setSettingsOpen(true);
-  };
-
   const lastTurn = turns.at(-1);
   // What a re-run of the latest message starts from — and what previews show.
   const previewContext = useMemo<PreviewContext | null>(
@@ -1083,254 +1079,87 @@ export function App() {
     }
   })();
 
-  return (
-    <div className="app" style={panels.style}>
-      <header className="topbar">
-        <div className="title-block">
-          <h1>LLM Pipeline</h1>
-          <span className="subtitle">{BASE_URL}</span>
-          <ServerStatus
-            baseUrl={BASE_URL}
-            online={online}
-            ollama={ollama}
-            readOnly={serverInfo !== null && !serverInfo.editing_enabled}
-          />
-        </div>
-        <div className="toolbar">
-          <select
-            className="pipeline-select"
-            aria-label="Pipeline"
-            value={doc?.definition.name ?? ""}
-            onChange={(e) => {
-              const name = e.target.value;
-              void confirmDiscard().then((ok) => {
-                if (ok) void openPipeline(name);
-              });
-            }}
-          >
-            {isNew && doc && <option value={doc.definition.name}>{doc.definition.name} (new)</option>}
-            {!doc && <option value="">{online === false ? "server unreachable" : "loading…"}</option>}
-            {pipelines.map((p) => (
-              <option key={p.name} value={p.name} title={p.description}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            className="ghost icon"
-            aria-label="Pipeline settings"
-            aria-pressed={pipelineSettingsOpen}
-            title="Pipeline settings: output, execution, conversation history, defaults for all nodes"
-            disabled={!doc}
-            onClick={togglePipelineSettings}
-          >
-            <GearIcon />
-          </button>
-          {doc?.dirty && <span className="dirty-dot" title="unsaved changes">●</span>}
-          {validationChip}
-          <span className="sep" />
-          <button
-            type="button"
-            className="ghost icon"
-            onClick={undo}
-            disabled={undoBlocked !== null}
-            title={undoBlocked ? `Undo — ${undoBlocked}` : "Undo (⌘Z / Ctrl+Z)"}
-            aria-label="Undo"
-          >
-            ↶
-          </button>
-          <button
-            type="button"
-            className="ghost icon"
-            onClick={redo}
-            disabled={redoBlocked !== null}
-            title={redoBlocked ? `Redo — ${redoBlocked}` : "Redo (⇧⌘Z / Ctrl+Y)"}
-            aria-label="Redo"
-          >
-            ↷
-          </button>
-          {/* Disabled, it says why — and the status chip beside it shows it too. */}
-          <button
-            type="button"
-            onClick={() => void save()}
-            disabled={saveBlocked !== null}
-            title={saveBlocked ? `Save — ${saveBlocked}` : "Save (⌘S / Ctrl+S)"}
-          >
-            Save
-          </button>
-          {/* Save stays the one filled button; the rest of the file
-              actions are in this menu, with Delete last and set apart. */}
-          <MenuButton label="File" items={fileMenu} align="end" />
-          <input
-            ref={importInput}
-            type="file"
-            accept=".yaml,.yml"
-            hidden
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              e.target.value = "";
-              if (file) void importFile(file);
-            }}
-          />
-          <DisplayMenu settings={display.settings} onChange={display.update} />
-        </div>
-      </header>
+  const state = pipelineState(doc, validation);
 
-      <div className="notices">
-        {notice && (
-          <div className={`notice ${notice.kind}`} role={notice.kind === "error" ? "alert" : "status"}>
-            <span>{notice.text}</span>
-            {notice.action && (
-              <button
-                type="button"
-                className="link"
-                onClick={() => {
-                  notice.action?.run();
-                  setNotice(null);
-                }}
-              >
-                {notice.action.label}
-              </button>
-            )}
-            <button type="button" className="link" aria-label="Dismiss" onClick={() => setNotice(null)}>
-              ✕
-            </button>
-          </div>
-        )}
-        {outage && online !== false && <OutageNotice message={outageMessage(outage)} onRetry={() => refreshModels(true)} />}
-        {serverInfo && !serverInfo.editing_enabled && (
-          <div className="notice info subtle">
-            {serverInfo.editing_disabled_reason ? (
-              <>Read-only: {serverInfo.editing_disabled_reason}</>
-            ) : (
-              <>
-                Read-only: this server has editing disabled. Set <code>PIPELINE_EDITING_ENABLED=true</code> on the server
-                to build and save pipelines here.
-              </>
-            )}
-          </div>
-        )}
-      </div>
+  // What node, dependency and pipeline settings are given.
+  const inspectorProps = doc
+    ? {
+        doc,
+        selection,
+        editable,
+        models,
+        presets,
+        turns,
+        validation: doc.dirty ? validation : ({ status: "idle" } as ValidationState),
+        onEdit: edit,
+        onSelect: select,
+        onRefreshModels: () => void refreshModels(true),
+        onSaveAsPreset: (id: string) => void saveNodeAsPreset(id),
+        onDuplicate: duplicate,
+        rerunnable,
+        onRerun: (id: string) => void run("", id),
+        previewContext,
+      }
+    : null;
 
-      <div className={settingsShown && panels.placement === "docked" ? "workspace settings-docked" : "workspace"}>
-        <main className="canvas-wrap">
-          {doc ? (
-            <PipelineCanvas
-              key={canvasKey}
-              nodes={flow.nodes}
-              edges={flow.edges}
-              editable={editable}
-              colorMode={display.theme}
-              textScale={display.settings.textScale}
-              selectedNodeId={selection?.kind === "node" ? selection.id : null}
-              selectedEdgeId={selection?.kind === "edge" ? dependencyEdgeId(selection.from, selection.to) : null}
-              fitSignal={fitSignal}
-              coveredRight={settingsShown && panels.placement === "floating" ? panels.sizes.settings : 0}
-              topLeft={
-                <AddNodeMenu
-                  editable={editable}
-                  presets={presets}
-                  onAdd={(preset) => addNodeAt(undefined, preset)}
-                  onDeletePreset={(name) => void deletePreset(name)}
-                />
-              }
-              onConnect={(from, to) => edit((d) => connect(d, from, to))}
-              onDelete={(deletion) => {
-                edit((d) => applyCanvasDeletion(d, deletion), undefined, deletionSummary(deletion));
-                if (deletion.nodeIds.length > 0) setSelection(null);
-              }}
-              onMoveNodes={(moves) =>
-                edit((d) =>
-                  moves.reduce((acc, m) => {
-                    const layout = acc.nodes.find((n) => n.id === m.id)?.layout;
-                    return layout && Math.round(m.x) === layout.x && Math.round(m.y) === layout.y
-                      ? acc
-                      : moveNode(acc, m.id, m.x, m.y);
-                  }, d)
-                )
-              }
-              onSelect={select}
-              onDropNode={(position, preset) => addNodeAt(position, preset)}
-              onAutoLayout={autoLayoutPipeline}
-            />
-          ) : (
-            <div className="canvas-empty">{loadError ?? "loading…"}</div>
-          )}
-        </main>
-        {settingsShown && (
-          <Splitter
-            axis="x"
-            grow={-1}
-            value={panels.sizes.settings}
-            onResize={(px) => panels.setSize("settings", px)}
-            onReset={() => panels.resetSize("settings")}
-            label="Resize the settings column"
-            className="splitter-settings"
-          />
-        )}
-        {settingsShown && doc && (
-          <SettingsColumn
-            pipeline={doc.definition.name}
-            subject={settingsSubject(doc.definition, selection)}
-            placement={panels.placement}
-            onPipeline={() => setSelection(null)}
-            onClose={() => setSettingsOpen(false)}
-          >
-            <Inspector
-              doc={doc}
-              selection={selection}
-              editable={editable}
-              models={models}
-              presets={presets}
-              turns={turns}
-              validation={doc.dirty ? validation : { status: "idle" }}
-              onEdit={edit}
-              onSelect={select}
-              onRefreshModels={() => void refreshModels(true)}
-              onSaveAsPreset={(id) => void saveNodeAsPreset(id)}
-              onDuplicate={duplicate}
-              rerunnable={rerunnable}
-              onRerun={(id) => void run("", id)}
-              previewContext={previewContext}
-            />
-          </SettingsColumn>
-        )}
-        {doc && (
-          <Splitter
-            axis="x"
-            grow={-1}
-            value={panels.sizes.run}
-            onResize={(px) => panels.setSize("run", px)}
-            onReset={() => panels.resetSize("run")}
-            label="Resize the run panel"
-            className="splitter-run"
-          />
-        )}
-        <RunPanel
-          tab={panelTab}
-          onTab={setPanelTab}
-          badges={{
-            chat: running ? <span className="pulse-dot" aria-hidden="true" /> : null,
-            tests: testRun?.status === "running" ? <span className="pulse-dot" aria-hidden="true" /> : null,
-          }}
-          // Tests has its own Run buttons, for test cases — a message box
-          // there would put two different "runs" side by side. Esc still
-          // stops a chat run from there.
-          footerHidden={panelTab === "tests"}
-          footer={
-            <Composer
-              ref={composer}
-              running={running}
-              saveFirst={doc?.dirty ?? false}
-              disabledReason={runDisabled}
-              onSubmit={(prompt) => void run(prompt)}
-              onStop={() => stopRun.current?.abort()}
-            />
-          }
-        >
-          {panelTab === "tests" ? (
-            doc ? (
+  // The panel's sections, top to bottom (ui/LeftPanel.tsx).
+  const sections: PanelSectionSpec[] =
+    doc && inspectorProps
+      ? [
+          {
+            id: "node",
+            ...selectionHeading(doc.definition, selection),
+            summary: selectionSummary(doc.definition, selection),
+            icon: <NodeIcon />,
+            fill: true,
+            content: <Inspector {...inspectorProps} />,
+          },
+          {
+            id: "chat",
+            title: "Chat",
+            summary: chatSummary(turns, running),
+            icon: <ChatIcon />,
+            busy: running,
+            fill: true,
+            preview: <ChatPreview exchange={lastExchange(turns, pendingAnswer)} onOpen={() => openSection("chat")} />,
+            content: (
+              <Chat
+                turns={turns}
+                running={running}
+                pendingAnswer={pendingAnswer}
+                openTraces={openTraces}
+                onOpenTraces={setOpenTraces}
+                outputNodeIds={outputIds}
+                onSelectNode={(nodeId) => select({ kind: "node", id: nodeId })}
+                rerunnable={rerunnable}
+                onRerun={(id) => void run("", id)}
+                formatted={formatted}
+                onFormatted={setFormatted}
+                conversations={conversations}
+                currentConversation={conversationId.current}
+                onOpenConversation={(id) => void openConversation(id)}
+                onDeleteConversation={(id) => void removeConversation(id)}
+                onNewConversation={resetRunState}
+                onRetry={retry}
+                retryDisabledReason={runDisabled}
+                onEditMessage={(prompt) => composer.current?.fill(prompt)}
+              />
+            ),
+          },
+          {
+            id: "pipeline",
+            title: "Pipeline",
+            summary: pipelineSectionSummary(doc.definition),
+            icon: <PipelineIcon />,
+            content: <PipelineSettings {...inspectorProps} />,
+          },
+          {
+            id: "tests",
+            title: "Tests",
+            summary: testsSummary(testCases(doc.definition).length, testRun),
+            icon: <TestsIcon />,
+            busy: testRun?.status === "running",
+            content: (
               <TestsView
                 definition={doc.definition}
                 editable={editable}
@@ -1342,34 +1171,221 @@ export function App() {
                 onStop={() => stopTests.current?.abort()}
                 lastMessage={lastTurn?.prompt ?? null}
               />
-            ) : (
-              <div className="empty-state">{loadError ?? "loading…"}</div>
-            )
-          ) : (
-            <Chat
-              turns={turns}
-              running={running}
-              pendingAnswer={pendingAnswer}
-              openTraces={openTraces}
-              onOpenTraces={setOpenTraces}
-              outputNodeIds={outputIds}
-              onSelectNode={(nodeId) => select({ kind: "node", id: nodeId })}
-              rerunnable={rerunnable}
-              onRerun={(id) => void run("", id)}
-              formatted={formatted}
-              onFormatted={setFormatted}
-              conversations={conversations}
-              currentConversation={conversationId.current}
-              onOpenConversation={(id) => void openConversation(id)}
-              onDeleteConversation={(id) => void removeConversation(id)}
-              onNewConversation={resetRunState}
-              onRetry={retry}
-              retryDisabledReason={runDisabled}
-              onEditMessage={(prompt) => composer.current?.fill(prompt)}
-            />
+            ),
+          },
+          {
+            id: "add",
+            title: "Add node",
+            summary: paletteSummary(presets.length),
+            icon: <AddNodeIcon />,
+            content: (
+              <NodePalette
+                editable={editable}
+                presets={presets}
+                onAdd={(preset) => addNodeAt(undefined, preset)}
+                onDeletePreset={(name) => void deletePreset(name)}
+              />
+            ),
+          },
+        ]
+      : [];
+
+  // The panel header: what the top bar held.
+  const header = (
+    <>
+      <div className="brand-row">
+        <h1 className="brand">LLM Pipeline</h1>
+        <span className="head-status" title={state.label}>
+          <span className={`state-dot ${state.tone}`} aria-hidden="true" />
+          {doc?.dirty && (
+            <span className="dirty-dot" aria-hidden="true">
+              ●
+            </span>
           )}
-        </RunPanel>
+          {validationChip}
+        </span>
+        <span className="spacer" />
+        <ServerStatus
+          compact
+          baseUrl={BASE_URL}
+          online={online}
+          ollama={ollama}
+          readOnly={serverInfo !== null && !serverInfo.editing_enabled}
+        />
+        <DisplayMenu settings={display.settings} onChange={display.update} />
+        {!panel.stacked && (
+          <button
+            type="button"
+            className="ghost icon"
+            aria-label="Hide panel"
+            title="Hide panel (⌘\ / Ctrl+\)"
+            onClick={() => panel.setHidden(true)}
+          >
+            <PanelHideIcon />
+          </button>
+        )}
       </div>
+      <div className="actions-row">
+        <select
+          className="pipeline-select"
+          aria-label="Pipeline"
+          value={doc?.definition.name ?? ""}
+          onChange={(e) => {
+            const name = e.target.value;
+            void confirmDiscard().then((ok) => {
+              if (ok) void openPipeline(name);
+            });
+          }}
+        >
+          {isNew && doc && <option value={doc.definition.name}>{doc.definition.name} (new)</option>}
+          {!doc && <option value="">{online === false ? "server unreachable" : "loading…"}</option>}
+          {pipelines.map((p) => (
+            <option key={p.name} value={p.name} title={p.description}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          className="ghost icon"
+          onClick={undo}
+          disabled={undoBlocked !== null}
+          title={undoBlocked ? `Undo — ${undoBlocked}` : "Undo (⌘Z / Ctrl+Z)"}
+          aria-label="Undo"
+        >
+          ↶
+        </button>
+        <button
+          type="button"
+          className="ghost icon"
+          onClick={redo}
+          disabled={redoBlocked !== null}
+          title={redoBlocked ? `Redo — ${redoBlocked}` : "Redo (⇧⌘Z / Ctrl+Y)"}
+          aria-label="Redo"
+        >
+          ↷
+        </button>
+        {/* Disabled, it says why — and the status chip shows it too. */}
+        <button
+          type="button"
+          onClick={() => void save()}
+          disabled={saveBlocked !== null}
+          title={saveBlocked ? `Save — ${saveBlocked}` : "Save (⌘S / Ctrl+S)"}
+        >
+          Save
+        </button>
+        {/* Save stays the one filled button; the rest of the file actions
+            are in this menu, with Delete last and set apart. */}
+        <MenuButton label="File" items={fileMenu} align="end" />
+        <input
+          ref={importInput}
+          type="file"
+          accept=".yaml,.yml"
+          hidden
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            e.target.value = "";
+            if (file) void importFile(file);
+          }}
+        />
+      </div>
+    </>
+  );
+
+  const notices = (
+    <>
+      {notice && (
+        <div className={`notice ${notice.kind}`} role={notice.kind === "error" ? "alert" : "status"}>
+          <span>{notice.text}</span>
+          {notice.action && (
+            <button
+              type="button"
+              className="link"
+              onClick={() => {
+                notice.action?.run();
+                setNotice(null);
+              }}
+            >
+              {notice.action.label}
+            </button>
+          )}
+          <button type="button" className="link" aria-label="Dismiss" onClick={() => setNotice(null)}>
+            ✕
+          </button>
+        </div>
+      )}
+      {outage && online !== false && <OutageNotice message={outageMessage(outage)} onRetry={() => refreshModels(true)} />}
+      {serverInfo && !serverInfo.editing_enabled && (
+        <div className="notice info subtle">
+          {serverInfo.editing_disabled_reason ? (
+            <>Read-only: {serverInfo.editing_disabled_reason}</>
+          ) : (
+            <>
+              Read-only: this server has editing disabled. Set <code>PIPELINE_EDITING_ENABLED=true</code> on the server
+              to build and save pipelines here.
+            </>
+          )}
+        </div>
+      )}
+    </>
+  );
+
+  return (
+    <div className="app" style={panel.style}>
+      <LeftPanel
+        panel={panel}
+        state={state}
+        header={header}
+        notices={notices}
+        sections={sections}
+        placeholder={<div className="empty-state">{loadError ?? "loading…"}</div>}
+        dock={
+          <Composer
+            ref={composer}
+            pipeline={doc?.definition.name}
+            running={running}
+            saveFirst={doc?.dirty ?? false}
+            disabledReason={runDisabled}
+            onSubmit={(prompt) => void run(prompt)}
+            onStop={() => stopRun.current?.abort()}
+          />
+        }
+      />
+      <main className="canvas-wrap">
+        {doc ? (
+          <PipelineCanvas
+            key={canvasKey}
+            nodes={flow.nodes}
+            edges={flow.edges}
+            editable={editable}
+            colorMode={display.theme}
+            textScale={display.settings.textScale}
+            selectedNodeId={selection?.kind === "node" ? selection.id : null}
+            selectedEdgeId={selection?.kind === "edge" ? dependencyEdgeId(selection.from, selection.to) : null}
+            fitSignal={fitSignal}
+            onConnect={(from, to) => edit((d) => connect(d, from, to))}
+            onDelete={(deletion) => {
+              edit((d) => applyCanvasDeletion(d, deletion), undefined, deletionSummary(deletion));
+              if (deletion.nodeIds.length > 0) setSelection(null);
+            }}
+            onMoveNodes={(moves) =>
+              edit((d) =>
+                moves.reduce((acc, m) => {
+                  const layout = acc.nodes.find((n) => n.id === m.id)?.layout;
+                  return layout && Math.round(m.x) === layout.x && Math.round(m.y) === layout.y
+                    ? acc
+                    : moveNode(acc, m.id, m.x, m.y);
+                }, d)
+              )
+            }
+            onSelect={select}
+            onDropNode={(position, preset) => addNodeAt(position, preset)}
+            onAutoLayout={autoLayoutPipeline}
+          />
+        ) : (
+          <div className="canvas-empty">{loadError ?? "loading…"}</div>
+        )}
+      </main>
     </div>
   );
 }

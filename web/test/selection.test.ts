@@ -2,7 +2,7 @@ import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import type { PipelineDefinition } from "@llm-pipeline/client";
 
-import { opensSettings, settingsSubject } from "../src/editor/SettingsColumn";
+import { opensSettings, settingsSubject } from "../src/editor/selection";
 
 const definition = {
   name: "p",

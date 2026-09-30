@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 /** Auto-layout: one box above two, joined like a dependency tree. Sized
  * for React Flow's control buttons, which fill their icons with currentColor. */
 export function AutoLayoutIcon() {
@@ -11,15 +13,77 @@ export function AutoLayoutIcon() {
   );
 }
 
-/** A settings cog, in the current text color. Drawn rather than the ⚙
- * character, which some systems render as a color emoji. */
-export function GearIcon() {
+/** The left panel's section icons (and its rail's): 15px, stroked in the
+ * current text color. */
+function StrokeIcon({ children }: { children: ReactNode }) {
   return (
-    <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-      {/* Eight teeth: a thick dashed ring (circumference 2π·5.6 ≈ 35.2 = 8 × 4.4). */}
-      <circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" strokeWidth="2.4" strokeDasharray="2.2 2.2" />
-      {/* The body, with the hole in the middle. */}
-      <circle cx="8" cy="8" r="3.6" fill="none" stroke="currentColor" strokeWidth="2.4" />
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true" focusable="false">
+      {children}
     </svg>
+  );
+}
+
+export function NodeIcon() {
+  return (
+    <StrokeIcon>
+      <rect x="3" y="4" width="10" height="8" rx="1.5" />
+      <circle cx="8" cy="2.5" r="1" />
+      <circle cx="8" cy="13.5" r="1" />
+    </StrokeIcon>
+  );
+}
+
+export function ChatIcon() {
+  return (
+    <StrokeIcon>
+      <path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" />
+    </StrokeIcon>
+  );
+}
+
+export function PipelineIcon() {
+  return (
+    <StrokeIcon>
+      <circle cx="4" cy="3.5" r="1.5" />
+      <circle cx="4" cy="12.5" r="1.5" />
+      <circle cx="12" cy="8" r="1.5" />
+      <path d="M4 5v6M5.4 4.3l5.2 3" />
+    </StrokeIcon>
+  );
+}
+
+export function TestsIcon() {
+  return (
+    <StrokeIcon>
+      <rect x="2.5" y="2.5" width="11" height="11" rx="1.5" />
+      <path d="M5 8.2l2 2 4-4.4" />
+    </StrokeIcon>
+  );
+}
+
+export function AddNodeIcon() {
+  return (
+    <StrokeIcon>
+      <circle cx="8" cy="8" r="5.5" />
+      <path d="M8 5.5v5M5.5 8h5" />
+    </StrokeIcon>
+  );
+}
+
+export function PanelHideIcon() {
+  return (
+    <StrokeIcon>
+      <rect x="2" y="2.5" width="12" height="11" rx="1.5" />
+      <path d="M6 2.5v11M11 6l-2 2 2 2" />
+    </StrokeIcon>
+  );
+}
+
+export function PanelShowIcon() {
+  return (
+    <StrokeIcon>
+      <rect x="2" y="2.5" width="12" height="11" rx="1.5" />
+      <path d="M6 2.5v11M9 6l2 2-2 2" />
+    </StrokeIcon>
   );
 }

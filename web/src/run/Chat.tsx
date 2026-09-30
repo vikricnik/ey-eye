@@ -1,4 +1,4 @@
-import { useEffect, useImperativeHandle, useRef, useState } from "react";
+import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode, Ref } from "react";
 import type { ConversationTurn, NodeOutput, RunLogEntry, StreamDoneEvent } from "@llm-pipeline/client";
 import { formatDuration, formatWhen } from "../format";
@@ -291,15 +291,17 @@ export interface ComposerHandle {
   fill(text: string): void;
 }
 
-/** The message box, at the bottom of the panel on every tab but Tests
- * (whose Run buttons run test cases). Its button says Send, so "Run"
- * means one thing on screen. */
+/** The message box, docked at the bottom of the left panel. Its button
+ * says Send, so "Run" (Tests) means one thing on screen. It starts one
+ * line tall and grows with what's typed. */
 export function Composer(props: {
   running: boolean;
   /** The pipeline has unsaved changes: sending saves it first, since runs
    * execute what's saved on the server. */
   saveFirst: boolean;
   disabledReason: string | null;
+  /** The open pipeline's name, for the placeholder. */
+  pipeline?: string | undefined;
   onSubmit: (prompt: string) => void;
   /** Stops the run in progress. */
   onStop: () => void;
@@ -307,6 +309,29 @@ export function Composer(props: {
 }) {
   const [prompt, setPrompt] = useState("");
   const box = useRef<HTMLTextAreaElement>(null);
+  // Grows with its text (CSS caps it at about six lines, then it scrolls).
+  const fit = () => {
+    const el = box.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight + 2}px`;
+  };
+  useLayoutEffect(fit, [prompt]);
+  // ...and fits again when its width changes: the panel resized, or still
+  // widening from the rail as it's shown, when a height measured at the
+  // narrower width would stay (the placeholder wrapped onto many lines).
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    let width = el.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (el.clientWidth === width) return; // the height it was just given
+      width = el.clientWidth;
+      fit();
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
   useImperativeHandle(
     props.ref,
     () => ({
@@ -332,9 +357,10 @@ export function Composer(props: {
       <div className="input-row">
         <textarea
           ref={box}
-          rows={2}
+          rows={1}
           aria-label="Message"
-          placeholder={props.disabledReason ?? "Type a message…  (Enter to send, Shift+Enter for a new line)"}
+          placeholder={props.disabledReason ?? `Message ${props.pipeline ?? "the pipeline"}…`}
+          title="Enter sends · Shift+Enter new line · Esc stops a run"
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           onKeyDown={(e) => {

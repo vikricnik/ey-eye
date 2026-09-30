@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Left panel · B · One section at a time</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="shared.css">
+<style>
+  /* B — admin-panel accordion: one section open at a time, filling the
+     panel; the other sections stay as nav rows above and below it. The
+     message box is docked at the bottom of the panel, so a message can be
+     sent whichever section is open; the Chat row previews the last answer. */
+  .nav { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .sec-head { height: 42px; }
+  .sec-head:hover { background: var(--panel-raised); }
+  .sec-head.open { background: var(--panel-raised); box-shadow: inset 3px 0 0 var(--accent); }
+  .sec-head.open .title { color: var(--accent); }
+  .open-body { flex: 1; min-height: 0; overflow-y: auto; padding: 0 14px 6px; border-bottom: 1px solid var(--border); }
+  .peek {
+    display: grid; gap: 4px; padding: 0 14px 10px 38px; border-bottom: 1px solid var(--border);
+    font-size: var(--fs-sm); color: var(--text-dim); cursor: pointer;
+  }
+  .peek .q { color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .peek .q .marker { color: var(--accent); }
+  .peek .a {
+    color: var(--text); line-height: 1.55;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .peek .more { color: var(--accent); font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.05em; }
+  .dock { flex: none; display: grid; gap: 7px; padding: 10px 14px 12px; background: var(--panel); box-shadow: 0 -6px 16px var(--shadow); }
+  .dock-line { display: flex; align-items: center; gap: 8px; font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); }
+  .dock-line b { color: var(--accent); font-weight: 600; }
+  .dock-line .spacer { flex: 1; }
+  .kbd { font-size: var(--fs-xs); color: var(--text-dim); border: 1px solid var(--border); border-radius: 2px; padding: 0 4px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="panel" aria-label="Pipeline panel">
+    <header class="panel-head">
+      <div class="brand-row">
+        <span class="brand">LLM Pipeline</span>
+        <span class="server">localhost:8000</span>
+        <span class="spacer"></span>
+        <span class="lights">
+          <span class="indicator"><span class="status-dot"></span>API</span>
+          <span class="indicator"><span class="status-dot"></span>Ollama</span>
+        </span>
+        <button class="ghost icon" title="Display: theme and text size">Aa</button>
+      </div>
+      <div class="pipeline-row">
+        <select aria-label="Pipeline"><option>simple-local</option></select>
+        <span class="dirty-dot" title="unsaved changes">●</span>
+        <span class="chip-status ok">valid · unsaved</span>
+      </div>
+      <div class="actions-row">
+        <button class="ghost icon" title="Undo (⌘Z)">↶</button>
+        <button class="ghost icon" title="Redo (⇧⌘Z)">↷</button>
+        <span class="spacer"></span>
+        <button>Save</button>
+        <button class="ghost">File <span style="font-size:var(--fs-xs)">▾</span></button>
+      </div>
+    </header>
+
+    <nav class="nav" aria-label="Sections">
+      <!-- CHAT — folded, but previews the latest exchange -->
+      <div class="sec-head">
+        <span class="chev">▸</span>
+        <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/></svg>
+        <span class="title">Chat</span>
+        <span class="summary">3 runs · last 752ms</span>
+      </div>
+      <div class="peek" title="Open Chat">
+        <span class="q"><span class="marker">›</span> Write two sentences about why short functions help.</span>
+        <span class="a">Short functions do one thing, so their name can say exactly what that is and a reader can check it at a glance. They're also easier to test and reuse…</span>
+        <span class="more">Open chat · trace · 2 nodes</span>
+      </div>
+
+      <!-- NODE — the one open section, filling the panel -->
+      <div class="sec-head open">
+        <span class="chev">▾</span>
+        <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="3" y="4" width="10" height="8" rx="1.5"/><circle cx="8" cy="2.5" r="1"/><circle cx="8" cy="13.5" r="1"/></svg>
+        <span class="title">Node · other</span>
+        <span class="summary">ollama:llama3 · T 0.3</span>
+      </div>
+      <div class="open-body">
+        <div class="node-title">
+          <h2>other</h2>
+          <div class="title-actions">
+            <button>↻ Re-run from here</button>
+            <button class="ghost">Duplicate</button>
+            <button class="ghost">Save as preset</button>
+            <button class="ghost">⋯</button>
+          </div>
+        </div>
+        <div class="sub"><div class="sub-head"><span class="chev">▸</span><span class="t">Trace</span><span class="s">run 3 · 464ms</span></div></div>
+        <div class="sub">
+          <div class="sub-head"><span class="chev">▾</span><span class="t">Model</span></div>
+          <div class="sub-body">
+            <div class="row"><select style="flex:1"><option>llama3:latest — 8.0B · Q4_0</option></select><button class="ghost">Refresh</button></div>
+            <div class="field">
+              <span class="field-label">Temperature · 0.3</span>
+              <div class="row"><div class="slider"></div><input class="num" type="text" value="0.3"></div>
+              <span class="hint">0 = deterministic, higher = more varied</span>
+            </div>
+          </div>
+        </div>
+        <div class="sub">
+          <div class="sub-head"><span class="chev">▾</span><span class="t">Prompts</span></div>
+          <div class="sub-body">
+            <div class="field">
+              <span class="field-label">System prompt</span>
+              <textarea rows="3">if input contains "OTHER" answer user question, otherwise dont do anything.</textarea>
+            </div>
+            <div class="field">
+              <span class="field-label">Prompt template</span>
+              <div class="chips"><span class="chip">{{ message }}</span><span class="chip">{{ conversation }}</span><span class="chip">{{ clasify.output }}</span></div>
+              <textarea rows="3">Answer: {{ message }}</textarea>
+            </div>
+          </div>
+        </div>
+        <div class="sub"><div class="sub-head"><span class="chev">▸</span><span class="t">Input &amp; output</span><span class="s">output node</span></div></div>
+        <div class="sub"><div class="sub-head"><span class="chev">▸</span><span class="t">Ollama options</span><span class="s">defaults</span></div></div>
+        <div class="sub"><div class="sub-head"><span class="chev">▸</span><span class="t">Depends on</span><span class="s">clasify</span></div></div>
+        <div class="sub"><div class="sub-head"><span class="chev">▸</span><span class="t">Presets</span><span class="s">2 saved</span></div></div>
+      </div>
+
+      <!-- The rest: nav rows below the open section -->
+      <div class="sec-head">
+        <span class="chev">▸</span>
+        <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="4" cy="3.5" r="1.5"/><circle cx="4" cy="12.5" r="1.5"/><circle cx="12" cy="8" r="1.5"/><path d="M4 5v6M5.4 4.3l5.2 3"/></svg>
+        <span class="title">Pipeline</span>
+        <span class="summary">answer from other · history off</span>
+      </div>
+      <div class="sec-head">
+        <span class="chev">▸</span>
+        <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2.5" y="2.5" width="11" height="11" rx="1.5"/><path d="M5 8.2l2 2 4-4.4"/></svg>
+        <span class="title">Tests</span>
+        <span class="summary">4 cases · 3/4 passed</span>
+      </div>
+      <div class="sec-head">
+        <span class="chev">▸</span>
+        <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="5.5"/><path d="M8 5.5v5M5.5 8h5"/></svg>
+        <span class="title">Add node</span>
+        <span class="summary">LLM node · 2 presets</span>
+      </div>
+    </nav>
+
+    <!-- Docked message box: always there, whichever section is open -->
+    <div class="dock">
+      <div class="dock-line"><span>Send to <b>simple-local</b></span><span class="spacer"></span><span class="kbd">Esc</span><span>stops a run</span></div>
+      <div class="composer">
+        <textarea placeholder="Type a message…  (Enter to send)"></textarea>
+        <button>Save &amp; send</button>
+      </div>
+    </div>
+  </aside>
+
+  <main class="canvas" aria-label="Canvas">
+    <!--CANVAS-->
+  </main>
+</div>
+</body>
+</html>
