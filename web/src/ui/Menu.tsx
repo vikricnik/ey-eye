@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useId, useRef, useState } from "react";
+import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 
 export interface MenuItem {
@@ -30,6 +30,22 @@ export function menuIndexFor(key: string, current: number, count: number): numbe
   }
 }
 
+/** How far to move a menu sideways, in px, so all of it is on screen. It
+ * opens along its button's `align` edge; where that would run past the
+ * window, it moves in to `margin` px from the edge — and when it's wider
+ * than the window, its left edge (where the labels start) stays in view. */
+export function menuShift(
+  button: { left: number; right: number },
+  menuWidth: number,
+  windowWidth: number,
+  align: "start" | "end",
+  margin = 8
+): number {
+  const natural = align === "end" ? button.right - menuWidth : button.left;
+  const fitted = Math.max(margin, Math.min(natural, windowWidth - margin - menuWidth));
+  return fitted - natural;
+}
+
 /**
  * A button that opens a menu of actions, with the ARIA menu button
  * keyboard contract: Enter, Space or ↓ opens it on the first item (↑ on
@@ -56,7 +72,18 @@ export function MenuButton(props: {
   const wrapper = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const menu = useRef<HTMLDivElement>(null);
+  // Sideways move that keeps the open menu on screen (see menuShift) —
+  // measured before it's painted, so it never shows cut off first.
+  const [shift, setShift] = useState(0);
   const id = useId();
+
+  useLayoutEffect(() => {
+    const at = button.current?.getBoundingClientRect();
+    const width = menu.current?.offsetWidth;
+    if (!open || !at || !width) return;
+    setShift(menuShift(at, width, document.documentElement.clientWidth, align));
+  }, [open, align]);
 
   const openAt = (index: number) => {
     setActive(index);
@@ -123,7 +150,15 @@ export function MenuButton(props: {
         )}
       </button>
       {open && (
-        <div className={align === "end" ? "menu align-end" : "menu"} role="menu" id={`${id}-menu`} aria-labelledby={`${id}-button`} onKeyDown={onMenuKeyDown}>
+        <div
+          ref={menu}
+          className={align === "end" ? "menu align-end" : "menu"}
+          style={shift ? { transform: `translateX(${shift}px)` } : undefined}
+          role="menu"
+          id={`${id}-menu`}
+          aria-labelledby={`${id}-button`}
+          onKeyDown={onMenuKeyDown}
+        >
           {items.map((item, i) => (
             <Fragment key={item.label}>
               {item.separated && <div role="separator" className="menu-separator" />}

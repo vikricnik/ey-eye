@@ -1188,7 +1188,10 @@ button.message-node { color: var(--accent); }
   left: 0;
   top: calc(100% + 6px);
   z-index: 50;
-  min-width: 17rem;
+  /* Never wider than the window (at a large text size 17rem can be); where
+     it would stick out, Menu.tsx moves it back in (menuShift). */
+  min-width: min(17rem, calc(100vw - 16px));
+  max-width: calc(100vw - 16px);
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 6px;

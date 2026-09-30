@@ -1161,7 +1161,7 @@ export function App() {
           </button>
           {/* Save stays the one filled button; the rest of the file
               actions are in this menu, with Delete last and set apart. */}
-          <MenuButton label="File" items={fileMenu} />
+          <MenuButton label="File" items={fileMenu} align="end" />
           <input
             ref={importInput}
             type="file"
