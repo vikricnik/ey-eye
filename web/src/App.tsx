@@ -65,7 +65,7 @@ import { Chat, Composer } from "./run/Chat";
 import type { ComposerHandle, Turn } from "./run/Chat";
 import { RunPanel } from "./ui/RunPanel";
 import type { PanelTab } from "./ui/RunPanel";
-import { SettingsColumn, settingsSubject } from "./editor/SettingsColumn";
+import { SettingsColumn, opensSettings, settingsSubject } from "./editor/SettingsColumn";
 
 const NAME_PATTERN = /^[A-Za-z0-9_-]+$/;
 
@@ -153,6 +153,15 @@ export function App() {
     if (next === docRef.current) return;
     docRef.current = next;
     setDoc(next);
+  }, []);
+
+  // Selecting a node or edge — on the canvas, in a trace, by adding one —
+  // opens the settings column on it, each time: one that stayed selected
+  // while the column was closed opens it again. Nothing else changes what's
+  // showing.
+  const select = useCallback((next: Selection | null) => {
+    setSelection(next);
+    if (opensSettings(next)) setSettingsOpen(true);
   }, []);
 
   const editable = serverInfo?.editing_enabled === true && online !== false;
@@ -443,7 +452,7 @@ export function App() {
       newId = result.id;
       return result.definition;
     });
-    if (newId) setSelection({ kind: "node", id: newId });
+    if (newId) select({ kind: "node", id: newId });
   };
 
   /** Copies a node beside the original — same settings and inputs. */
@@ -458,7 +467,7 @@ export function App() {
       return result.definition;
     });
     if (newId) {
-      setSelection({ kind: "node", id: newId });
+      select({ kind: "node", id: newId });
       notify("info", `duplicated "${id}" as "${newId}"`);
     }
   };
@@ -610,7 +619,7 @@ export function App() {
     const preset = presets.find((p) => p.name === answer.start);
     const definition = newDefinition(answer.name!, defaultModel(), preset);
     loadDoc(definition, null, false);
-    setSelection({ kind: "node", id: definition.nodes[0]!.id });
+    select({ kind: "node", id: definition.nodes[0]!.id });
   };
 
   const deletePipeline = async () => {
@@ -902,14 +911,6 @@ export function App() {
 
   // ---------- derived ----------
 
-  // Selecting a node or edge — on the canvas, in a trace, by adding one —
-  // opens the settings column on it. Nothing else changes what's showing.
-  const selectionKey =
-    selection?.kind === "node" ? `node:${selection.id}` : selection?.kind === "edge" ? `edge:${selection.from}->${selection.to}` : "";
-  useEffect(() => {
-    if (selectionKey) setSettingsOpen(true);
-  }, [selectionKey]);
-
   // The column, while there's a pipeline to show settings for.
   const settingsShown = settingsOpen && doc !== null;
   // The pipeline's own settings are the column with nothing selected —
@@ -1070,7 +1071,7 @@ export function App() {
             type="button"
             className="chip-status error"
             title={validation.message}
-            onClick={() => setSelection(validation.nodeId ? { kind: "node", id: validation.nodeId } : null)}
+            onClick={() => select(validation.nodeId ? { kind: "node", id: validation.nodeId } : null)}
           >
             invalid{validation.nodeId ? ` · ${validation.nodeId}` : ""}
           </button>
@@ -1249,7 +1250,7 @@ export function App() {
                   }, d)
                 )
               }
-              onSelect={setSelection}
+              onSelect={select}
               onDropNode={(position, preset) => addNodeAt(position, preset)}
               onAutoLayout={autoLayoutPipeline}
             />
@@ -1285,7 +1286,7 @@ export function App() {
               turns={turns}
               validation={doc.dirty ? validation : { status: "idle" }}
               onEdit={edit}
-              onSelect={setSelection}
+              onSelect={select}
               onRefreshModels={() => void refreshModels(true)}
               onSaveAsPreset={(id) => void saveNodeAsPreset(id)}
               onDuplicate={duplicate}
@@ -1352,7 +1353,7 @@ export function App() {
               openTraces={openTraces}
               onOpenTraces={setOpenTraces}
               outputNodeIds={outputIds}
-              onSelectNode={(nodeId) => setSelection({ kind: "node", id: nodeId })}
+              onSelectNode={(nodeId) => select({ kind: "node", id: nodeId })}
               rerunnable={rerunnable}
               onRerun={(id) => void run("", id)}
               formatted={formatted}

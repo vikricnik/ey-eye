@@ -162,21 +162,33 @@ export function AddNodeMenu(props: {
       // Confirming a preset's removal (a dialog) is still using the menu.
       if (!wrapper.current?.contains(target) && !target.closest?.("dialog")) setOpen(false);
     };
+    // Escape closes the menu wherever focus is — not every browser focuses a
+    // button it clicks — and only the menu: caught on window in the capture
+    // phase, before App's Esc ("stop the run") hears it. An open dialog
+    // (removing a preset) gets its own Escape.
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || document.querySelector("dialog[open]")) return;
+      e.stopPropagation();
+      setOpen(false);
+      button.current?.focus();
+    };
     document.addEventListener("pointerdown", onPointerDown);
-    return () => document.removeEventListener("pointerdown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown, true);
+    };
   }, [open]);
 
   return (
     <div
       className="add-node-menu"
       ref={wrapper}
-      onKeyDown={(e) => {
-        if (e.key === "Escape" && open) {
-          e.stopPropagation(); // not also "stop the run" (App's Esc)
-          setOpen(false);
-          button.current?.focus();
-        }
-      }}
+      // The menu sits on the canvas, which takes drops: a drag let go over
+      // the menu is refused here (no preventDefault) rather than adding a
+      // node underneath it.
+      onDragOver={(e) => e.stopPropagation()}
+      onDrop={(e) => e.stopPropagation()}
     >
       <button
         ref={button}

@@ -153,12 +153,20 @@ function CanvasInner(props: PipelineCanvasProps) {
 
   // Keeps the selected node in sight when the canvas narrows or the floating
   // settings column covers it — e.g. right after selecting it opens the
-  // column. Pans only; the zoom stays. A pan the user makes afterwards is
-  // left alone: this runs when the selection, the size or the cover changes.
+  // column. Pans only; the zoom stays. It's asked for when the selection,
+  // the size or the cover changes, and tried until the node is on the canvas
+  // and measured: a node just added or duplicated reaches React Flow a
+  // render or two after it's selected. A pan the user makes afterwards is
+  // left alone. (The request is declared first, so it runs first.)
+  const revealPending = useRef(false);
   useEffect(() => {
-    if (!selectedNodeId || !size) return;
+    revealPending.current = true;
+  }, [selectedNodeId, size, coveredRight]);
+  useEffect(() => {
+    if (!revealPending.current || !selectedNodeId || !size) return;
     const node = flow.getInternalNode(selectedNodeId);
-    if (!node) return;
+    if (!node?.measured.width) return; // not drawn yet — tried again when `nodes` changes
+    revealPending.current = false;
     const rect = {
       x: node.internals.positionAbsolute.x,
       y: node.internals.positionAbsolute.y,
@@ -169,7 +177,7 @@ function CanvasInner(props: PipelineCanvasProps) {
     if (!needsReveal(rect, viewport, { width: size.width - coveredRight, height: size.height })) return;
     const center = revealCenter(rect, viewport.zoom, coveredRight);
     void flow.setCenter(center.x, center.y, { zoom: viewport.zoom, duration: 200 });
-  }, [flow, selectedNodeId, size, coveredRight]);
+  }, [flow, selectedNodeId, size, coveredRight, nodes]);
 
   // Removals go through onNodesDelete/onEdgesDelete (-> the definition);
   // everything else (drag, select, measure) is applied locally.
@@ -191,7 +199,7 @@ function CanvasInner(props: PipelineCanvasProps) {
   return (
     <div
       ref={canvas}
-      className={compact ? "canvas detail-compact" : "canvas"}
+      className={`canvas${compact ? " detail-compact" : ""}${coveredRight > 0 ? " covered" : ""}`}
       // The canvas's own right-hand controls (legend, minimap) move clear of
       // the floating settings column (style.css, --covered-right).
       style={{ "--covered-right": `${coveredRight}px` } as CSSProperties}

@@ -13,6 +13,13 @@ export function settingsSubject(definition: PipelineDefinition, selection: Selec
   return selection?.kind === "edge" ? "dependency" : "pipeline";
 }
 
+/** Selecting a node or dependency opens the column on it — each time it's
+ * selected, so one that stayed selected when the column was closed opens
+ * it again. Clearing the selection leaves the column as it is. */
+export function opensSettings(selection: Selection | null): boolean {
+  return selection?.kind === "node" || selection?.kind === "edge";
+}
+
 /**
  * The column between the canvas and the run panel: the selected node's or
  * dependency's settings, or the pipeline's. Its header says which — with
